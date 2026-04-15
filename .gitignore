@@ -94,6 +94,9 @@ services/sam3/output_*.png
 services/sam3/assets/
 temp/
 
+# Scripts
+scripts/bootstrap
+
 # Misc
 dataset_store/note.md
 dataset_store/test_*/

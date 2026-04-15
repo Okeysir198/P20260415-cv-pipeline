@@ -1,0 +1,53 @@
+# Local variant for this machine (RTX 5090 / driver 580 / nvidia-container-toolkit 1.18 legacy mode).
+# The upstream docker-compose.yaml uses `deploy.resources.reservations.devices[driver: nvidia]`,
+# which on this host triggers legacy-mode hook failure:
+#   "nvidia-container-cli: initialization error: load library failed: libnvidia-ml.so.1"
+# Switching to `runtime: nvidia` + NVIDIA_VISIBLE_DEVICES works around it.
+#
+# Usage:
+#   docker compose -f docker-compose.local.yaml up -d
+#   docker compose -f docker-compose.local.yaml --profile demo up -d
+
+services:
+  sam3:
+    build: .
+    image: sam3-service:local
+    env_file:
+      - .env
+    ports:
+      - "18100:18100"
+    volumes:
+      - ${HOME}/.cache/huggingface:/app/.cache/huggingface
+      - ./configs:/app/configs
+      - ./src:/app/src
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18100/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+  demo:
+    build: .
+    image: sam3-service:local
+    env_file:
+      - .env
+    ports:
+      - "7860:7860"
+    volumes:
+      - ${HOME}/.cache/huggingface:/app/.cache/huggingface
+      - ./configs:/app/configs
+      - ./src:/app/src
+      - ./demo.py:/app/demo.py
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    command: ["uv", "run", "--extra", "demo", "python", "demo.py", "--server-name", "0.0.0.0", "--server-port", "7860"]
+    profiles:
+      - demo
