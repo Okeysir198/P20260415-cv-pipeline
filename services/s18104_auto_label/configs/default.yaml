@@ -1,0 +1,33 @@
+server:
+  host: "0.0.0.0"
+  port: 18104
+
+services:
+  sam3_url: "http://localhost:18100"
+
+processing:
+  request_timeout: 120
+  default_confidence: 0.5
+  default_mode: "text"
+  default_output_format: "coco"
+  batch_concurrency: 8  # Process N images in parallel
+  use_batch_endpoints: true  # Use new SAM3 batch endpoints (true tensor batching)
+
+nms:
+  per_class_iou_threshold: 0.5
+  cross_class_enabled: true
+  cross_class_threshold: 0.8
+
+polygon:
+  simplify_tolerance: 2.0
+  min_vertices: 4
+
+jobs:
+  max_concurrent_jobs: 2
+  max_stored: 100
+  ttl_seconds: 3600
+  max_images_per_job: 500
+
+video_sessions:
+  max_active: 10
+  ttl_seconds: 3600

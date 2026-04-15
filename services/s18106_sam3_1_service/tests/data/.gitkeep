@@ -1,0 +1,3 @@
+# Test data files required: truck.jpg, cat.jpg, bedroom.mp4
+# Copy from: ../s18100_sam3_service/tests/data/
+# These are binary files not tracked in git.

@@ -1,0 +1,38 @@
+# Training config — Segmentation (SegFormer-B0, for testing)
+model:
+  arch: hf-segformer
+  pretrained: nvidia/segformer-b0-finetuned-ade-512-512
+  num_classes: 3
+  input_size: [128, 128]
+  ignore_mismatched_sizes: true
+
+data:
+  dataset_config: 05_data_segmentation.yaml
+  batch_size: 4
+  num_workers: 0
+  pin_memory: false
+
+training:
+  backend: pytorch
+  epochs: 5
+  optimizer: adamw
+  lr: 0.0001
+  weight_decay: 0.01
+  warmup_epochs: 1
+  scheduler: cosine
+  patience: 3
+  amp: false
+  grad_clip: 1.0
+  ema: false
+
+logging:
+  wandb_project: null
+  save_dir: ../../runs/test_segmentation
+
+checkpoint:
+  save_best: true
+  metric: val/mIoU
+  mode: max
+  save_interval: 5
+
+seed: 42

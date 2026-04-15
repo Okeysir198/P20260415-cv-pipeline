@@ -1,0 +1,23 @@
+# Auto Label — standalone annotation service (CPU-only)
+# Requires SAM3 (:18100) running independently
+services:
+  auto-label:
+    build:
+      context: ..
+      dockerfile: s18104_auto_label/Dockerfile
+    ports:
+      - "18104:18104"
+    volumes:
+      - ./configs:/app/configs
+    environment:
+      - SAM3_URL=http://host.docker.internal:18100
+      - AUTO_LABEL_CONFIG=/app/configs/default.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18104/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3

@@ -1,0 +1,48 @@
+# Generative Augmentation Pipeline Config
+generative_augment:
+  splits: ["train"]
+  naming_template: "{stem}_aug{variant}"  # Output file naming
+
+source:
+  class_name: null          # Source class to replace (must match data config names)
+  class_id: null            # Auto-resolved from data config if class_name set
+
+target:
+  class_name: null          # Target class name after replacement
+  class_id: null            # Auto-resolved or specified
+
+replacement_prompts:
+  - "replaced object"       # Override per use-case config
+
+processing:
+  batch_size: 16
+  max_objects_per_image: 5  # Max objects to replace per image
+  max_images: null          # null = process all matching images
+  dry_run: false
+
+sam3:
+  service_url: "http://localhost:18100"
+  timeout: 120
+  mask_threshold: 0.5
+
+inpainting:
+  mode: "local"             # "local" or "service"
+  model: "black-forest-labs/FLUX.2-klein-4B"
+  device: null
+  torch_dtype: "bfloat16"
+  service_url: "http://localhost:8002"
+  defaults:
+    strength: 0.85
+    guidance_scale: 3.5
+    num_variants: 1
+    steps: 4
+    seed: null              # null = random
+
+validation:
+  min_pixel_std: 5.0        # Minimum std dev of pixel values (detect blank)
+  max_blank_fraction: 0.95  # Max fraction of single-color pixels
+  check_dimensions: true
+
+reporting:
+  preview_count: 20
+  save_previews: true

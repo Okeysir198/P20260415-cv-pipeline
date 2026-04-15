@@ -1,0 +1,14 @@
+# Gitignored: scratch outputs (DVC tracks release/*/model.{onnx,pt})
+runs/*
+!runs/.gitkeep
+eval/*
+!eval/.gitkeep
+export/*
+!export/.gitkeep
+predict/*
+!predict/.gitkeep
+# Large release artifacts go through DVC
+release/**/*.onnx
+release/**/*.pt
+release/**/*.pth
+release/**/*.tflite

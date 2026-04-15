@@ -1,0 +1,36 @@
+# Label Studio integration config
+label_studio:
+  # Connection settings
+  url: "http://localhost:18103"
+  api_key: ""  # Override via LS_API_KEY env var or --api-key CLI arg
+
+  # Data directories
+  local_files_root: "/datasets"              # Container mount path for image access
+
+  # Project defaults
+  project_suffix: "_review"                  # Appended to dataset_name for project naming
+
+  # Import settings
+  import:
+    model_version: "auto_annotate_v1"        # Version tag for pre-annotations
+    batch_size: 100                           # Tasks per API batch
+    include_predictions: true                 # Import YOLO labels as pre-annotations
+
+  # Export settings
+  export:
+    only_reviewed: true                      # Only export tasks with human annotations
+    backup: true                             # Backup existing labels before overwrite
+    format: "yolo"                           # Export format (yolo)
+
+  # Label colors (one per class, cycles if more classes than colors)
+  colors:
+    - "#FF0000"   # red
+    - "#00FF00"   # green
+    - "#0066FF"   # blue
+    - "#FF9900"   # orange
+    - "#9900FF"   # purple
+    - "#00CCCC"   # teal
+    - "#FF00CC"   # magenta
+    - "#666600"   # olive
+    - "#FF6666"   # salmon
+    - "#00CC66"   # emerald

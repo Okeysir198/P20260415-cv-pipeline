@@ -1,0 +1,47 @@
+# Data
+dataset_store/
+pretrained/
+site_collected/
+
+# Outputs & runs
+runs/
+outputs/
+*.wandb/
+wandb/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.._MACOSX/
+
+# DVC
+.dvc/cache/
+.dvc/tmp/
+
+# Services
+services/*/logs/
+services/*/.env
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build
+dist/
+build/
+

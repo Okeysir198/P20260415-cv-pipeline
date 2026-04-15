@@ -1,0 +1,23 @@
+# Dataset config — PPE: Helmet Compliance
+dataset_name: "helmet_detection"
+path: "../../dataset_store/helmet_detection"
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+names:
+  0: person
+  1: head_with_helmet
+  2: head_without_helmet
+num_classes: 3
+input_size: [640, 640]
+
+# Normalization (ImageNet defaults, updated by compute_normalization.py)
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
+
+# SAM3-friendly text prompts for auto-annotation
+text_prompts:
+  person: "a person standing, walking, or working at a construction site"
+  head_with_helmet: "a person's head wearing a hard hat or safety helmet"
+  head_without_helmet: "a person's bare head, uncovered head, head with hair visible, no helmet"

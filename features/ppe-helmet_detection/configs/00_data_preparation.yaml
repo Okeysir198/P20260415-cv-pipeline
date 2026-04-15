@@ -1,0 +1,74 @@
+# Helmet Detection Data Preparation Config
+# Combines multiple source datasets into training-ready YOLO format
+
+# Task type
+task: detection
+
+# Dataset identification
+dataset_name: "helmet_detection"
+output_dir: "../../dataset_store/helmet_detection"
+
+# Output format
+output_format: "yolo"
+
+# Target classes (canonical names)
+classes:
+  - person
+  - head_with_helmet
+  - head_without_helmet
+  - head_with_nitto_hat
+
+# Source datasets to combine
+sources:
+  # Pre-split YOLO format (Roboflow)
+  - name: "ppe_yolov8"
+    path: "../../dataset_store/raw/helmet_detection/ppe_yolov8"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Hardhat": "head_with_helmet"
+      "NO-Hardhat": "head_without_helmet"
+      "Person": "person"
+
+  # VOC XML format
+  - name: "hard_hat_workers"
+    path: "../../dataset_store/raw/helmet_detection/hard_hat_workers/data"
+    format: "voc"
+    has_splits: false
+    class_map:
+      "helmet": "head_with_helmet"
+      "no_helmet": "head_without_helmet"
+      "person": "person"
+
+  # Flat YOLO format
+  - name: "sfchd"
+    path: "../../dataset_store/raw/helmet_detection/sfchd/dataset_SFCHD"
+    format: "yolo"
+    has_splits: false
+    class_map:
+      "helmet": "head_with_helmet"
+      "person": "person"
+
+  # Site collected data
+  - name: "site_collected"
+    path: "../../dataset_store/site_collected/helmet_detection"
+    format: "yolo"
+    has_splits: false
+    class_map:
+      "head_with_helmet": "head_with_helmet"
+      "head_without_helmet": "head_without_helmet"
+      "person": "person"
+
+# Split configuration (stratified by default)
+splits:
+  train: 0.8
+  val: 0.1
+  test: 0.1
+  seed: 42
+
+# Processing options
+options:
+  copy_images: true
+  handle_duplicates: "rename"
+  validate_labels: true

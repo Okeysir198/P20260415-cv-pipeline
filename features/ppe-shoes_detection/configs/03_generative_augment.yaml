@@ -1,0 +1,40 @@
+# Generative Augment: foot_with_safety_shoes -> foot_without_safety_shoes (dataset expansion)
+# Usage: python run_generative_augment.py --data-config features/ppe-shoes_detection/configs/05_data.yaml --config features/ppe-shoes_detection/configs/03_generative_augment.yaml
+
+generative_augment:
+  output_dir: "runs/generative_augment/shoes_expansion"
+  splits: ["train"]
+
+source:
+  class_name: "foot_with_safety_shoes"
+  class_id: 1              # From shoes data config: 1=foot_with_safety_shoes
+
+target:
+  class_name: "foot_without_safety_shoes"
+  class_id: 2              # From shoes data config: 2=foot_without_safety_shoes
+
+replacement_prompts:
+  - "casual sneakers, running shoes"
+  - "leather dress shoes"
+  - "sandals, open-toe shoes"
+  - "flip flops"
+  - "bare feet"
+  - "canvas shoes, slip-on shoes"
+  - "high heels"
+  - "boots, fashion boots"
+
+processing:
+  batch_size: 8
+  max_objects_per_image: 2
+  max_images: null
+
+inpainting:
+  mode: "local"
+  model: "black-forest-labs/FLUX.2-klein-4B"
+  torch_dtype: "bfloat16"
+  defaults:
+    strength: 0.90
+    guidance_scale: 3.5
+    num_variants: 3
+    steps: 4
+    seed: null

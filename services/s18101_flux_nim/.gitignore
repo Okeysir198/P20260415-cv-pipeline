@@ -1,0 +1,13 @@
+# Environment variables with secrets
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Test cache
+.pytest_cache/
+
+# Test outputs (optional - remove if you want to commit visualizations)
+# tests/outputs/*.png

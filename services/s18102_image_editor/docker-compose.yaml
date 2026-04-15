@@ -1,0 +1,24 @@
+# Image Editor — standalone orchestrator (CPU-only)
+# Requires SAM3 (:18100) and Flux NIM (:18101) running independently
+services:
+  image-editor:
+    build:
+      context: ..
+      dockerfile: s18102_image_editor/Dockerfile
+    ports:
+      - "18102:18102"
+    volumes:
+      - ./configs:/app/configs
+    environment:
+      - FLUX_NIM_URL=http://host.docker.internal:18101
+      - SAM3_URL=http://host.docker.internal:18100
+      - IMAGE_EDITOR_CONFIG=/app/configs/default.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18102/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3

@@ -1,0 +1,80 @@
+# Fire Detection Data Preparation Config
+# Combines multiple source datasets into training-ready YOLO format
+
+# Task type
+task: detection
+
+# Dataset identification
+dataset_name: "fire_detection"
+output_dir: "../../dataset_store/fire_detection"
+
+# Output format
+output_format: "yolo"
+
+# Target classes (canonical names)
+classes:
+  - fire
+  - smoke
+
+# Source datasets to combine
+sources:
+  # Pre-split YOLO format
+  - name: "roboflow_fire"
+    path: "../../dataset_store/raw/fire_detection/roboflow_fire"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "fire": "fire"
+      "smoke": "smoke"
+
+  # Pre-split YOLO format
+  - name: "industrial_hazards"
+    path: "../../dataset_store/raw/fire_detection/industrial_hazards"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid"]
+    class_map:
+      "fire": "fire"
+      "smoke": "smoke"
+
+  # Flat YOLO format
+  - name: "d_fire"
+    path: "../../dataset_store/raw/fire_detection/d_fire/data/data/train"
+    format: "yolo"
+    has_splits: false
+    class_map:
+      "smoke": "smoke"
+      "fire": "fire"
+
+  # COCO JSON format
+  - name: "fasdd_cv"
+    path: "../../dataset_store/raw/fire_detection/fasdd_cv/data"
+    format: "coco"
+    has_splits: true
+    splits_to_use: ["train", "val", "test"]
+    class_map:
+      "fire": "fire"
+      "smoke": "smoke"
+
+  # Site collected data
+  - name: "site_collected"
+    path: "../../dataset_store/site_collected/fire_detection"
+    format: "yolo"
+    has_splits: false
+    class_map:
+      "fire": "fire"
+      "smoke": "smoke"
+
+# Split configuration (stratified by default)
+splits:
+  train: 0.8
+  val: 0.1
+  test: 0.1
+  seed: 42
+
+# Processing options
+options:
+  copy_images: true
+  handle_duplicates: "rename"
+  validate_labels: true

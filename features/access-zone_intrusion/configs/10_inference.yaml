@@ -1,0 +1,26 @@
+# Inference + zone-logic config for the `zone` feature.
+# Uses a generic person-detector (pretrained or any detector) + polygon zones.
+
+model:
+  weights: ../../../pretrained/yolox_m.pth    # base person detector
+  conf: 0.3
+  iou: 0.45
+
+# Zone-intrusion specifics (consumed by app_demo.tabs.tab_zone)
+zone:
+  person_class_id: 0
+  default_zones: []       # list of [[x,y], ...] polygons
+
+alerts:
+  confidence_thresholds: {}
+  frame_windows: {}
+  window_ratio: 0.8
+  cooldown_frames: 90
+
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.25
+
+samples:
+  images: []
+  videos: []

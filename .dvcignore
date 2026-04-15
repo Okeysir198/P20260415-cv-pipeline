@@ -1,0 +1,26 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Logs
+wandb/
+*.log
+
+# Test outputs
+tests/outputs/
+tests/runs/

@@ -1,0 +1,124 @@
+# Optuna Hyperparameter Optimization Configuration
+# Usage: uv run core/p07_hpo/run_hpo.py --config configs/_shared/08_hyperparameter_tuning.yaml --data-config features/safety-fire_detection/configs/05_data.yaml
+
+# --- Study settings ---
+study:
+  name: "hpo_{dataset_name}"
+  direction: "maximize"          # maximize mAP@0.5
+  n_trials: 50
+  timeout: null                  # no time limit (set in seconds if needed)
+  sampler: "tpe"                 # tree-structured parzen estimator
+  seed: 42
+
+# --- Pruning (early stop unpromising trials) ---
+pruning:
+  type: "median"
+  n_startup_trials: 5           # don't prune until this many trials complete
+  n_warmup_epochs: 10           # don't prune a trial before this many epochs
+  interval_epochs: 1            # check pruning every N epochs
+
+# --- Per-trial training settings ---
+trial:
+  epochs: 30
+  patience: 15
+  disable_wandb: true
+  save_checkpoints: false
+
+# --- Search space ---
+# Each parameter: type (int | float | log_float | categorical), range/choices.
+# Optional "condition" makes a parameter active only when another param has a given value.
+search_space:
+  training:
+    lr:
+      type: log_float
+      low: 1.0e-4
+      high: 0.1
+    weight_decay:
+      type: log_float
+      low: 1.0e-5
+      high: 1.0e-2
+    optimizer:
+      type: categorical
+      choices: [sgd, adamw]
+    momentum:
+      type: float
+      low: 0.8
+      high: 0.99
+      condition:
+        param: training.optimizer
+        value: sgd
+    warmup_epochs:
+      type: int
+      low: 1
+      high: 10
+    scheduler:
+      type: categorical
+      choices: [cosine, plateau]
+
+  data:
+    batch_size:
+      type: categorical
+      choices: [8, 16, 32]
+
+  augmentation:
+    mosaic:
+      type: categorical
+      choices: [true, false]
+    mixup:
+      type: categorical
+      choices: [true, false]
+    hsv_h:
+      type: float
+      low: 0.0
+      high: 0.04
+    hsv_s:
+      type: float
+      low: 0.3
+      high: 1.0
+    hsv_v:
+      type: float
+      low: 0.2
+      high: 0.6
+    scale_min:                   # maps to augmentation.scale[0]
+      type: float
+      low: 0.1
+      high: 0.5
+    scale_max:                   # maps to augmentation.scale[1]
+      type: float
+      low: 1.5
+      high: 2.0
+    degrees:
+      type: float
+      low: 0.0
+      high: 15.0
+    translate:
+      type: float
+      low: 0.0
+      high: 0.2
+    shear:
+      type: float
+      low: 0.0
+      high: 5.0
+
+  loss:
+    iou_variant:
+      type: categorical
+      choices: [giou, ciou, diou]
+    cls_weight:
+      type: float
+      low: 0.5
+      high: 2.0
+    obj_weight:
+      type: float
+      low: 0.5
+      high: 2.0
+    reg_weight:
+      type: float
+      low: 2.0
+      high: 10.0
+
+# --- Output settings ---
+output:
+  save_best_config: true
+  save_plots: true
+  save_study_json: true

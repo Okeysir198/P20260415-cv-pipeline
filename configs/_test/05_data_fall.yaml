@@ -1,0 +1,19 @@
+# Dataset config — Fall Classification (100 images for pipeline testing)
+dataset_name: "test_fall_classification_100"
+path: "../../dataset_store/test_fall_classification_100"
+train: "train/images"
+val: "val/images"
+test: "val/images"
+
+names:
+  0: person
+  1: fallen_person
+num_classes: 2
+input_size: [640, 640]
+
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
+
+text_prompts:
+  person: "a person standing, walking, or sitting upright"
+  fallen_person: "a person lying on the ground, fallen down, collapsed on the floor"

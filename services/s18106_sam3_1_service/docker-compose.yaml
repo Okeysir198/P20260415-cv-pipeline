@@ -1,0 +1,30 @@
+services:
+  sam3_1:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "18106:18106"
+    volumes:
+      - model-cache-31:/app/.cache/huggingface
+      - ./configs:/app/configs
+      - ./src:/app/src  # Dev mode: mount source code to test without rebuild
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18106/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+volumes:
+  model-cache-31:

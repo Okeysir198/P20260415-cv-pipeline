@@ -1,0 +1,38 @@
+# Generative Augment: head_with_helmet -> head_without_helmet (hard negatives)
+# Usage: python run_generative_augment.py --data-config features/ppe-helmet_detection/configs/05_data.yaml --config features/ppe-helmet_detection/configs/03_generative_augment.yaml
+
+generative_augment:
+  output_dir: "runs/generative_augment/helmet_to_no_helmet"
+  splits: ["train"]
+
+source:
+  class_name: "head_with_helmet"
+  class_id: 1              # From helmet data config: 1=head_with_helmet
+
+target:
+  class_name: "head_without_helmet"
+  class_id: 2              # From helmet data config: 2=head_without_helmet
+
+replacement_prompts:
+  - "knit hat, woolly beanie on head"
+  - "baseball cap on head"
+  - "bare head with hair"
+  - "bandana on head"
+  - "sun hat on head"
+  - "bare head, no headwear"
+
+processing:
+  batch_size: 8
+  max_objects_per_image: 3
+  max_images: null
+
+inpainting:
+  mode: "local"
+  model: "black-forest-labs/FLUX.2-klein-4B"
+  torch_dtype: "bfloat16"
+  defaults:
+    strength: 0.85
+    guidance_scale: 3.5
+    num_variants: 2
+    steps: 4
+    seed: null

@@ -1,0 +1,63 @@
+server:
+  host: "0.0.0.0"
+  port: 18105
+
+services:
+  sam3_url: "http://localhost:18100"
+  ollama_url: "http://localhost:11434"
+
+processing:
+  request_timeout: 120
+
+validation:
+  min_box_size: 0.005
+  max_box_size: 0.95
+  duplicate_iou_threshold: 0.95
+  max_aspect_ratio: 20.0
+  min_polygon_vertices: 3
+  polygon_bbox_area_ratio_min: 0.1
+  polygon_bbox_area_ratio_max: 2.0
+
+sam3:
+  text_verify_threshold: 0.6
+  auto_mask_min_area: 0.001
+  auto_mask_max_area: 0.8
+
+vlm:
+  model: "qwen3.5:9b"
+  trigger: "selective"
+  crop_padding: 0.05
+  request_timeout: 120
+  crop_weight: 0.6
+  scene_weight: 0.4
+  crop_prompt: |
+    Look at this cropped image region from an object detection dataset.
+    Is this a {class_name}?
+    Answer format: YES/NO | confidence (0-1) | brief reason
+    Example: YES | 0.95 | clearly shows flames and smoke
+  scene_prompt: |
+    This image has the following annotations:
+    {annotation_list}
+    Available classes: {class_list}
+    Check: 1) Incorrectly labeled? 2) Missing objects? 3) Quality 0-1.
+    Format:
+    INCORRECT: [indices] or NONE
+    MISSING: [descriptions] or NONE
+    QUALITY: [0-1]
+
+scoring:
+  weights:
+    structural: 0.25
+    bbox_quality: 0.30
+    classification: 0.15
+    coverage: 0.15
+    vlm: 0.15
+  thresholds:
+    good: 0.8
+    review: 0.5
+
+jobs:
+  max_concurrent_jobs: 2
+  max_stored: 100
+  ttl_seconds: 3600
+  max_images_per_job: 500

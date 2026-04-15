@@ -1,0 +1,24 @@
+# Annotation Quality Assessment — standalone service (CPU-only)
+# Requires SAM3 (:18100) running independently for /verify endpoint
+services:
+  annotation-quality-assessment:
+    build:
+      context: ..
+      dockerfile: s18105_annotation_quality_assessment/Dockerfile
+    ports:
+      - "18105:18105"
+    volumes:
+      - ./configs:/app/configs
+    environment:
+      - SAM3_URL=http://host.docker.internal:18100
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - ANNOTATION_QUALITY_ASSESSMENT_CONFIG=/app/configs/default.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18105/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3

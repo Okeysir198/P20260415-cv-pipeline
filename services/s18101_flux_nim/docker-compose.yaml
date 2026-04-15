@@ -1,0 +1,36 @@
+services:
+  flux-nim:
+    image: nvcr.io/nim/black-forest-labs/flux.2-klein-4b:latest
+    ports:
+      - "18101:8000"
+    volumes:
+      - ${HOME}/.cache/nim:/opt/nim/.cache/
+      # Patch: sglang's NvmlCudaPlatform.get_device_total_memory fails on GB10/Jetson
+      # because nvmlDeviceGetMemoryInfo raises NVMLError_NotSupported.
+      # Patched version falls back to torch.cuda.get_device_properties().
+      - ./cuda_platform_patched.py:/usr/local/lib/python3.12/dist-packages/sglang/multimodal_gen/runtime/platforms/cuda.py:ro
+    env_file:
+      - .env
+    environment:
+      - NGC_API_KEY=${NGC_API_KEY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      # Triton's bundled ptxas is CUDA 12.8 — doesn't know sm_121a (Blackwell GB10).
+      # Point Triton to the system ptxas (CUDA 13.0) which supports it.
+      - TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/ready"]
+      interval: 30s
+      timeout: 10s
+      start_period: 900s
+      retries: 5
+
+# Using host bind mount (~/.cache/nim) instead of named volume to avoid permission issues
+# Cache dir must be chmod 777 for the NIM container user (nvs:1000)

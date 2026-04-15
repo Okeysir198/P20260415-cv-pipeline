@@ -1,0 +1,16 @@
+{
+  "_comment": "Polygon zone per sample, normalized [0,1] coords (x,y). Right-half placeholder unless customized. GT 'expected_intrusion' encodes the qualitative intent of the sample name.",
+  "default_polygon": [[0.5, 0.0], [1.0, 0.0], [1.0, 1.0], [0.5, 1.0]],
+  "samples": {
+    "inside_00.jpg":  {"polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "expected_intrusion": true,  "scene": "person clearly inside zone (zone=full image)"},
+    "inside_01.jpg":  {"polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "expected_intrusion": true,  "scene": "person clearly inside zone (zone=full image)"},
+    "inside_02.jpg":  {"polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "expected_intrusion": true,  "scene": "person clearly inside zone (zone=full image)"},
+    "outside_00.jpg": {"polygon": [[0.0, 0.0], [0.05, 0.0], [0.05, 0.05], [0.0, 0.05]], "expected_intrusion": false, "scene": "person clearly outside zone (zone=tiny corner)"},
+    "outside_01.jpg": {"polygon": [[0.0, 0.0], [0.05, 0.0], [0.05, 0.05], [0.0, 0.05]], "expected_intrusion": false, "scene": "person clearly outside zone (zone=tiny corner)"},
+    "outside_02.jpg": {"polygon": [[0.0, 0.0], [0.05, 0.0], [0.05, 0.05], [0.0, 0.05]], "expected_intrusion": false, "scene": "person clearly outside zone (zone=tiny corner)"},
+    "edge_00.jpg":    {"polygon": [[0.5, 0.0], [1.0, 0.0], [1.0, 1.0], [0.5, 1.0]], "expected_intrusion": null,  "scene": "edge-crossing person (right-half zone)"},
+    "edge_01.jpg":    {"polygon": [[0.5, 0.0], [1.0, 0.0], [1.0, 1.0], [0.5, 1.0]], "expected_intrusion": null,  "scene": "edge-crossing person (right-half zone)"},
+    "negative_00.jpg":{"polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "expected_intrusion": false, "scene": "no person (sunset)"},
+    "negative_01.jpg":{"polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "expected_intrusion": false, "scene": "no person (lights)"}
+  }
+}

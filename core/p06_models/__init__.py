@@ -1,0 +1,74 @@
+"""Model registry and architecture factories.
+
+Import :func:`build_model` to instantiate a model from config, or inspect
+:data:`MODEL_REGISTRY` to see all registered architectures.
+
+Example::
+
+    from core.p06_models import build_model, MODEL_REGISTRY
+
+    print(MODEL_REGISTRY.keys())
+    model = build_model(config)
+"""
+
+from core.p06_models.registry import MODEL_REGISTRY, build_model
+from core.p06_models.base import DetectionModel
+from core.p06_models.pose_base import PoseModel
+from core.p06_models.pose_registry import POSE_MODEL_REGISTRY, build_pose_model
+from core.p06_models.face_base import FaceDetector, FaceEmbedder
+from core.p06_models.face_registry import (
+    FACE_DETECTOR_REGISTRY,
+    FACE_EMBEDDER_REGISTRY,
+    build_face_detector,
+    build_face_embedder,
+)
+
+# Import model modules to trigger registration
+import core.p06_models.yolox  # noqa: F401
+import core.p06_models.hf_model  # noqa: F401
+import core.p06_models.dfine  # noqa: F401
+import core.p06_models.rtdetr  # noqa: F401
+import core.p06_models.hf_classification_variants  # noqa: F401
+import core.p06_models.hf_segmentation_variants  # noqa: F401
+
+# Import timm model module to trigger registration (optional dep)
+try:
+    import core.p06_models.timm_model  # noqa: F401
+    import core.p06_models.timm_variants  # noqa: F401
+except ImportError:
+    pass
+
+# Import pose model modules to trigger registration (optional deps)
+try:
+    import core.p06_models.rtmpose  # noqa: F401
+except ImportError:
+    pass
+try:
+    import core.p06_models.mediapipe_pose  # noqa: F401
+except ImportError:
+    pass
+
+# Import face model modules to trigger registration (optional deps)
+try:
+    import core.p06_models.scrfd  # noqa: F401
+except ImportError:
+    pass
+try:
+    import core.p06_models.mobilefacenet  # noqa: F401
+except ImportError:
+    pass
+
+__all__ = [
+    "build_model",
+    "MODEL_REGISTRY",
+    "DetectionModel",
+    "build_pose_model",
+    "POSE_MODEL_REGISTRY",
+    "PoseModel",
+    "build_face_detector",
+    "build_face_embedder",
+    "FACE_DETECTOR_REGISTRY",
+    "FACE_EMBEDDER_REGISTRY",
+    "FaceDetector",
+    "FaceEmbedder",
+]

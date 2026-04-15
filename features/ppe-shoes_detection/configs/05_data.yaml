@@ -1,0 +1,23 @@
+# Dataset config — PPE: Safety Shoes Compliance
+dataset_name: "shoes_detection"
+path: "../../dataset_store/shoes_detection"
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+names:
+  0: person
+  1: foot_with_safety_shoes
+  2: foot_without_safety_shoes
+num_classes: 3
+input_size: [640, 640]
+
+# Normalization (ImageNet defaults, updated by compute_normalization.py)
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
+
+# SAM3-friendly text prompts for auto-annotation
+text_prompts:
+  person: "a person standing or walking, full body visible"
+  foot_with_safety_shoes: "a person's feet wearing safety boots or steel-toe shoes"
+  foot_without_safety_shoes: "a person's feet wearing regular shoes, sneakers, sandals, or barefoot"
