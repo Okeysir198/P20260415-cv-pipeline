@@ -1,74 +1,425 @@
-# datasets bootstrap 2026-04-15T03:19:15Z filter=all dry=0
-2026-04-15T03:19:15Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/d_fire	4096
-2026-04-15T03:19:15Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/fasdd_cv	4096
-2026-04-15T03:19:15Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/zenodo_indoor_fire	4096
-2026-04-15T03:19:15Z	FAIL	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/roboflow_fire	4096
-2026-04-15T03:19:15Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/hardhat_vest_v3	4096
-2026-04-15T03:19:15Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/sfchd	4096
-2026-04-15T03:19:15Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/sh17_ppe	4096
-2026-04-15T03:19:15Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/hard_hat_workers	4096
-2026-04-15T03:19:15Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/ppe_yolov8	4096
-2026-04-15T03:19:15Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/construction_safety	4096
-2026-04-15T03:19:15Z	FAIL	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/roboflow_hardhat	4096
-2026-04-15T03:19:15Z	SKIP	ppe-shoes_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/shoes_detection/keremberke_ppe	4096
-2026-04-15T03:19:15Z	SKIP	ppe-shoes_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/shoes_detection/shoe_ppe	4096
-2026-04-15T03:19:15Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/coco_keypoints	4096
-2026-04-15T03:19:15Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/roboflow_fall	4096
-2026-04-15T03:19:15Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/cctv_fall	4096
-2026-04-15T03:19:17Z	FAIL	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/ur_fall	4096
-2026-04-15T03:19:17Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/phone_detection/fpi_det	4096
-2026-04-15T03:19:17Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/phone_detection/phone_call_usage	4096
-2026-04-15T03:19:17Z	FAIL	access-zone_intrusion	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/_coco_val	4096
-2026-04-15T03:19:17Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/fire_detection	4096
-2026-04-15T03:19:17Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/helmet_detection	4096
-2026-04-15T03:19:17Z	SKIP	ppe-shoes_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/shoes_detection	4096
-2026-04-15T03:19:17Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/fall_detection	4096
-2026-04-15T03:19:17Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/phone_detection	4096
-2026-04-15T03:19:17Z	SKIP	_all	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/test_video	4096
-2026-04-15T03:19:17Z	SKIP	_all	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/training_ready	4096
-2026-04-15T03:19:17Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/fire_cctv	4096
-2026-04-15T03:19:17Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/fire_smoke_datacluster	4096
-2026-04-15T03:19:17Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/industrial_hazards	4096
-2026-04-15T03:19:18Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/fall_detection_imgs	4096
-2026-04-15T03:19:18Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/construction_safety	4096
-2026-04-15T03:19:18Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/phone_detection/action_recognition	4096
-2026-04-15T03:19:18Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/phone_detection/mobile_phone	4096
-2026-04-15T03:19:18Z	RSYNC	_all	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/nitto_denko	0
-2026-04-15T03:19:18Z	RSYNC	_all	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/smart_parking	0
-# datasets bootstrap 2026-04-15T03:19:52Z filter=all dry=0
-2026-04-15T03:19:52Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/d_fire	4096
-2026-04-15T03:19:52Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/fasdd_cv	4096
-2026-04-15T03:19:52Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/zenodo_indoor_fire	4096
-2026-04-15T03:19:52Z	FAIL	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/roboflow_fire	4096
-2026-04-15T03:19:52Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/hardhat_vest_v3	4096
-2026-04-15T03:19:52Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/sfchd	4096
-2026-04-15T03:19:52Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/sh17_ppe	4096
-2026-04-15T03:19:52Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/hard_hat_workers	4096
-2026-04-15T03:19:52Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/ppe_yolov8	4096
-2026-04-15T03:19:52Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/construction_safety	4096
-2026-04-15T03:19:52Z	FAIL	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/roboflow_hardhat	4096
-2026-04-15T03:19:52Z	SKIP	ppe-shoes_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/shoes_detection/keremberke_ppe	4096
-2026-04-15T03:19:52Z	SKIP	ppe-shoes_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/shoes_detection/shoe_ppe	4096
-2026-04-15T03:19:52Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/coco_keypoints	4096
-2026-04-15T03:19:52Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/roboflow_fall	4096
-2026-04-15T03:19:52Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/cctv_fall	4096
-2026-04-15T03:19:54Z	FAIL	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/ur_fall	4096
-2026-04-15T03:19:54Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/phone_detection/fpi_det	4096
-2026-04-15T03:19:54Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/phone_detection/phone_call_usage	4096
-2026-04-15T03:19:55Z	FAIL	access-zone_intrusion	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/_coco_val	4096
-2026-04-15T03:19:55Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/fire_detection	4096
-2026-04-15T03:19:55Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/helmet_detection	4096
-2026-04-15T03:19:55Z	SKIP	ppe-shoes_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/shoes_detection	4096
-2026-04-15T03:19:55Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/fall_detection	4096
-2026-04-15T03:19:55Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/phone_detection	4096
-2026-04-15T03:19:55Z	SKIP	_all	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/site_collected/test_video	4096
-2026-04-15T03:19:55Z	SKIP	_all	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/training_ready	4096
-2026-04-15T03:19:55Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/fire_cctv	4096
-2026-04-15T03:19:55Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/fire_smoke_datacluster	4096
-2026-04-15T03:19:55Z	SKIP	safety-fire_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fire_detection/industrial_hazards	4096
-2026-04-15T03:19:55Z	SKIP	safety-fall_classification,safety-fall_pose_estimation	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/fall_detection/fall_detection_imgs	4096
-2026-04-15T03:19:55Z	SKIP	ppe-helmet_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/helmet_detection/construction_safety	4096
-2026-04-15T03:19:55Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/phone_detection/action_recognition	4096
-2026-04-15T03:19:55Z	SKIP	safety-phone_detection	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/raw/phone_detection/mobile_phone	4096
-2026-04-15T03:19:55Z	RSYNC	_all	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/nitto_denko	0
-2026-04-15T03:19:55Z	RSYNC	_all	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/dataset_store/smart_parking	0
+# pretrained bootstrap 2026-04-14T13:14:55Z filter=all dry=0
+2026-04-14T13:14:56Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_nano.pth	7694953
+2026-04-14T13:14:58Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_tiny.pth	40755013
+2026-04-14T13:15:02Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_s.pth	72089125
+2026-04-14T13:15:26Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_m.pth	203114461
+2026-04-14T13:15:49Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_l.pth	434357141
+2026-04-14T13:15:50Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_n_coco.pt	0
+2026-04-14T13:15:50Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_s_coco.pt	0
+2026-04-14T13:15:51Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_m_coco.pt	0
+2026-04-14T13:15:51Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_l_coco.pt	0
+2026-04-14T13:15:51Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/rtdetr_v2_r18_coco.pt	0
+2026-04-14T13:16:01Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/rtdetr_v2_r50_coco.pt	147321131
+2026-04-14T13:16:02Z	FAIL	[legacy file; YuNet-as-SCRFD]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/scrfd_500m.onnx	232589
+2026-04-14T13:16:03Z	FAIL	[placeholder: legacy arcface onnx — retrieve from insightface buffalo bundle]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/mobilefacenet_arcface.onnx	0
+2026-04-14T13:16:03Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yunet_2023mar.onnx	232589
+2026-04-14T13:16:04Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yunet_2023mar_int8.onnx	100416
+2026-04-14T13:16:05Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/sface_2021dec.onnx	38696353
+2026-04-14T13:16:08Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/sface_2021dec_int8.onnx	9896933
+2026-04-14T13:16:10Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_sc.zip	14969382
+2026-04-14T13:16:12Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_s.zip	127607557
+2026-04-14T13:16:22Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_m.zip	275951529
+2026-04-14T13:16:29Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_l.zip	288621354
+2026-04-14T13:16:43Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/antelopev2.zip	360662982
+2026-04-14T13:16:44Z	FAIL	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_idiap_EdgeFace	4096
+2026-04-14T13:16:47Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yolov8n-face.pt	6247065
+2026-04-14T13:16:48Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/anti_spoof_2_7_80x80_MiniFASNetV2.pth	1849453
+2026-04-14T13:16:49Z	FAIL	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_facebook_dinov3-vits16	4096
+2026-04-14T13:16:51Z	FAIL	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_facebook_dinov3-vitb16	4096
+2026-04-14T13:16:52Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10n.pt	11448431
+2026-04-14T13:16:54Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10s.pt	32956759
+2026-04-14T13:16:57Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10m.pt	66924323
+2026-04-14T13:16:58Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11n.pt	5613764
+2026-04-14T13:16:58Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11s.pt	19313732
+2026-04-14T13:17:02Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11m.pt	40684120
+2026-04-14T13:17:03Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov12n.pt	5515407
+2026-04-14T13:17:04Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov12s.pt	18708559
+2026-04-14T13:18:30Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/HudatersU_safety_helmet.onnx	174677134
+2026-04-14T13:18:47Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/HudatersU_safety_helmet.pt	87632058
+2026-04-14T13:19:20Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11m.pt	40523493
+2026-04-14T13:19:29Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11n.pt	5480019
+2026-04-14T13:19:48Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11x.pt	114397330
+2026-04-14T13:20:04Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8m.pt	52038091
+2026-04-14T13:20:13Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8n.pt	6256867
+2026-04-14T13:20:43Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8x.pt	136726451
+2026-04-14T13:21:01Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/darthregicid_yolov5_ppe_m896.pt	119287967
+2026-04-14T13:21:18Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/dxvyaaa_yolo_helmet.pt	22487786
+2026-04-14T13:21:41Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gghsgn_helmet_detection.bin	25975638
+2026-04-14T13:22:12Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gghsgn_safety_helmet.bin	25958678
+2026-04-14T13:22:21Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gungniir_yolo11_vest.pt	5478170
+2026-04-14T13:22:28Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hansung_yolov8_ppe.pt	6250090
+2026-04-14T13:22:49Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hexmon_vyra_yolo_ppe.onnx	103655282
+2026-04-14T13:23:05Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hexmon_vyra_yolo_ppe.pt	52056210
+2026-04-14T13:23:24Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8m_hardhat.pt	52007840
+2026-04-14T13:23:37Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8n_hardhat.pt	6229688
+2026-04-14T13:23:50Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8s_hardhat.pt	22493816
+2026-04-14T13:24:05Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11m_helmet.pt	40535852
+2026-04-14T13:24:13Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11s_helmet.pt	19195226
+2026-04-14T13:24:55Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11x_helmet.pt	114402073
+2026-04-14T13:25:05Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo26m_helmet.pt	44031513
+# pretrained bootstrap 2026-04-14T13:25:13Z filter=all dry=0
+2026-04-14T13:25:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_nano.pth	7694953
+2026-04-14T13:25:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_tiny.pth	40755013
+2026-04-14T13:25:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_s.pth	72089125
+2026-04-14T13:25:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_m.pth	203114461
+2026-04-14T13:25:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_l.pth	434357141
+2026-04-14T13:25:13Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_n_coco.pt	0
+2026-04-14T13:25:13Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_s_coco.pt	0
+2026-04-14T13:25:14Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_m_coco.pt	0
+2026-04-14T13:25:14Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_l_coco.pt	0
+2026-04-14T13:25:15Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/rtdetr_v2_r18_coco.pt	0
+2026-04-14T13:25:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/rtdetr_v2_r50_coco.pt	147321131
+2026-04-14T13:25:15Z	SKIP	[legacy file; YuNet-as-SCRFD]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/scrfd_500m.onnx	232589
+2026-04-14T13:25:15Z	FAIL	[placeholder: legacy arcface onnx — retrieve from insightface buffalo bundle]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/mobilefacenet_arcface.onnx	0
+2026-04-14T13:25:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yunet_2023mar.onnx	232589
+2026-04-14T13:25:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yunet_2023mar_int8.onnx	100416
+2026-04-14T13:25:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/sface_2021dec.onnx	38696353
+2026-04-14T13:25:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/sface_2021dec_int8.onnx	9896933
+2026-04-14T13:25:15Z	SKIP	[non-commercial]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_sc.zip	14969382
+2026-04-14T13:25:15Z	SKIP	[non-commercial]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_s.zip	127607557
+2026-04-14T13:25:15Z	SKIP	[non-commercial]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_m.zip	275951529
+2026-04-14T13:25:15Z	SKIP	[non-commercial; contains w600k_r50]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_l.zip	288621354
+2026-04-14T13:25:15Z	SKIP	[non-commercial; glintr100]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/antelopev2.zip	360662982
+2026-04-14T13:25:16Z	FAIL	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_idiap_EdgeFace	4096
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yolov8n-face.pt	6247065
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/anti_spoof_2_7_80x80_MiniFASNetV2.pth	1849453
+2026-04-14T13:25:16Z	SKIP	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_facebook_dinov3-vits16	4096
+2026-04-14T13:25:16Z	SKIP	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_facebook_dinov3-vitb16	4096
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10n.pt	11448431
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10s.pt	32956759
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10m.pt	66924323
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11n.pt	5613764
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11s.pt	19313732
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11m.pt	40684120
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov12n.pt	5515407
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov12s.pt	18708559
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/HudatersU_safety_helmet.onnx	174677134
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/HudatersU_safety_helmet.pt	87632058
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11m.pt	40523493
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11n.pt	5480019
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11x.pt	114397330
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8m.pt	52038091
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8n.pt	6256867
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8x.pt	136726451
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/darthregicid_yolov5_ppe_m896.pt	119287967
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/dxvyaaa_yolo_helmet.pt	22487786
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gghsgn_helmet_detection.bin	25975638
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gghsgn_safety_helmet.bin	25958678
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gungniir_yolo11_vest.pt	5478170
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hansung_yolov8_ppe.pt	6250090
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hexmon_vyra_yolo_ppe.onnx	103655282
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hexmon_vyra_yolo_ppe.pt	52056210
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8m_hardhat.pt	52007840
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8n_hardhat.pt	6229688
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8s_hardhat.pt	22493816
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11m_helmet.pt	40535852
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11s_helmet.pt	19195226
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11x_helmet.pt	114402073
+2026-04-14T13:25:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo26m_helmet.pt	44031513
+2026-04-14T13:25:25Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo26s_helmet.pt	20350213
+2026-04-14T13:25:33Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/melihuzunoglu_yolov11_ppe.pt	5475290
+2026-04-14T13:25:41Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/tanishjain_yolov8n_ppe6.pt	5625014
+2026-04-14T13:26:53Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/thenobody12_helmet_deta.safetensors	878596508
+2026-04-14T13:27:09Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/uisikdag_yolov5_hardhat.pt	42217961
+2026-04-14T13:27:32Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/wesjos_yolo11m_hardhat_vest.pt	121046621
+2026-04-14T13:27:39Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/wesjos_yolo11n_hardhat_vest.pt	5246331
+2026-04-14T13:27:43Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/_hf_Advantech-EIOT_qualcomm-ultralytics-ppe_detection	4096
+# datasets bootstrap 2026-04-14T13:27:52Z filter=all dry=0
+# pretrained bootstrap 2026-04-14T13:28:13Z filter=all dry=0
+2026-04-14T13:28:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_nano.pth	7694953
+2026-04-14T13:28:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_tiny.pth	40755013
+2026-04-14T13:28:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_s.pth	72089125
+2026-04-14T13:28:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_m.pth	203114461
+2026-04-14T13:28:13Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_l.pth	434357141
+2026-04-14T13:28:13Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_n_coco.pt	0
+2026-04-14T13:28:13Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_s_coco.pt	0
+2026-04-14T13:28:14Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/dfine_m_coco.pt	0
+2026-04-14T13:28:14Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_l_coco.pt	0
+2026-04-14T13:28:14Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/rtdetr_v2_r18_coco.pt	0
+2026-04-14T13:28:14Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/rtdetr_v2_r50_coco.pt	147321131
+2026-04-14T13:28:14Z	SKIP	[legacy file; YuNet-as-SCRFD]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/scrfd_500m.onnx	232589
+2026-04-14T13:28:15Z	FAIL	[placeholder: legacy arcface onnx — retrieve from insightface buffalo bundle]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/mobilefacenet_arcface.onnx	0
+2026-04-14T13:28:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yunet_2023mar.onnx	232589
+2026-04-14T13:28:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yunet_2023mar_int8.onnx	100416
+2026-04-14T13:28:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/sface_2021dec.onnx	38696353
+2026-04-14T13:28:15Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/sface_2021dec_int8.onnx	9896933
+2026-04-14T13:28:15Z	SKIP	[non-commercial]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_sc.zip	14969382
+2026-04-14T13:28:15Z	SKIP	[non-commercial]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_s.zip	127607557
+2026-04-14T13:28:15Z	SKIP	[non-commercial]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_m.zip	275951529
+2026-04-14T13:28:15Z	SKIP	[non-commercial; contains w600k_r50]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_l.zip	288621354
+2026-04-14T13:28:15Z	SKIP	[non-commercial; glintr100]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/antelopev2.zip	360662982
+2026-04-14T13:28:16Z	FAIL	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_idiap_EdgeFace	4096
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yolov8n-face.pt	6247065
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/anti_spoof_2_7_80x80_MiniFASNetV2.pth	1849453
+2026-04-14T13:28:16Z	SKIP	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_facebook_dinov3-vits16	4096
+2026-04-14T13:28:16Z	SKIP	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_facebook_dinov3-vitb16	4096
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10n.pt	11448431
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10s.pt	32956759
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10m.pt	66924323
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11n.pt	5613764
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11s.pt	19313732
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11m.pt	40684120
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov12n.pt	5515407
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov12s.pt	18708559
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/HudatersU_safety_helmet.onnx	174677134
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/HudatersU_safety_helmet.pt	87632058
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11m.pt	40523493
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11n.pt	5480019
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11x.pt	114397330
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8m.pt	52038091
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8n.pt	6256867
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8x.pt	136726451
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/darthregicid_yolov5_ppe_m896.pt	119287967
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/dxvyaaa_yolo_helmet.pt	22487786
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gghsgn_helmet_detection.bin	25975638
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gghsgn_safety_helmet.bin	25958678
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gungniir_yolo11_vest.pt	5478170
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hansung_yolov8_ppe.pt	6250090
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hexmon_vyra_yolo_ppe.onnx	103655282
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hexmon_vyra_yolo_ppe.pt	52056210
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8m_hardhat.pt	52007840
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8n_hardhat.pt	6229688
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8s_hardhat.pt	22493816
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11m_helmet.pt	40535852
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11s_helmet.pt	19195226
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11x_helmet.pt	114402073
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo26m_helmet.pt	44031513
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo26s_helmet.pt	20350213
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/melihuzunoglu_yolov11_ppe.pt	5475290
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/tanishjain_yolov8n_ppe6.pt	5625014
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/thenobody12_helmet_deta.safetensors	878596508
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/uisikdag_yolov5_hardhat.pt	42217961
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/wesjos_yolo11m_hardhat_vest.pt	121046621
+2026-04-14T13:28:16Z	SKIP		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/wesjos_yolo11n_hardhat_vest.pt	5246331
+2026-04-14T13:28:16Z	SKIP	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/_hf_Advantech-EIOT_qualcomm-ultralytics-ppe_detection	4096
+2026-04-14T13:28:23Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/dfine_small_coco.safetensors	41497620
+2026-04-14T13:28:29Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/efficientformerv2_s1.bin	25279701
+2026-04-14T13:28:38Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/fastvit_t12.bin	30586837
+2026-04-14T13:28:44Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/fastvit_t8.bin	16393221
+2026-04-14T13:28:52Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/mobilevitv2_100.bin	19771073
+2026-04-14T13:29:09Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/rfdetr_small.onnx	114680416
+2026-04-14T13:29:17Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/_hf_facebook_dinov3-vits16	4096
+2026-04-14T13:29:30Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/_hf_facebook_dinov3-vitb16	4096
+2026-04-14T13:29:30Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/dfine_s_coco.pth	0
+2026-04-14T13:29:30Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/dfine_m_coco.pth	0
+2026-04-14T13:29:30Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/dfine_s_obj365.pth	0
+2026-04-14T13:29:31Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/dfine_m_obj365.pth	0
+2026-04-14T13:29:31Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/dfine_l_obj365.pth	0
+2026-04-14T13:29:35Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/yolox_m.pth	203114461
+2026-04-14T13:29:35Z	FAIL	[DEIM 90e; gdown --fuzzy]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/deim_dfine_m_coco/deim_dfine_hgnetv2_m_coco_90e.pth	0
+2026-04-14T13:29:35Z	FAIL	[DEIM 120e; gdown --fuzzy]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/deim_dfine_s_coco/deim_dfine_hgnetv2_s_coco_120e.pth	0
+2026-04-14T13:29:42Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_yolo11s_sensitive-detector	4096
+2026-04-14T13:29:44Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_yolo11s_nimble-narwhal_v6	4096
+# pretrained bootstrap 2026-04-14T13:31:18Z filter=all dry=0
+2026-04-14T13:31:19Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_nano.pth	7694953
+2026-04-14T13:31:20Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_tiny.pth	40755013
+2026-04-14T13:31:21Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_s.pth	72089125
+2026-04-14T13:31:25Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_m.pth	203114461
+2026-04-14T13:31:33Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/yolox_l.pth	434357141
+2026-04-14T13:31:33Z	OK	[legacy file; YuNet-as-SCRFD]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/scrfd_500m.onnx	232589
+2026-04-14T13:31:33Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yunet_2023mar.onnx	232589
+2026-04-14T13:31:34Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yunet_2023mar_int8.onnx	100416
+2026-04-14T13:31:35Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/sface_2021dec.onnx	38696353
+2026-04-14T13:31:35Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/sface_2021dec_int8.onnx	9896933
+2026-04-14T13:31:36Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_sc.zip	14969382
+2026-04-14T13:31:38Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_s.zip	127607557
+2026-04-14T13:31:43Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_m.zip	275951529
+2026-04-14T13:31:48Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/buffalo_l.zip	288621354
+2026-04-14T13:32:20Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/antelopev2.zip	360662982
+2026-04-14T13:32:22Z	FAIL	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_idiap_EdgeFace	4096
+2026-04-14T13:32:25Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/yolov8n-face.pt	6247065
+2026-04-14T13:32:26Z	OK	access-face_recognition	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/anti_spoof_2_7_80x80_MiniFASNetV2.pth	1849453
+2026-04-14T13:32:39Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_facebook_dinov3-vits16	4096
+2026-04-14T13:32:55Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/_hf_facebook_dinov3-vitb16	4096
+2026-04-14T13:32:57Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10n.pt	11448431
+2026-04-14T13:33:00Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10s.pt	32956759
+2026-04-14T13:33:01Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov10m.pt	66924323
+2026-04-14T13:33:02Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11n.pt	5613764
+2026-04-14T13:33:03Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11s.pt	19313732
+2026-04-14T13:33:04Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolo11m.pt	40684120
+2026-04-14T13:33:04Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov12n.pt	5515407
+2026-04-14T13:33:05Z	OK	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/yolov12s.pt	18708559
+2026-04-14T13:33:20Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/HudatersU_safety_helmet.onnx	174677134
+2026-04-14T13:33:35Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/HudatersU_safety_helmet.pt	87632058
+2026-04-14T13:33:59Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11m.pt	40523493
+2026-04-14T13:34:04Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11n.pt	5480019
+2026-04-14T13:34:11Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov11x.pt	114397330
+2026-04-14T13:34:15Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8m.pt	52038091
+2026-04-14T13:34:17Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8n.pt	6256867
+2026-04-14T13:34:29Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/bhavani23_ocularone_yolov8x.pt	136726451
+2026-04-14T13:34:34Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/darthregicid_yolov5_ppe_m896.pt	119287967
+2026-04-14T13:34:39Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/dxvyaaa_yolo_helmet.pt	22487786
+2026-04-14T13:34:42Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gghsgn_helmet_detection.bin	25975638
+2026-04-14T13:34:46Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gghsgn_safety_helmet.bin	25958678
+2026-04-14T13:34:52Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/gungniir_yolo11_vest.pt	5478170
+2026-04-14T13:34:58Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hansung_yolov8_ppe.pt	6250090
+2026-04-14T13:35:08Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hexmon_vyra_yolo_ppe.onnx	103655282
+2026-04-14T13:35:16Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/hexmon_vyra_yolo_ppe.pt	52056210
+2026-04-14T13:35:23Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8m_hardhat.pt	52007840
+2026-04-14T13:35:26Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8n_hardhat.pt	6229688
+2026-04-14T13:35:30Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/keremberke_yolov8s_hardhat.pt	22493816
+2026-04-14T13:35:33Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11m_helmet.pt	40535852
+2026-04-14T13:35:37Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11s_helmet.pt	19195226
+2026-04-14T13:35:46Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo11x_helmet.pt	114402073
+2026-04-14T13:35:49Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo26m_helmet.pt	44031513
+2026-04-14T13:35:55Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/leeyunjai_yolo26s_helmet.pt	20350213
+2026-04-14T13:35:57Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/melihuzunoglu_yolov11_ppe.pt	5475290
+2026-04-14T13:36:01Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/tanishjain_yolov8n_ppe6.pt	5625014
+2026-04-14T13:36:26Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/thenobody12_helmet_deta.safetensors	878596508
+2026-04-14T13:36:42Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/uisikdag_yolov5_hardhat.pt	42217961
+2026-04-14T13:36:51Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/wesjos_yolo11m_hardhat_vest.pt	121046621
+2026-04-14T13:36:53Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/wesjos_yolo11n_hardhat_vest.pt	5246331
+2026-04-14T13:36:59Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-helmet_detection/_hf_Advantech-EIOT_qualcomm-ultralytics-ppe_detection	4096
+2026-04-14T13:37:06Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/dfine_small_coco.safetensors	41497620
+2026-04-14T13:37:09Z	OK	ppe-shoes_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/efficientformerv2_s1.bin	25279701
+2026-04-14T13:37:12Z	OK	ppe-shoes_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/fastvit_t12.bin	30586837
+2026-04-14T13:37:16Z	OK	ppe-shoes_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/fastvit_t8.bin	16393221
+2026-04-14T13:37:24Z	OK	ppe-shoes_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/mobilevitv2_100.bin	19771073
+2026-04-14T13:37:29Z	OK	ppe-shoes_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/rfdetr_small.onnx	114680416
+2026-04-14T13:37:36Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/_hf_facebook_dinov3-vits16	4096
+2026-04-14T13:37:45Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/ppe-shoes_detection/_hf_facebook_dinov3-vitb16	4096
+2026-04-14T13:37:49Z	OK	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/yolox_m.pth	203114461
+2026-04-14T13:37:49Z	FAIL	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/deim_dfine_m_coco/deim_dfine_hgnetv2_m_coco_90e.pth	0
+2026-04-14T13:37:49Z	FAIL	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/deim_dfine_s_coco/deim_dfine_hgnetv2_s_coco_120e.pth	0
+2026-04-14T13:37:56Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_yolo11s_sensitive-detector	4096
+2026-04-14T13:37:56Z	FAIL		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_yolo11s_nimble-narwhal_v6	4096
+2026-04-14T13:38:17Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_yolov8s	4096
+2026-04-14T13:38:24Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_yolov11n	4096
+2026-04-14T13:38:27Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_rexnet1_0x	4096
+2026-04-14T13:38:34Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_rexnet1_3x	4096
+2026-04-14T13:38:38Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_rexnet1_5x	4096
+2026-04-14T13:38:44Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_mobilenet_v3_small	4096
+2026-04-14T13:38:47Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_mobilenet_v3_large	4096
+2026-04-14T13:38:55Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_resnet18	4096
+2026-04-14T13:39:05Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/pyronear_resnet34	4096
+2026-04-14T13:39:08Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/SalahALHaismawi_yolov26-fire-detection	4096
+2026-04-14T13:39:17Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/touati-kamel_yolov8s-forest-fire	4096
+2026-04-14T13:39:27Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/touati-kamel_yolov10n-forest-fire	4096
+2026-04-14T13:39:33Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/touati-kamel_yolov12n-forest-fire	4096
+2026-04-14T13:39:40Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/JJUNHYEOK_yolov8n_wildfire	4096
+2026-04-14T13:39:49Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/Mehedi-2-96_fire-smoke-yolo	4096
+2026-04-14T13:40:09Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/TommyNgx_YOLOv10-Fire-and-Smoke	4096
+2026-04-14T13:40:24Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/shawnmichael_vit-fire-smoke-v4	4096
+2026-04-14T13:40:28Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/shawnmichael_convnext-tiny-fire-smoke	4096
+2026-04-14T13:40:33Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/shawnmichael_swin-fire-smoke	4096
+2026-04-14T13:40:37Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/shawnmichael_efficientnetb2-fire-smoke	4096
+2026-04-14T13:41:03Z	OK	[partial in prior run — resume]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/shawnmichael_vit-large-fire-smoke	4096
+2026-04-14T13:41:47Z	OK	[partial in prior run — resume]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/dima806_wildfire_types	4096
+2026-04-14T13:41:52Z	OK	[NASA]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/sequoiaandrade_smoke-cloud-race-odin	4096
+2026-04-14T13:41:54Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/Shoriful025_wildfire_smoke_seg_vit	4096
+2026-04-14T13:42:03Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/ustc-community_dfine-medium-coco	4096
+2026-04-14T13:42:09Z	OK		/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fire_detection/ustc-community_dfine-small-coco	4096
+2026-04-14T13:42:17Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/dinov2-small.bin	88297097
+2026-04-14T13:42:30Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/efficientnetv2_rw_s.ra2_in1k.bin	96674637
+2026-04-14T13:42:41Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/fall_resnet18_popkek00.safetensors	44764336
+2026-04-14T13:42:43Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/fall_resnet18_popkek00_config.json	690
+2026-04-14T13:42:43Z	OK	[label map]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/_imagenet_classes.json	10472
+2026-04-14T13:42:53Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/mobilenetv4_conv_small.e2400_r224_in1k.bin	15296226
+2026-04-14T13:42:56Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/movinet_a1_base.tar.gz	18995200
+2026-04-14T13:42:59Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/movinet_a2_base.tar.gz	21258240
+2026-04-14T13:43:02Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/movinet_a2_stream.tar.gz	29624320
+2026-04-14T13:43:05Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/movinet_a3_base.tar.gz	29941760
+2026-04-14T13:43:11Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/slowfast_r50_k400.pyth	277138115
+2026-04-14T13:43:21Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/slowfast_r101_k400.pyth	503790111
+2026-04-14T13:43:22Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/uniformerv2_b16_k400_k710.pyth	0
+2026-04-14T13:43:34Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/videomae-base-finetuned-kinetics.bin	346198861
+2026-04-14T13:43:39Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/videomae-small-finetuned-kinetics.bin	88197173
+2026-04-14T13:43:40Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/videomaev2_base_k710.safetensors	0
+2026-04-14T13:43:41Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/videomaev2_large_k710.safetensors	0
+2026-04-14T13:43:42Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/x3d_l.pyth	50025453
+2026-04-14T13:43:43Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/x3d_m.pyth	30779313
+2026-04-14T13:43:45Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/x3d_s.pyth	30779313
+2026-04-14T13:43:46Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/x3d_xs.pyth	30779313
+2026-04-14T13:43:49Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/yolov11_fall_melihuzunoglu.pt	5472282
+2026-04-14T13:43:59Z	OK	safety-fall_classification	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/yolov8_fall_kamalchibrani.pt	6210350
+2026-04-14T13:44:09Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/dw-ll_ucoco_384.onnx	134399116
+2026-04-14T13:44:23Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/hrnet_w48_coco_256x192.pth	255011654
+2026-04-14T13:44:23Z	MANUAL	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/posec3d_slowonly_r50_ntu60_xsub_keypoint.pth	0
+2026-04-14T13:44:26Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/pose_landmarker_full.task	9398198
+2026-04-14T13:44:29Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/pose_landmarker_heavy.task	30664242
+2026-04-14T13:44:31Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/pose_landmarker_lite.task	5777746
+2026-04-14T13:44:36Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/rtmdet-nano_person.pth	4215674
+2026-04-14T13:44:45Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/rtmo-l_body7_640x640.pth	179277852
+2026-04-14T13:44:47Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/rtmo-s_body7_640x640.pth	39766454
+2026-04-14T13:44:49Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/rtmpose-s_coco_256x192.pth	22007763
+2026-04-14T13:44:49Z	MANUAL	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/stgcn_80e_ntu60_xsub_keypoint.pth	0
+2026-04-14T13:45:01Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/vitpose-plus-base.pth	501627628
+2026-04-14T13:45:07Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/vitpose-plus-small.pth	132619932
+2026-04-14T13:45:27Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/yolo_nas_pose_s.onnx	61688622
+2026-04-14T13:45:43Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/yolo_nas_pose_m.onnx	156009479
+2026-04-14T13:46:17Z	OK	safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/yolo_nas_pose_l.onnx	217844305
+2026-04-14T13:47:06Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_pose_estimation/_hf_facebook_sapiens-pose-0.3b	4096
+2026-04-14T13:47:12Z	OK	safety-poketenashi	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx	134399116
+2026-04-14T13:47:16Z	OK	safety-poketenashi	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-poketenashi/rtmpose-s_coco-wholebody.pth	72010049
+2026-04-14T13:47:31Z	OK	safety-poketenashi	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-poketenashi/rtmw-l_256x192.zip	212739469
+2026-04-14T13:47:46Z	OK	safety-poketenashi	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-poketenashi/rtmw-l_384x288.zip	213433855
+2026-04-14T13:48:09Z	OK	safety-poketenashi	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-poketenashi/rtmw-l_cocktail14_384x288.pth	230299153
+2026-04-14T13:48:51Z	OK	[gated — one-time HF agree]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-poketenashi/_hf_facebook_sapiens-pose-0.6b-torchscript	4096
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_asformer_gtea_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_mstcn_gtea_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_c2f_tcn_gtea_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_diffact_gtea_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_diffact_gtea_split2.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_diffact_gtea_split3.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_diffact_gtea_split4.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_breakfast_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_breakfast_split2.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_breakfast_split3.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_breakfast_split4.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_egoprocel_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_epic_kitchens_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_gtea_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_gtea_split2.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_gtea_split3.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_fact_gtea_split4.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_ltcontext_breakfast_split1.pth	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_ltcontext_breakfast_split2.pth	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_ltcontext_breakfast_split3.pth	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_ltcontext_breakfast_split4.pth	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/safety-fall_classification/visualcore_ltcontext_gtea_split1.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/visualcore_yolov8l.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/visualcore_rf-detr-base.pth	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-zone_intrusion/dmsoms_rtdetr_r18vd.safetensors	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/dmsoms_yolov11n_face.pt	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/dmsoms_yolov11n_face.onnx	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/dmsoms_yolov11n_face_nms.onnx	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/dmsoms_yolov11n_face_fp16.onnx	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/dmsoms_yolov11n_face_gpu.onnx	0
+2026-04-14T13:48:51Z	RSYNC	[sibling-project symlink]	/home/ct-admin/Documents/Langgraph/TEST/ai/pretrained/access-face_recognition/dmsoms_RetinaFace-R50.pth	0
+# datasets bootstrap 2026-04-14T13:48:51Z filter=all dry=0
+2026-04-14T13:48:51Z	SKIP	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fire_detection/d_fire	4096
+2026-04-14T13:59:35Z	OK	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fire_detection/fasdd_cv	4096
+2026-04-14T13:59:36Z	FAIL	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fire_detection/zenodo_indoor_fire	0
+2026-04-14T13:59:36Z	FAIL	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fire_detection/roboflow_fire	4096
+2026-04-14T14:03:58Z	OK	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/helmet_detection/hardhat_vest_v3	4096
+2026-04-14T14:03:58Z	FAIL	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/helmet_detection/sfchd	0
+2026-04-14T14:17:08Z	OK	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/helmet_detection/sh17_ppe	4096
+2026-04-14T14:18:20Z	OK	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/helmet_detection/hard_hat_workers	4096
+2026-04-14T14:18:21Z	FAIL	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/helmet_detection/ppe_yolov8	4096
+2026-04-14T14:18:21Z	FAIL	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/helmet_detection/construction_safety	4096
+2026-04-14T14:18:22Z	FAIL	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/helmet_detection/roboflow_hardhat	4096
+2026-04-14T14:18:23Z	FAIL	ppe-shoes_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/shoes_detection/keremberke_ppe	4096
+2026-04-14T14:18:24Z	FAIL	ppe-shoes_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/shoes_detection/shoe_ppe	4096
+2026-04-14T14:26:30Z	OK	safety-fall_classification,safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fall_detection/coco_keypoints	4096
+2026-04-14T14:26:33Z	FAIL	safety-fall_classification,safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fall_detection/roboflow_fall	4096
+2026-04-14T14:26:46Z	OK	safety-fall_classification,safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fall_detection/cctv_fall	4096
+2026-04-14T14:26:47Z	FAIL	safety-fall_classification,safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fall_detection/ur_fall	0
+2026-04-14T14:26:47Z	FAIL	safety-phone_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/phone_detection/fpi_det	0
+2026-04-14T14:26:48Z	FAIL	safety-phone_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/phone_detection/phone_call_usage	4096
+2026-04-14T14:26:49Z	FAIL	access-zone_intrusion	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/_coco_val	4096
+2026-04-14T14:26:49Z	RSYNC	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/site_collected/fire_detection	0
+2026-04-14T14:26:49Z	RSYNC	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/site_collected/helmet_detection	0
+2026-04-14T14:26:49Z	RSYNC	ppe-shoes_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/site_collected/shoes_detection	0
+2026-04-14T14:26:49Z	RSYNC	safety-fall_classification,safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/site_collected/fall_detection	0
+2026-04-14T14:26:49Z	RSYNC	safety-phone_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/site_collected/phone_detection	0
+2026-04-14T14:26:49Z	RSYNC	_all	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/site_collected/test_video	0
+2026-04-14T14:26:49Z	RSYNC	_all	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/training_ready	0
+2026-04-14T14:26:49Z	RSYNC	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fire_detection/fire_cctv	0
+2026-04-14T14:26:49Z	RSYNC	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fire_detection/fire_smoke_datacluster	0
+2026-04-14T14:26:49Z	RSYNC	safety-fire_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fire_detection/industrial_hazards	0
+2026-04-14T14:26:49Z	RSYNC	safety-fall_classification,safety-fall_pose_estimation	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/fall_detection/fall_detection_imgs	0
+2026-04-14T14:26:49Z	RSYNC	ppe-helmet_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/helmet_detection/construction_safety	0
+2026-04-14T14:26:49Z	RSYNC	safety-phone_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/phone_detection/action_recognition	0
+2026-04-14T14:26:49Z	RSYNC	safety-phone_detection	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/raw/phone_detection/mobile_phone	0
+2026-04-14T14:26:49Z	RSYNC	_all	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/nitto_denko	0
+2026-04-14T14:26:49Z	RSYNC	_all	/home/ct-admin/Documents/Langgraph/TEST/ai/dataset_store/smart_parking	0
