@@ -1,0 +1,35 @@
+# Label Studio for annotation review
+# Usage:
+#   cd services/s18103_label_studio && docker compose up -d    # start
+#   curl http://localhost:18103/health                    # check
+#   docker compose down                                  # stop
+
+services:
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    restart: unless-stopped
+    ports:
+      - "18103:8080"
+    volumes:
+      # LS database + exports (named volume — Docker manages permissions)
+      - ls-data:/label-studio/data
+      # Read-only access to dataset images
+      - ../../dataset_store:/datasets:ro
+      # Test fixtures (read-only, for E2E tests)
+      - ../../tests/fixtures/data:/dataset_store/test_fixtures:ro
+    environment:
+      - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/datasets
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=false
+      - LABEL_STUDIO_LEGACY_API_TOKEN_AUTH_ENABLED=true
+      - LABEL_STUDIO_USERNAME=nthanhtrung198@gmail.com
+      - LABEL_STUDIO_PASSWORD=Trung123
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  ls-data:

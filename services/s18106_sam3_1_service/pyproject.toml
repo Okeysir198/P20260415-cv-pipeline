@@ -1,0 +1,41 @@
+[project]
+name = "sam3-1-service"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "torch>=2.10.0",
+    "torchvision>=0.22.0",
+    "sam3 @ git+https://github.com/facebookresearch/sam3.git",
+    "einops>=0.7.0",
+    "pycocotools>=2.0",
+    "huggingface-hub",
+    "Pillow>=10.0",
+    "numpy>=1.24",
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+    "matplotlib>=3.8",
+    "requests>=2.31",
+    "aiohttp>=3.9",
+    "av>=17.0.0",
+]
+
+[tool.setuptools.packages.find]
+exclude = ["demos*", "tests*", "configs*"]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "supervision>=0.25.0", "opencv-python-headless>=4.8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }

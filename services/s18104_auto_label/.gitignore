@@ -1,0 +1,14 @@
+# Test outputs (generated overlays, JSON responses, videos)
+tests/outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environment
+.venv/
+
+# pytest
+.pytest_cache/
+

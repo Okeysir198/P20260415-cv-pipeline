@@ -1,0 +1,28 @@
+# SAM3.1 Service Config
+server:
+  host: "0.0.0.0"
+  port: 18106
+  workers: 1
+
+model:
+  name: "facebook/sam3.1"
+  device: null              # null = auto-detect (cuda > mps > cpu)
+  dtype: bfloat16
+
+segmentation:
+  mask_threshold: 0.5
+  detection_threshold: 0.5
+  auto_mask_threshold: 0.35
+  auto_mask_nms_threshold: 0.5  # IoU threshold for NMS across prompts
+  auto_mask_max_area: 0.95      # discard masks covering more than this fraction of the image
+  max_hole_area: 100.0       # fill holes smaller than this (pixels)
+  max_sprinkle_area: 100.0   # remove disconnected blobs smaller than this (pixels)
+  auto_mask_prompts:
+    - "person. car. truck. dog. cat. bird."
+    - "chair. table. laptop. phone. bottle. cup."
+    - "tree. building. road. sky. door. window."
+    - "fire. smoke. helmet. shoe. bag. sign."
+
+sessions:
+  max_active: 10
+  ttl_seconds: 3600
