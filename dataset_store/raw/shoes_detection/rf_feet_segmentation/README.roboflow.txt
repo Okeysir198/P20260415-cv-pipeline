@@ -1,8 +1,8 @@
 
-Fall Detection - v1 raw-images
+Feet Segmentation - v5 more_office_data
 ==============================
 
-This dataset was exported via roboflow.com on April 7, 2023 at 10:44 AM GMT
+This dataset was exported via roboflow.com on November 12, 2024 at 11:49 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,12 +17,18 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 4497 images.
-Fallen-person are annotated in YOLOv8 format.
+The dataset includes 17888 images.
+Shoes are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
 * Auto-orientation of pixel data (with EXIF-orientation stripping)
+* Resize to 640x640 (Stretch)
 
-No image augmentation techniques were applied.
+The following augmentation was applied to create 3 versions of each source image:
+* Random shear of between -10° to +10° horizontally and -10° to +10° vertically
+* Random brigthness adjustment of between -15 and +15 percent
+* Random exposure adjustment of between -10 and +10 percent
+* Random Gaussian blur of between 0 and 2.5 pixels
+* Salt and pepper noise was applied to 0.1 percent of pixels
 
 

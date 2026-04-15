@@ -1,8 +1,8 @@
 
-Fall Detection - v1 raw-images
+INTRUSION - v2 2026-03-30 10:18am
 ==============================
 
-This dataset was exported via roboflow.com on April 7, 2023 at 10:44 AM GMT
+This dataset was exported via roboflow.com on April 7, 2026 at 3:35 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,11 +17,12 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 4497 images.
-Fallen-person are annotated in YOLOv8 format.
+The dataset includes 3141 images.
+HUMAN are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
 * Auto-orientation of pixel data (with EXIF-orientation stripping)
+* Resize to 640x640 (Stretch)
 
 No image augmentation techniques were applied.
 

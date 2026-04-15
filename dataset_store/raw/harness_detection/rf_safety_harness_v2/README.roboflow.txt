@@ -1,8 +1,8 @@
 
-Fall Detection - v1 raw-images
+Safety_harness_v2 - v1 Safety_harness_v2 Dataset
 ==============================
 
-This dataset was exported via roboflow.com on April 7, 2023 at 10:44 AM GMT
+This dataset was exported via roboflow.com on July 12, 2023 at 1:01 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,12 +17,14 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 4497 images.
-Fallen-person are annotated in YOLOv8 format.
+The dataset includes 1234 images.
+Safty-harness are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
 * Auto-orientation of pixel data (with EXIF-orientation stripping)
 
-No image augmentation techniques were applied.
+The following augmentation was applied to create 2 versions of each source image:
+* Random rotation of between -15 and +15 degrees
+* Random Gaussian blur of between 0 and 5 pixels
 
 

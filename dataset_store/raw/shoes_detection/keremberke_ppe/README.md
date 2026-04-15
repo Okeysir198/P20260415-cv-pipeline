@@ -8,7 +8,7 @@ tags:
 ---
 
 <div align="center">
-  <img width="640" alt="keremberke/protective-equipment-detection" src="https://huggingface.co/dataset_store/keremberke/protective-equipment-detection/resolve/main/thumbnail.jpg">
+  <img width="640" alt="keremberke/protective-equipment-detection" src="https://huggingface.co/datasets/keremberke/protective-equipment-detection/resolve/main/thumbnail.jpg">
 </div>
 
 ### Dataset Labels
@@ -27,7 +27,7 @@ tags:
 
 ### How to Use
 
-- Install [datasets](https://pypi.org/project/dataset_store/):
+- Install [datasets](https://pypi.org/project/datasets/):
 
 ```bash
 pip install datasets

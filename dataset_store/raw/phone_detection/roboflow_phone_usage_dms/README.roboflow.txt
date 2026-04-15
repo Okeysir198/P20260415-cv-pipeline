@@ -1,8 +1,8 @@
 
-Fall Detection - v1 raw-images
+Phone Usage Detection - v1 2025-04-12 5:21pm
 ==============================
 
-This dataset was exported via roboflow.com on April 7, 2023 at 10:44 AM GMT
+This dataset was exported via roboflow.com on April 15, 2026 at 8:19 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,11 +17,12 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 4497 images.
-Fallen-person are annotated in YOLOv8 format.
+The dataset includes 997 images.
+Phone are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
 * Auto-orientation of pixel data (with EXIF-orientation stripping)
+* Resize to 640x640 (Stretch)
 
 No image augmentation techniques were applied.
 

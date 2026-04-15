@@ -1,8 +1,8 @@
 
-Fall Detection - v1 raw-images
+fire-smoke-detection - v6 2023-08-18 7:40am
 ==============================
 
-This dataset was exported via roboflow.com on April 7, 2023 at 10:44 AM GMT
+This dataset was exported via roboflow.com on August 18, 2023 at 5:43 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,12 +17,18 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 4497 images.
-Fallen-person are annotated in YOLOv8 format.
+The dataset includes 3203 images.
+Fire-smoke-detection-boxes-to-segmentations are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
 * Auto-orientation of pixel data (with EXIF-orientation stripping)
+* Resize to 640x640 (Stretch)
 
-No image augmentation techniques were applied.
+The following augmentation was applied to create 2 versions of each source image:
+* 50% probability of horizontal flip
+* Salt and pepper noise was applied to 5 percent of pixels
+
+The following transformations were applied to the bounding boxes of each image:
+* Random rotation of between -15 and +15 degrees
 
 
