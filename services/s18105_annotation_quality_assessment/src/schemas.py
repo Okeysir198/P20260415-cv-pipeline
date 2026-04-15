@@ -58,8 +58,8 @@ class VerifyRequest(BaseModel):
     config: dict = Field(default_factory=dict)
     enable_vlm: bool = False
     vlm_trigger: Literal["all", "selective", "standalone"] = "selective"
-    class_rules: list[dict] = Field(..., description="Rules that derived the labels (direct/overlap/no_overlap)")
-    vlm_budget: dict = Field(..., description="VLM priority sampling budget: {sample_rate, max_samples, priority}")
+    class_rules: list[dict] = Field(default_factory=list, description="Rules that derived the labels (direct/overlap/no_overlap)")
+    vlm_budget: dict = Field(default_factory=dict, description="VLM priority sampling budget: {sample_rate, max_samples, priority}")
 
 
 class SAM3Verification(BaseModel):
@@ -122,8 +122,8 @@ class QAJobRequest(BaseModel):
     webhook_url: str | None = None
     enable_vlm: bool = False
     vlm_trigger: Literal["all", "selective", "standalone"] = "selective"
-    class_rules: list[dict] = Field(..., description="Rules that derived the labels")
-    vlm_budget: dict = Field(..., description="VLM priority sampling budget")
+    class_rules: list[dict] = Field(default_factory=list, description="Rules that derived the labels")
+    vlm_budget: dict = Field(default_factory=dict, description="VLM priority sampling budget")
 
 
 class JobState(BaseModel):
