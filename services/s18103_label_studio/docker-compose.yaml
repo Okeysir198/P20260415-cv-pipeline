@@ -1,8 +1,13 @@
 # Label Studio for annotation review
 # Usage:
-#   cd services/s18103_label_studio && docker compose up -d    # start
-#   curl http://localhost:18103/health                    # check
-#   docker compose down                                  # stop
+#   cd services/s18103_label_studio
+#   docker compose up -d                 # start
+#   ./bootstrap.sh                       # enable legacy tokens + print admin token (idempotent)
+#   curl http://localhost:18103/health   # check
+#   docker compose down                  # stop (keeps data)
+#   docker compose down -v               # stop + wipe DB (forces bootstrap re-run)
+#
+# See CLAUDE.md for login creds + LS 1.23+ gotchas.
 
 services:
   label-studio:
@@ -19,11 +24,11 @@ services:
       - ../../tests/fixtures/data:/dataset_store/test_fixtures:ro
     environment:
       - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
-      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/datasets
+      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/datasets/training_ready
       - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=false
       - LABEL_STUDIO_LEGACY_API_TOKEN_AUTH_ENABLED=true
-      - LABEL_STUDIO_USERNAME=nthanhtrung198@gmail.com
-      - LABEL_STUDIO_PASSWORD=Trung123
+      - LABEL_STUDIO_USERNAME=admin@admin.com
+      - LABEL_STUDIO_PASSWORD=admin123
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

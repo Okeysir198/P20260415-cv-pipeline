@@ -1,0 +1,6 @@
+{
+  "name": "cv-data-prep",
+  "version": "0.1.0",
+  "description": "CV training-data preparation workflow wrapping core/p00/p01/p02 for the cv-pipeline repo.",
+  "author": "cv-pipeline team"
+}

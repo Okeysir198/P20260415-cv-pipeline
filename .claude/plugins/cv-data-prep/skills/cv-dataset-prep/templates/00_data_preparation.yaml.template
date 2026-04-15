@@ -1,0 +1,51 @@
+# {{FEATURE_NAME}} — Data Preparation Config ({{VERSION}}, {{DATE}})
+#
+# Quality-first selection: {{N_SOURCES}} sources.
+# Dropped (v2 candidates): {{DROPPED_SOURCES}}
+
+task: detection
+dataset_name: "{{DATASET_NAME}}"
+output_dir: "../../../dataset_store/training_ready/{{DATASET_NAME}}"
+output_format: "yolo"
+
+# Canonical target classes — keep order stable (becomes YOLO class id)
+classes:
+{{CANONICAL_CLASSES_YAML_LIST}}
+
+sources:
+  # Repeat one block per picked source.
+  - name: "{{SOURCE_NAME}}"
+    path: "../../../dataset_store/raw/{{CATEGORY}}/{{SOURCE_FOLDER}}"
+    format: "yolo"           # one of: yolo | coco | voc
+    has_splits: true         # true if dataset has train/valid/test subdirs
+    splits_to_use: ["train", "valid", "test"]
+    # For VOC only:
+    # voc_annotations_dir: "voc_labels"
+    # voc_images_dir: "images"
+    # For COCO only:
+    # annotations_file: "_annotations.coco.json"
+    # For YOLO with non-standard class names (e.g. numeric), set:
+    # source_classes: ["safety_shoes"]
+    class_map:
+      "{{SOURCE_CLASS_NAME}}": "{{CANONICAL_CLASS}}"
+      # add one line per source class you want to keep;
+      # classes not listed here are silently dropped.
+
+  # Site-collected overlay — optional, ignore if folder is empty
+  # - name: "site_collected"
+  #   path: "../../../dataset_store/site_collected/{{CATEGORY}}"
+  #   format: "yolo"
+  #   has_splits: false
+  #   class_map:
+  #     "{{CANONICAL_CLASS}}": "{{CANONICAL_CLASS}}"
+
+splits:
+  train: 0.8
+  val: 0.1
+  test: 0.1
+  seed: 42
+
+options:
+  copy_images: true
+  handle_duplicates: "rename"
+  validate_labels: true

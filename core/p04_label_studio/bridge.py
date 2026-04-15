@@ -576,12 +576,21 @@ def generate_label_config(class_names: Dict[int, str]) -> str:
         label_lines.append(f'    <Label value="{name}" background="{color}"/>')
 
     labels_block = "\n".join(label_lines)
+    # <Choices> lets the reviewer reassign the sample's split (train/val/test/drop).
+    # The selected value is read back during export and drives the physical move.
     return (
         "<View>\n"
         '  <Image name="image" value="$image"/>\n'
         '  <RectangleLabels name="label" toName="image">\n'
         f"{labels_block}\n"
         "  </RectangleLabels>\n"
+        '  <Header value="Split assignment"/>\n'
+        '  <Choices name="split" toName="image" choice="single" showInLine="true">\n'
+        '    <Choice value="train"/>\n'
+        '    <Choice value="val"/>\n'
+        '    <Choice value="test"/>\n'
+        '    <Choice value="drop"/>\n'
+        "  </Choices>\n"
         "</View>"
     )
 
@@ -676,8 +685,11 @@ def gather_dataset_pairs(
     data_config: Dict[str, Any],
     splits: List[str],
     config_dir: Optional[Path] = None,
-) -> List[Tuple[Path, Path]]:
-    """Gather (image_path, label_path) pairs from dataset splits.
+) -> List[Tuple[Path, Path, str]]:
+    """Gather (image_path, label_path, split_name) triples from dataset splits.
+
+    The split tag is preserved so we can stamp each LS task with its current
+    split and track moves during export.
 
     Args:
         data_config: Loaded data config dict.
@@ -685,11 +697,11 @@ def gather_dataset_pairs(
         config_dir: Directory of the data config file (for resolving relative paths).
 
     Returns:
-        List of (image_path, label_path) tuples.
+        List of (image_path, label_path, split_name) triples.
     """
     base = config_dir if config_dir else _PROJECT_ROOT
     dataset_path = resolve_path(data_config["path"], base)
-    pairs: List[Tuple[Path, Path]] = []
+    triples: List[Tuple[Path, Path, str]] = []
 
     for split in splits:
         split_key = split.strip()
@@ -706,9 +718,9 @@ def gather_dataset_pairs(
         for img_file in sorted(images_dir.iterdir()):
             if img_file.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp"):
                 label_file = _label_path_for_image(img_file)
-                pairs.append((img_file, label_file))
+                triples.append((img_file, label_file, split_key))
 
-    return pairs
+    return triples
 
 
 def gather_auto_annotate_pairs(
@@ -801,6 +813,7 @@ def build_task(
     local_files_root: str,
     dataset_base: Path,
     model_version: str = "auto_annotate_v1",
+    split: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build a Label Studio task dict with pre-annotations from a YOLO label.
 
@@ -835,6 +848,15 @@ def build_task(
     task: Dict[str, Any] = {
         "data": {"image": ls_url},
     }
+    if split:
+        task["data"]["split"] = split
+        # Pre-select the current split in the LS Choices field.
+        results.append({
+            "from_name": "split",
+            "to_name": "image",
+            "type": "choices",
+            "value": {"choices": [split]},
+        })
 
     if results:
         task["predictions"] = [
@@ -886,9 +908,10 @@ def cmd_import(args: argparse.Namespace) -> None:
         logger.info("Gathered %d pairs from QA fixes: %s", len(pairs), fixes_path)
     else:
         splits = args.splits.split()
-        pairs = gather_dataset_pairs(data_config, splits, config_dir)
+        triples = gather_dataset_pairs(data_config, splits, config_dir)
         model_version = "dataset_v1"
-        logger.info("Gathered %d pairs from splits: %s", len(pairs), splits)
+        logger.info("Gathered %d pairs from splits: %s", len(triples), splits)
+        pairs = triples  # list of (img, lbl, split)
 
     if not pairs:
         logger.warning("No image-label pairs found. Nothing to import.")
@@ -896,7 +919,12 @@ def cmd_import(args: argparse.Namespace) -> None:
 
     # Build tasks
     tasks: List[Dict[str, Any]] = []
-    for img_path, lbl_path in tqdm(pairs, total=len(pairs), desc="Building tasks"):
+    for item in tqdm(pairs, total=len(pairs), desc="Building tasks"):
+        if len(item) == 3:
+            img_path, lbl_path, split_name = item
+        else:
+            img_path, lbl_path = item
+            split_name = None
         task = build_task(
             image_path=img_path,
             label_path=lbl_path,
@@ -904,6 +932,7 @@ def cmd_import(args: argparse.Namespace) -> None:
             local_files_root=local_files_root,
             dataset_base=dataset_base,
             model_version=model_version,
+            split=split_name,
         )
         tasks.append(task)
 
@@ -988,15 +1017,18 @@ def cmd_export(args: argparse.Namespace) -> None:
         password=getattr(args, "password", "") or "",
     )
 
-    # Resolve output directory: explicit flag > derived from data config > error
-    if args.output_dir is not None:
-        output_dir = Path(args.output_dir).resolve()
-    elif args.data_config is not None:
+    # Resolve dataset root (for split-subdir routing) + legacy output_dir.
+    dataset_root: Optional[Path] = None
+    if args.data_config is not None:
         config_dir = Path(args.data_config).resolve().parent
         data_config_for_path = load_config(args.data_config)
-        output_dir = resolve_path(data_config_for_path["path"], config_dir) / "train" / "labels"
-        logger.info("No --output-dir specified; defaulting to %s", output_dir)
-        # Auto-enable backup when writing to the training dataset
+        dataset_root = resolve_path(data_config_for_path["path"], config_dir)
+
+    if args.output_dir is not None:
+        output_dir = Path(args.output_dir).resolve()
+        logger.info("Legacy mode: writing all labels to %s (no split-aware routing).", output_dir)
+    elif dataset_root is not None:
+        output_dir = dataset_root  # split-aware routing will derive per-split paths
         args.backup = True
     else:
         logger.error("Either --output-dir or --data-config must be provided.")
@@ -1045,46 +1077,105 @@ def cmd_export(args: argparse.Namespace) -> None:
         class_name_to_id = {name: idx for idx, name in enumerate(sorted(all_labels))}
         logger.info("Inferred class mapping: %s", class_name_to_id)
 
-    # Backup existing labels
-    if args.backup and output_dir.exists():
+    # Backup existing labels across all split subdirs when in split-aware mode.
+    split_aware = dataset_root is not None and args.output_dir is None
+    if args.backup:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        backup_dir = output_dir / f".backup_{timestamp}"
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        backed_up = 0
-        for txt_file in output_dir.glob("*.txt"):
-            shutil.copy2(txt_file, backup_dir / txt_file.name)
-            backed_up += 1
-        logger.info("Backed up %d label files to %s", backed_up, backup_dir)
+        if split_aware:
+            for split in ("train", "val", "test"):
+                src = dataset_root / split / "labels"
+                if not src.is_dir():
+                    continue
+                backup_dir = dataset_root / split / f".backup_{timestamp}"
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                for txt_file in src.glob("*.txt"):
+                    shutil.copy2(txt_file, backup_dir / txt_file.name)
+        elif output_dir.exists():
+            backup_dir = output_dir / f".backup_{timestamp}"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            for txt_file in output_dir.glob("*.txt"):
+                shutil.copy2(txt_file, backup_dir / txt_file.name)
+        logger.info("Label backup done.")
 
-    # Convert and write
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Lazy import so legacy (non-split-aware) export path still works.
+    if split_aware:
+        from core.p00_data_prep.core.splitter import (
+            SPLIT_NAMES,
+            ensure_split_dirs,
+            move_sample,
+            refresh_audit_snapshot,
+        )
+        ensure_split_dirs(dataset_root, include_dropped=True)
+
     written = 0
     skipped = 0
+    split_moves: Dict[str, int] = {"train": 0, "val": 0, "test": 0, "drop": 0}
 
     for task in tqdm(tasks, total=len(tasks), desc="Exporting"):
-        # Use the latest annotation (last in list)
         annotations_list = task.get("annotations", [])
         if not annotations_list:
             skipped += 1
             continue
 
-        annotation = annotations_list[-1]  # latest annotation
+        annotation = annotations_list[-1]  # latest
         results = annotation.get("result", [])
 
+        # Extract split choice (if any) + bbox results separately.
+        new_split: Optional[str] = None
         yolo_annotations: List[Tuple[int, float, float, float, float]] = []
         for result in results:
+            if result.get("type") == "choices" and result.get("from_name") == "split":
+                choices = result.get("value", {}).get("choices") or []
+                if choices:
+                    new_split = choices[0]
+                continue
             converted = ls_to_yolo(result, class_name_to_id)
             if converted is not None:
                 yolo_annotations.append(converted)
 
-        # Determine output path
         image_url = task.get("data", {}).get("image", "")
-        label_path = _ls_url_to_label_path(image_url, output_dir)
+        current_split = task.get("data", {}).get("split")
+        stem = Path(image_url.split("?d=", 1)[-1] if "?d=" in image_url else image_url).stem
 
-        write_yolo_labels(label_path, yolo_annotations)
+        if split_aware and current_split:
+            target_split = new_split or current_split
+            # Write corrected labels to the CURRENT split first, then move if needed.
+            cur_label_dir = dataset_root / current_split / "labels"
+            cur_label_dir.mkdir(parents=True, exist_ok=True)
+            cur_label_path = cur_label_dir / f"{stem}.txt"
+            write_yolo_labels(cur_label_path, yolo_annotations)
+
+            if target_split != current_split:
+                move_sample(
+                    dataset_root,
+                    stem,
+                    from_split=current_split,
+                    to_split=target_split,
+                )
+                split_moves[target_split] = split_moves.get(target_split, 0) + 1
+        else:
+            # Legacy mode: write everything to the single output_dir.
+            output_dir.mkdir(parents=True, exist_ok=True)
+            label_path = _ls_url_to_label_path(image_url, output_dir)
+            write_yolo_labels(label_path, yolo_annotations)
+
         written += 1
 
-    print(f"\nExported {written} label files to {output_dir}")
+    if split_aware:
+        counts = refresh_audit_snapshot(
+            dataset_root,
+            seed=data_config_for_path.get("splits", {}).get("seed", 42),
+            ratios=(0.8, 0.1, 0.1),
+        )
+        print(f"\nExported {written} tasks (split-aware).")
+        for split, n in counts.items():
+            print(f"  {split}: {n} imgs")
+        total_moved = sum(split_moves.values())
+        if total_moved:
+            print(f"  Split moves applied: {split_moves}")
+    else:
+        print(f"\nExported {written} label files to {output_dir}")
+
     if skipped:
         print(f"  Skipped {skipped} tasks (no annotations).")
 

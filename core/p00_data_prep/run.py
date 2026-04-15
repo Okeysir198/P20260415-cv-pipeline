@@ -11,6 +11,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Dict
 
 from tqdm import tqdm
 
@@ -144,86 +145,144 @@ def run_data_prep(config: dict, args) -> None:
         print(f"\n🔍 Dry run mode - {len(samples)} samples would be processed")
         return
 
-    images_dir = output_dir / "images"
-    labels_dir = output_dir / "labels"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
+    # Assign splits BEFORE copying so we can write each sample directly into its
+    # split subdir. No flat images/ or labels/ dir, no symlinks.
+    from core.p00_data_prep.core.splitter import (
+        ensure_split_dirs,
+        write_audit_snapshot,
+    )
+
+    print(f"\n✂️  Assigning splits ({ratios[0]:.0%}/{ratios[1]:.0%}/{ratios[2]:.0%})...")
+    splitter = SplitGenerator(ratios=ratios, seed=seed, stratified=True)
+    split_input = [
+        {"_idx": i, "filename": Path(s["image_path"]).name, "labels": s.get("labels", [])}
+        for i, s in enumerate(samples)
+    ]
+    assignment = splitter.assign_splits(split_input)  # {split: [dict, ...]}
+    idx_to_split = {item["_idx"]: split for split, items in assignment.items() for item in items}
+
+    ensure_split_dirs(output_dir)
+    split_dirs = {
+        split: {"images": output_dir / split / "images", "labels": output_dir / split / "labels"}
+        for split in ("train", "val", "test")
+    }
 
     print("\n📝 Processing samples...")
     file_ops = FileOps(handle_duplicates="rename")
 
-    for sample in tqdm(samples, desc="Processing"):
-        output_path = file_ops.copy_file(sample["image_path"], images_dir, source_name=sample["source"])
-
+    for i, sample in enumerate(tqdm(samples, desc="Processing")):
+        split = idx_to_split.get(i, "train")
+        output_path = file_ops.copy_file(
+            sample["image_path"], split_dirs[split]["images"], source_name=sample["source"]
+        )
         if output_path is None:
             continue
 
         stem = output_path.stem  # Use actual output filename (may be renamed)
-        label_path = labels_dir / f"{stem}.txt"
+        label_path = split_dirs[split]["labels"] / f"{stem}.txt"
         with open(label_path, "w") as f:
             for obj in sample.get("objects", []):
                 f.write(f"{obj['class_id']} {obj['cx']:.6f} {obj['cy']:.6f} {obj['w']:.6f} {obj['h']:.6f}\n")
 
-        # Update filename in sample for splits.json
         sample["filename"] = output_path.name
+        sample["_split"] = split
 
-    print(f"\n✂️  Generating splits ({ratios[0]:.0%}/{ratios[1]:.0%}/{ratios[2]:.0%})...")
-    splitter = SplitGenerator(ratios=ratios, seed=seed, stratified=True)
+    # Audit snapshot (counts + ratios + seed), not a filename list.
+    counts = {split: sum(1 for s in samples if s.get("_split") == split) for split in ("train", "val", "test")}
     splits_file = output_dir / "splits.json"
-    split_samples = [{"filename": s["filename"], "labels": s.get("labels", [])} for s in samples]
-    splitter.generate_splits(split_samples, splits_file, task_type=task_type)
+    write_audit_snapshot(
+        splits_file,
+        counts=counts,
+        ratios=ratios,
+        seed=seed,
+        task_type=task_type,
+        total=sum(counts.values()),
+    )
 
     # Generate dataset report
     report_path = output_dir / "DATASET_REPORT.md"
     _write_dataset_report(report_path, config, stats, splits_file, ratios)
 
     print(f"\n✅ Done! Dataset created at: {output_dir}")
-    print(f"   Images: {images_dir}")
-    print(f"   Labels: {labels_dir}")
-    print(f"   Splits: {splits_file}")
+    for split, d in split_dirs.items():
+        print(f"   {split}/: {counts[split]} imgs ({d['images']})")
+    print(f"   Snapshot: {splits_file}")
     print(f"   Report: {report_path}")
 
 
 def resplit_only(output_dir: Path, ratios: tuple, seed: int, task_type: str) -> None:
-    """Regenerate splits.json for an existing dataset without re-copying files."""
+    """Rescan existing split subdirs, reassign samples, physically move files."""
+    from core.p00_data_prep.core.splitter import (
+        IMAGE_EXTS,
+        SPLIT_NAMES,
+        ensure_split_dirs,
+        move_sample,
+        rescan_splits,
+        write_audit_snapshot,
+    )
+
     output_dir = Path(output_dir)
-    splits_file = output_dir / "splits.json"
-    labels_dir = output_dir / "labels"
+    ensure_split_dirs(output_dir)
 
-    if not labels_dir.exists():
-        print(f"❌ Labels directory not found: {labels_dir}")
-        return
-
+    # Collect every existing sample from all split subdirs.
     samples = []
-    for label_file in labels_dir.glob("*.txt"):
-        labels = []
-        try:
-            with open(label_file) as f:
-                for line in f:
-                    parts = line.strip().split()
-                    if parts:
-                        labels.append(parts[0])
-        except (OSError, IOError):
-            pass
-
-        # Find the corresponding image filename with extension
-        found_name = label_file.stem  # fallback: stem only if no image found
-        for ext in [".jpg", ".jpeg", ".png", ".bmp"]:
-            test_path = output_dir / "images" / f"{label_file.stem}{ext}"
-            if test_path.exists():
-                found_name = test_path.name
-                break
-
-        samples.append({"filename": found_name, "labels": labels})
+    for split in SPLIT_NAMES:
+        img_dir = output_dir / split / "images"
+        lbl_dir = output_dir / split / "labels"
+        if not img_dir.is_dir():
+            continue
+        for ext in IMAGE_EXTS:
+            for img_path in img_dir.glob(f"*{ext}"):
+                stem = img_path.stem
+                label_path = lbl_dir / f"{stem}.txt"
+                labels = []
+                if label_path.exists():
+                    try:
+                        for line in label_path.read_text().splitlines():
+                            parts = line.strip().split()
+                            if parts:
+                                labels.append(parts[0])
+                    except (OSError, IOError):
+                        pass
+                samples.append({
+                    "stem": stem,
+                    "filename": img_path.name,
+                    "current_split": split,
+                    "labels": labels,
+                })
 
     if not samples:
-        print(f"❌ No samples found in {output_dir}")
+        print(f"❌ No samples found under {output_dir}/{{train,val,test}}/images")
         return
 
-    print(f"   Found {len(samples)} samples")
+    print(f"   Found {len(samples)} samples across existing splits")
+
+    # Reassign.
     splitter = SplitGenerator(ratios=ratios, seed=seed, stratified=True)
-    splitter.generate_splits(samples, splits_file, task_type=task_type)
-    print(f"✅ Splits regenerated: {splits_file}")
+    assignment = splitter.assign_splits(samples)
+    new_split_of: Dict[str, str] = {}
+    for split, items in assignment.items():
+        for item in items:
+            new_split_of[item["stem"]] = split
+
+    # Physically move samples whose split changed.
+    n_moved = 0
+    for s in samples:
+        new_split = new_split_of[s["stem"]]
+        if new_split != s["current_split"]:
+            move_sample(output_dir, s["stem"], s["current_split"], new_split)
+            n_moved += 1
+
+    counts = rescan_splits(output_dir)
+    write_audit_snapshot(
+        output_dir / "splits.json",
+        counts={k: len(v) for k, v in counts.items()},
+        ratios=ratios,
+        seed=seed,
+        task_type=task_type,
+        total=sum(len(v) for v in counts.values()),
+    )
+    print(f"✅ Resplit done: {n_moved} samples moved. Snapshot: {output_dir / 'splits.json'}")
 
 
 def _write_dataset_report(
