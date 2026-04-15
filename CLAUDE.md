@@ -8,6 +8,10 @@ uv sync --extra train          # Training + evaluation
 uv sync --extra all            # Everything except export (dep conflict)
 uv sync --extra export         # ONNX export (install separately)
 
+# Prepare training-ready dataset (merge multi-source raw data, class-remap, stratified split)
+uv run python core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml
+uv run python core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml --dry-run
+
 # Train
 uv run python core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml
 uv run python core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml \
@@ -59,16 +63,21 @@ core/
 features/              Self-contained per-use-case folders (see features/README.md)
   <category-name>/     Names follow a `<category>-<name>` convention matching
                        docs/03_platform/: access-, ppe-, safety-, traffic-
-                       (e.g. safety-fire_detection, ppe-helmet_detection,
-                       access-face_recognition). Uniform layout: configs/,
-                       code/, samples/, notebooks/, tests/, runs/, eval/,
-                       export/, predict/, release/
+                       (e.g. safety-fire_detection, safety-fall-detection,
+                       ppe-helmet_detection, ppe-shoes_detection,
+                       safety-poketenashi-phone-usage, access-face_recognition,
+                       access-zone_intrusion, detect_vehicle). Uniform layout:
+                       configs/, code/, samples/, notebooks/, tests/, runs/,
+                       eval/, export/, predict/, release/
   _TEMPLATE/           Copy via scripts/new_feature.sh to scaffold new features
 configs/_shared/       Shared pipeline templates (non-authoritative)
 configs/_test/         CI test fixtures
 services/              Microservices: SAM3, Flux, auto-label, QA (see services/CLAUDE.md)
 tests/                 Integration tests with real data (see below)
 app_demo/              Gradio demo UI (see app_demo/CLAUDE.md)
+dataset_store/         raw/ + site_collected/ + training_ready/ — all datasets.
+                       Downloads via MCP (Roboflow/Kaggle/HF), not bootstrap scripts.
+                       See dataset_store/CLAUDE.md for per-source registry + v1 plan.
 ../smart_parking/      Sibling repo (split from this tree)
 ```
 

@@ -249,6 +249,46 @@ Canonical class `head_with_nitto_hat` — now has 926 instances from bump-cap da
 - **Phone-usage `person` 9%**: `phone_usage` is the alert class; tracking person is done separately. If needed, add a dedicated person-rich source (COCO val, roboflow_hardhat).
 - **Shoes 2.7K**: smaller than other models; `rf_feet_segmentation` (17K) held back for two-stage pipeline in v2.
 
+### V1 source URLs (click to inspect label quality manually)
+
+All links open the source page — browse images, preview labels, check for noise before accepting into training.
+
+#### Fire (Model A)
+- [`d_fire`](https://www.kaggle.com/datasets/sayedgamal99/smoke-fire-detection-yolo) — Kaggle, sayedgamal99/smoke-fire-detection-yolo
+- [`zenodo_indoor_fire`](https://zenodo.org/records/15826133) — Zenodo record 15826133
+- [`industrial_hazards`](https://www.kaggle.com/datasets/vigneshnachu/industrial-hazards-detection) — Kaggle, vigneshnachu/industrial-hazards-detection
+
+#### Fall (Model G)
+- [`roboflow_person_fall_8k`](https://universe.roboflow.com/xzjs/person-fall-ewpyk) — Roboflow Universe, xzjs/person-fall-ewpyk
+- [`roboflow_fall`](https://universe.roboflow.com/roboflow-universe-projects/fall-detection-ca3o8) — Roboflow Universe, roboflow-universe-projects/fall-detection-ca3o8 v1
+- [`cctv_fall`](https://www.kaggle.com/datasets/simuletic/cctv-incident-dataset-fall-and-lying-down-detection) — Kaggle, simuletic/cctv-incident-dataset-fall-and-lying-down-detection
+
+#### Helmet (Model B)
+- [`sh17_ppe`](https://www.kaggle.com/datasets/mugheesahmad/sh17-dataset-for-ppe-detection) — Kaggle, mugheesahmad/sh17-dataset-for-ppe-detection (17-class, Pexels-sourced, arXiv paper [2407.04590](https://arxiv.org/abs/2407.04590))
+- [`shlokraval_ppe_yolov8`](https://www.kaggle.com/datasets/shlokraval/ppe-dataset-yolov8) — Kaggle, shlokraval/ppe-dataset-yolov8 (14-class incl. NO-* negatives; mirror of [Roboflow PPE combined v4](https://universe.roboflow.com/roboflow-universe-projects/personal-protective-equipment-combined-model))
+- [`roboflow_ppe_6class`](https://universe.roboflow.com/dataset-ppe/ppe-vest-helmet) — Roboflow Universe, dataset-ppe/ppe-vest-helmet v1
+- [`rf_bump_cap`](https://universe.roboflow.com/n-wto9b/bump-cap) — Roboflow Universe, n-wto9b/bump-cap v4 (**Nitto soft hat source**)
+
+#### Shoes (Model F)
+- [`rf_safety_shoes_11k`](https://universe.roboflow.com/bns218/safety-shoes-yawyh) — Roboflow Universe, bns218/safety-shoes-yawyh v1 (biggest safety-shoes set)
+- [`rf_footwear_3class_mohamed`](https://universe.roboflow.com/mohamed-nihal/footwear-hh4hz) — Roboflow Universe, mohamed-nihal/footwear-hh4hz v1 (shoes/no_shoes/slippers)
+- [`rf_footwear_9class`](https://universe.roboflow.com/workspace4-hdyta/footwear-p5juo) — Roboflow Universe, workspace4-hdyta/footwear-p5juo v7 (Boots/Sneakers/Sandals/etc.)
+- [`rf_safety_shoes_flipflop`](https://universe.roboflow.com/bagas-nfbz0/safety-shoes-adtln) — Roboflow Universe, bagas-nfbz0/safety-shoes-adtln v1
+- [`rf_sneakers`](https://universe.roboflow.com/ds06/sneakers-k7svc) — Roboflow Universe, ds06/sneakers-k7svc v5
+- [`rf_barefoot`](https://universe.roboflow.com/mohamed-nihal/barefoot) — Roboflow Universe, mohamed-nihal/barefoot v1
+- [`rf_footwear_sandal_shoe`](https://universe.roboflow.com/ariel-hzk0a/footwear-2ws0y) — Roboflow Universe, ariel-hzk0a/footwear-2ws0y v1
+- [`keremberke_ppe`](https://huggingface.co/datasets/keremberke/protective-equipment-detection) — HF, keremberke/protective-equipment-detection
+- cross-use from helmet: [`roboflow_ppe_6class`](https://universe.roboflow.com/dataset-ppe/ppe-vest-helmet) · [`rf_chemical_ppe_11class`](https://universe.roboflow.com/data2-4uqki/chemical-8oaqi)
+
+#### Phone-usage (Model H)
+- [`fpi_det`](https://github.com/KvCgRv/FPI-Det) — GitHub, KvCgRv/FPI-Det (**manually fetched via Baidu Netdisk, code `Mofo`**) — [arXiv paper 2509.09111](https://arxiv.org/abs/2509.09111). License: AGPL-3.0.
+- [`rf_using_phone_unimonitor`](https://universe.roboflow.com/unimonitor-03qbp/using-phone-pqaut) — Roboflow Universe, unimonitor-03qbp/using-phone-pqaut v1
+- [`rf_phone_using_fyp`](https://universe.roboflow.com/fyp-odgmu/phone-using-dhjqe) — Roboflow Universe, fyp-odgmu/phone-using-dhjqe v3
+- [`rf_phone_texting_4class`](https://universe.roboflow.com/cv2-kyb30/mobile-phone-texting) — Roboflow Universe, cv2-kyb30/mobile-phone-texting v4
+- [`rf_texting_calling_drinking`](https://universe.roboflow.com/hand-rules/texting-calling-drinking) — Roboflow Universe, hand-rules/texting-calling-drinking v1
+- [`roboflow_phone_usage_dms`](https://universe.roboflow.com/dms-ejczp/phone-usage-detection-a6oou) — Roboflow Universe, dms-ejczp/phone-usage-detection-a6oou v1
+- cross-use from helmet: [`shlokraval_ppe_yolov8`](https://www.kaggle.com/datasets/shlokraval/ppe-dataset-yolov8) (Person class only)
+
 ### v2 candidates (held back from v1)
 
 | Category | Dataset held | Reason held | When to add |
