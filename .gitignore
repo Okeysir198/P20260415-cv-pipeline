@@ -44,6 +44,7 @@ htmlcov/
 dist/
 build/
 
-# Third-party MCP servers (cloned, not vendored)
-roboflow-mcp/
+# Third-party MCP servers under .claude/ — track source, ignore venv/cache
+.claude/roboflow-mcp/venv/
+.claude/roboflow-mcp/__pycache__/
 

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "roboflow": {
+      "command": "./.claude/roboflow-mcp/venv/bin/python",
+      "args": ["./.claude/roboflow-mcp/server.py"]
+    },
+    "kaggle": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://www.kaggle.com/mcp"]
+    },
+    "huggingface": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://huggingface.co/mcp"]
+    }
+  }
+}
