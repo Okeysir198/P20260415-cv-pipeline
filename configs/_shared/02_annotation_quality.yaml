@@ -1,0 +1,61 @@
+# Annotation QA config
+qa:
+  splits: ["train", "val"]
+
+sampling:
+  strategy: "stratified"       # "stratified" | "random" | "all"
+  sample_size: 2000            # Per split
+  min_per_class: 100
+  seed: 42
+
+processing:
+  batch_size: 32
+  num_workers: 4
+
+sam3:
+  service_url: "http://localhost:18100"
+  timeout: 120
+  box_prompt_threshold: 0.5
+  text_verify_threshold: 0.6
+  auto_mask_sample_rate: 0.1
+  auto_mask_min_area: 0.001
+  auto_mask_max_area: 0.8
+
+qa_service:
+  url: "http://localhost:18105"
+  timeout: 120
+
+scoring:
+  weights:
+    structural: 0.3
+    bbox_quality: 0.4
+    classification: 0.2
+    coverage: 0.1
+  thresholds:
+    good: 0.8
+    review: 0.5
+
+validation:
+  max_coord_value: 1.0
+  min_box_size: 0.005
+  max_box_size: 0.95
+  duplicate_iou_threshold: 0.95
+  max_aspect_ratio: 20.0
+
+reporting:
+  worst_images_count: 50
+  visualize_count: 20
+  save_fixes: true
+
+# SAM3-friendly text prompts for each class name
+text_prompts:
+  fire: "fire"
+  smoke: "smoke"
+  person: "person"
+  head_with_helmet: "helmet on head"
+  head_without_helmet: "person head without helmet"
+  head_with_nitto_hat: "nitto soft hat on head"
+  foot_with_safety_shoes: "safety shoes on feet"
+  foot_without_safety_shoes: "feet without safety shoes"
+  phone: "mobile phone"
+  fallen_person: "person lying on the ground"

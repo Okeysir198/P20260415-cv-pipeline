@@ -1,0 +1,206 @@
+source_type	url_or_id	dest_relpath	sha256	license	feature	notes
+# ============================================================================
+# Shared / root-level public backbones (ai/pretrained/*.pt|pth|onnx)
+# ============================================================================
+github	https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth	yolox_nano.pth		Apache-2.0	_shared
+github	https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.pth	yolox_tiny.pth		Apache-2.0	_shared
+github	https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.pth	yolox_s.pth		Apache-2.0	_shared
+github	https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_m.pth	yolox_m.pth		Apache-2.0	_shared
+github	https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_l.pth	yolox_l.pth		Apache-2.0	_shared
+github	https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx	scrfd_500m.onnx		Apache-2.0	_shared	[legacy file; YuNet-as-SCRFD]
+# ============================================================================
+# access-face_recognition
+# ============================================================================
+github	https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx	access-face_recognition/yunet_2023mar.onnx	8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4	Apache-2.0	access-face_recognition
+github	https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar_int8.onnx	access-face_recognition/yunet_2023mar_int8.onnx	321aa5a6afabf7ecc46a3d06bfab2b579dc96eb5c3be7edd365fa04502ad9294	Apache-2.0	access-face_recognition
+github	https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx	access-face_recognition/sface_2021dec.onnx	0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79	Apache-2.0	access-face_recognition
+github	https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec_int8.onnx	access-face_recognition/sface_2021dec_int8.onnx	2b0e941e6f16cc048c20aee0c8e31f569118f65d702914540f7bfdc14048d78a	Apache-2.0	access-face_recognition
+github	https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_sc.zip	access-face_recognition/buffalo_sc.zip	57d31b56b6ffa911c8a73cfc1707c73cab76efe7f13b675a05223bf42de47c72	InsightFace-NC	access-face_recognition	[non-commercial]
+github	https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip	access-face_recognition/buffalo_s.zip	d85a87f503f691807cd8bb97128bdf7a0660326cd9cd02657127fa978bab8b5e	InsightFace-NC	access-face_recognition	[non-commercial]
+github	https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_m.zip	access-face_recognition/buffalo_m.zip	d98264bd8f2dc75cbc2ddce2a14e636e02bb857b3051c234b737bf3b614edca9	InsightFace-NC	access-face_recognition	[non-commercial]
+github	https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip	access-face_recognition/buffalo_l.zip	80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f	InsightFace-NC	access-face_recognition	[non-commercial; contains w600k_r50]
+github	https://github.com/deepinsight/insightface/releases/download/v0.7/antelopev2.zip	access-face_recognition/antelopev2.zip	8e182f14fc6e80b3bfa375b33eb6cff7ee05d8ef7633e738d1c89021dcf0c5c5	InsightFace-NC	access-face_recognition	[non-commercial; glintr100]
+hf	idiap/EdgeFace	access-face_recognition/_hf_idiap_EdgeFace		Idiap-research	access-face_recognition	[gated — one-time HF agree]
+hf_file	arnabdhar/YOLOv8-Face-Detection:model.pt	access-face_recognition/yolov8n-face.pt	37396ac6a9601ab9f5177e4231b09d81cf6f65a7f22db99ec3b36ab63f674e71	AGPL-3.0	access-face_recognition
+github	https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/2.7_80x80_MiniFASNetV2.pth	access-face_recognition/anti_spoof_2_7_80x80_MiniFASNetV2.pth	a5eb02e1843f19b5386b953cc4c9f011c3f985d0ee2bb9819eea9a142099bec0	Apache-2.0	access-face_recognition
+hf	facebook/dinov3-vits16-pretrain-lvd1689m	access-face_recognition/_hf_facebook_dinov3-vits16		DINOv3-NC	access-face_recognition	[gated — one-time HF agree]
+hf	facebook/dinov3-vitb16-pretrain-lvd1689m	access-face_recognition/_hf_facebook_dinov3-vitb16		DINOv3-NC	access-face_recognition	[gated — one-time HF agree]
+# ============================================================================
+# access-zone_intrusion
+# ============================================================================
+github	https://github.com/THU-MIG/yolov10/releases/download/v1.1/yolov10n.pt	access-zone_intrusion/yolov10n.pt	61b91ffc99b284792dca49bf40216945833cc2a515e1a742954e6e9327cfc19e	AGPL-3.0	access-zone_intrusion
+github	https://github.com/THU-MIG/yolov10/releases/download/v1.1/yolov10s.pt	access-zone_intrusion/yolov10s.pt	96af3fc7c7169abcc4867f3e3088b761bb33cf801283c2ec05f9703d63a0ba77	AGPL-3.0	access-zone_intrusion
+github	https://github.com/THU-MIG/yolov10/releases/download/v1.1/yolov10m.pt	access-zone_intrusion/yolov10m.pt	ff2c559f11d13701abc4e0345f82851d146ecfe7035efaafcc08475cfd8b5f2d	AGPL-3.0	access-zone_intrusion
+github	https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt	access-zone_intrusion/yolo11n.pt	0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1	AGPL-3.0	access-zone_intrusion
+github	https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt	access-zone_intrusion/yolo11s.pt	85a76fe86dd8afe384648546b56a7a78580c7cb7b404fc595f97969322d502d5	AGPL-3.0	access-zone_intrusion
+github	https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt	access-zone_intrusion/yolo11m.pt	d5ffc1a674953a08e11a8d21e022781b1b23a19b730afc309290bd9fb5305b95	AGPL-3.0	access-zone_intrusion
+github	https://github.com/sunsmarterjie/yolov12/releases/download/turbo/yolov12n.pt	access-zone_intrusion/yolov12n.pt	37080c2891b94c62998f0bfb552dd70c32f9f2ee36618b9e7b3da49b49e150ac	AGPL-3.0	access-zone_intrusion
+github	https://github.com/sunsmarterjie/yolov12/releases/download/turbo/yolov12s.pt	access-zone_intrusion/yolov12s.pt	83b22d92565a0399a48eb8e3ee05dbb5056ee6e0dece66acd6d553a1f7f73cd8	AGPL-3.0	access-zone_intrusion
+# ============================================================================
+# ppe-helmet_detection
+# ============================================================================
+hf_file	HudatersU/Safety_helmet:safety_helmet_251209.onnx	ppe-helmet_detection/HudatersU_safety_helmet.onnx		GPL-3.0	ppe-helmet_detection
+hf_file	HudatersU/Safety_helmet:safety_helmet_251209.pt	ppe-helmet_detection/HudatersU_safety_helmet.pt		GPL-3.0	ppe-helmet_detection
+hf_file	Bhavani-23/Ocularone-Hazard-Vest-Dataset-Models:models/yolov11m/yolov11m.pt	ppe-helmet_detection/bhavani23_ocularone_yolov11m.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	Bhavani-23/Ocularone-Hazard-Vest-Dataset-Models:models/yolov11n/yolov11n.pt	ppe-helmet_detection/bhavani23_ocularone_yolov11n.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	Bhavani-23/Ocularone-Hazard-Vest-Dataset-Models:models/yolov11x/yolov11x.pt	ppe-helmet_detection/bhavani23_ocularone_yolov11x.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	Bhavani-23/Ocularone-Hazard-Vest-Dataset-Models:models/yolov8m/yolov8m.pt	ppe-helmet_detection/bhavani23_ocularone_yolov8m.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	Bhavani-23/Ocularone-Hazard-Vest-Dataset-Models:models/yolov8n/yolov8n.pt	ppe-helmet_detection/bhavani23_ocularone_yolov8n.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	Bhavani-23/Ocularone-Hazard-Vest-Dataset-Models:models/yolov8x/yolov8x.pt	ppe-helmet_detection/bhavani23_ocularone_yolov8x.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	DarthRegicid1/YOLOv5_PPE-Detection:train/ppe_detection_m_896_v132/weights/best.pt	ppe-helmet_detection/darthregicid_yolov5_ppe_m896.pt		GPL-3.0	ppe-helmet_detection
+hf_file	dxvyaaa/yolo_helmet:best.pt	ppe-helmet_detection/dxvyaaa_yolo_helmet.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	gghsgn/helmet_detection:pytorch_model.bin	ppe-helmet_detection/gghsgn_helmet_detection.bin		Apache-2.0	ppe-helmet_detection
+hf_file	gghsgn/safety_helmet_detection:pytorch_model.bin	ppe-helmet_detection/gghsgn_safety_helmet.bin		MIT	ppe-helmet_detection
+hf_file	gungniir/yolo11-vest:best.pt	ppe-helmet_detection/gungniir_yolo11_vest.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	Hansung-Cho/yolov8-ppe-detection:best.pt	ppe-helmet_detection/hansung_yolov8_ppe.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	Hexmon/vyra-yolo-ppe-detection:best.onnx	ppe-helmet_detection/hexmon_vyra_yolo_ppe.onnx		AGPL-inherited	ppe-helmet_detection
+hf_file	Hexmon/vyra-yolo-ppe-detection:best.pt	ppe-helmet_detection/hexmon_vyra_yolo_ppe.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	keremberke/yolov8m-hard-hat-detection:best.pt	ppe-helmet_detection/keremberke_yolov8m_hardhat.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	keremberke/yolov8n-hard-hat-detection:best.pt	ppe-helmet_detection/keremberke_yolov8n_hardhat.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	keremberke/yolov8s-hard-hat-detection:best.pt	ppe-helmet_detection/keremberke_yolov8s_hardhat.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	leeyunjai/yolo11-helmet:helmet-11m.pt	ppe-helmet_detection/leeyunjai_yolo11m_helmet.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	leeyunjai/yolo11-helmet:helmet-11s.pt	ppe-helmet_detection/leeyunjai_yolo11s_helmet.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	leeyunjai/yolo11-helmet:helmet-11x.pt	ppe-helmet_detection/leeyunjai_yolo11x_helmet.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	leeyunjai/yolo26-helmet:helmet-26m.pt	ppe-helmet_detection/leeyunjai_yolo26m_helmet.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	leeyunjai/yolo26-helmet:helmet-26s.pt	ppe-helmet_detection/leeyunjai_yolo26s_helmet.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	melihuzunoglu/ppe-detection:best.pt	ppe-helmet_detection/melihuzunoglu_yolov11_ppe.pt		AGPL-3.0	ppe-helmet_detection
+hf_file	Tanishjain9/yolov8n-ppe-detection-6classes:best.pt	ppe-helmet_detection/tanishjain_yolov8n_ppe6.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	TheNobody-12/HelmetDETA:model.safetensors	ppe-helmet_detection/thenobody12_helmet_deta.safetensors		MIT	ppe-helmet_detection
+hf_file	uisikdag/yolo-v5-hard-hat-detection:best.pt	ppe-helmet_detection/uisikdag_yolov5_hardhat.pt		GPL-3.0	ppe-helmet_detection
+hf_file	wesjos/Yolo-hard-hat-safety-vest:yolo11m_safety.pt	ppe-helmet_detection/wesjos_yolo11m_hardhat_vest.pt		AGPL-inherited	ppe-helmet_detection
+hf_file	wesjos/Yolo-hard-hat-safety-vest:yolo11n_safety.pt	ppe-helmet_detection/wesjos_yolo11n_hardhat_vest.pt		AGPL-inherited	ppe-helmet_detection
+hf	Advantech-EIOT/qualcomm-ultralytics-ppe_detection	ppe-helmet_detection/_hf_Advantech-EIOT_qualcomm-ultralytics-ppe_detection		Qualcomm-EULA	ppe-helmet_detection	[gated — one-time HF agree]
+# ============================================================================
+# ppe-shoes_detection
+# ============================================================================
+hf_file	ustc-community/dfine-small-coco:model.safetensors	ppe-shoes_detection/dfine_small_coco.safetensors		Apache-2.0	ppe-shoes_detection
+hf_file	timm/efficientformerv2_s1.snap_dist_in1k:pytorch_model.bin	ppe-shoes_detection/efficientformerv2_s1.bin	eabc103e7f168f30	Apache-2.0	ppe-shoes_detection
+hf_file	timm/fastvit_t12.apple_in1k:pytorch_model.bin	ppe-shoes_detection/fastvit_t12.bin	5af58180ba8e43bc	Apple-ASCL	ppe-shoes_detection
+hf_file	timm/fastvit_t8.apple_in1k:pytorch_model.bin	ppe-shoes_detection/fastvit_t8.bin	759267da2f73d6a8	Apple-ASCL	ppe-shoes_detection
+hf_file	timm/mobilevitv2_100.cvnets_in1k:pytorch_model.bin	ppe-shoes_detection/mobilevitv2_100.bin	86278d69dbae7b97	Apple-sample	ppe-shoes_detection
+hf_file	onnx-community/rfdetr_small-ONNX:onnx/model.onnx	ppe-shoes_detection/rfdetr_small.onnx	121cc1476a7b69d8	Apache-2.0	ppe-shoes_detection
+hf	facebook/dinov3-vits16-pretrain-lvd1689m	ppe-shoes_detection/_hf_facebook_dinov3-vits16		DINOv3-NC	ppe-shoes_detection	[gated — one-time HF agree]
+hf	facebook/dinov3-vitb16-pretrain-lvd1689m	ppe-shoes_detection/_hf_facebook_dinov3-vitb16		DINOv3-NC	ppe-shoes_detection	[gated — one-time HF agree]
+# ============================================================================
+# safety-fire_detection
+# ============================================================================
+github	https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_m.pth	safety-fire_detection/yolox_m.pth	760c6dd41afa32b341d8bdbf1e951de4cb1967a81d0de75509852869d656b0f2	Apache-2.0	safety-fire_detection
+gdrive	https://drive.google.com/file/d/1DxlYpIcJMR14Ytc4O2MVj6WS1f7L4D3-/view?usp=drive_link	safety-fire_detection/deim_dfine_m_coco/deim_dfine_hgnetv2_m_coco_90e.pth	2b6cd0582a4aa711f583982057b7fb0f3daebdd98e4dc168824714014c3219bc	Apache-2.0	safety-fire_detection	[DEIM 90e; gdown --fuzzy]
+gdrive	https://drive.google.com/file/d/1Qg-F_pPzPY_LsLhk_tL6p9H3sF6NjM2g/view?usp=drive_link	safety-fire_detection/deim_dfine_s_coco/deim_dfine_hgnetv2_s_coco_120e.pth	a089c9eb798f8a0322e05f757fe8e8188eee34aa578788a35ec253bcec8a6b38	Apache-2.0	safety-fire_detection	[DEIM 120e; gdown --fuzzy]
+hf	pyronear/yolo11s_sensitive-detector_v1.0.0	safety-fire_detection/pyronear_yolo11s_sensitive-detector		AGPL-inherited	safety-fire_detection
+hf	pyronear/yolo11s_nimble-narwhal_v6	safety-fire_detection/pyronear_yolo11s_nimble-narwhal_v6		AGPL-inherited	safety-fire_detection
+hf	pyronear/yolov8s	safety-fire_detection/pyronear_yolov8s		AGPL-inherited	safety-fire_detection
+hf	pyronear/yolov11n	safety-fire_detection/pyronear_yolov11n		AGPL-inherited	safety-fire_detection
+hf	pyronear/rexnet1_0x	safety-fire_detection/pyronear_rexnet1_0x		Apache-2.0	safety-fire_detection
+hf	pyronear/rexnet1_3x	safety-fire_detection/pyronear_rexnet1_3x		Apache-2.0	safety-fire_detection
+hf	pyronear/rexnet1_5x	safety-fire_detection/pyronear_rexnet1_5x		Apache-2.0	safety-fire_detection
+hf	pyronear/mobilenet_v3_small	safety-fire_detection/pyronear_mobilenet_v3_small		Apache-2.0	safety-fire_detection
+hf	pyronear/mobilenet_v3_large	safety-fire_detection/pyronear_mobilenet_v3_large		Apache-2.0	safety-fire_detection
+hf	pyronear/resnet18	safety-fire_detection/pyronear_resnet18		Apache-2.0	safety-fire_detection
+hf	pyronear/resnet34	safety-fire_detection/pyronear_resnet34		Apache-2.0	safety-fire_detection
+hf	SalahALHaismawi/yolov26-fire-detection	safety-fire_detection/SalahALHaismawi_yolov26-fire-detection		AGPL-inherited	safety-fire_detection
+hf	touati-kamel/yolov8s-forest-fire-detection	safety-fire_detection/touati-kamel_yolov8s-forest-fire		AGPL-inherited	safety-fire_detection
+hf	touati-kamel/yolov10n-forest-fire-detection	safety-fire_detection/touati-kamel_yolov10n-forest-fire		AGPL-inherited	safety-fire_detection
+hf	touati-kamel/yolov12n-forest-fire-detection	safety-fire_detection/touati-kamel_yolov12n-forest-fire		AGPL-inherited	safety-fire_detection
+hf	JJUNHYEOK/yolov8n_wildfire_detection	safety-fire_detection/JJUNHYEOK_yolov8n_wildfire		AGPL-inherited	safety-fire_detection
+hf	Mehedi-2-96/fire-smoke-detection-yolo	safety-fire_detection/Mehedi-2-96_fire-smoke-yolo		AGPL-inherited	safety-fire_detection
+hf	TommyNgx/YOLOv10-Fire-and-Smoke-Detection	safety-fire_detection/TommyNgx_YOLOv10-Fire-and-Smoke		AGPL-inherited	safety-fire_detection
+hf	shawnmichael/vit-fire-smoke-detection-v4	safety-fire_detection/shawnmichael_vit-fire-smoke-v4		unspecified	safety-fire_detection
+hf	shawnmichael/convnext-tiny-fire-smoke-detection-v1	safety-fire_detection/shawnmichael_convnext-tiny-fire-smoke		unspecified	safety-fire_detection
+hf	shawnmichael/swin-fire-smoke-detection-v1	safety-fire_detection/shawnmichael_swin-fire-smoke		unspecified	safety-fire_detection
+hf	shawnmichael/efficienetb2-fire-smoke-detection-v1	safety-fire_detection/shawnmichael_efficientnetb2-fire-smoke		unspecified	safety-fire_detection
+hf	shawnmichael/vit-large-fire-smoke-detection-v1	safety-fire_detection/shawnmichael_vit-large-fire-smoke		unspecified	safety-fire_detection	[partial in prior run — resume]
+hf	dima806/wildfire_types_image_detection	safety-fire_detection/dima806_wildfire_types		unspecified	safety-fire_detection	[partial in prior run — resume]
+hf	sequoiaandrade/Smoke-Cloud-Segmentation-RACE-ODIN	safety-fire_detection/sequoiaandrade_smoke-cloud-race-odin		Apache-2.0	safety-fire_detection	[NASA]
+hf	Shoriful025/wildfire_smoke_segmentation_vit	safety-fire_detection/Shoriful025_wildfire_smoke_seg_vit		unspecified	safety-fire_detection
+hf	ustc-community/dfine-medium-coco	safety-fire_detection/ustc-community_dfine-medium-coco		Apache-2.0	safety-fire_detection
+hf	ustc-community/dfine-small-coco	safety-fire_detection/ustc-community_dfine-small-coco		Apache-2.0	safety-fire_detection
+# ============================================================================
+# safety-fall_classification
+# ============================================================================
+hf_file	facebook/dinov2-small:pytorch_model.bin	safety-fall_classification/dinov2-small.bin	1051e25b2ed69ddad24f3c41e7b6eed6e7f7d012103ea227e47eb82e87dc2050	Apache-2.0	safety-fall_classification
+hf_file	timm/efficientnetv2_rw_s.ra2_in1k:pytorch_model.bin	safety-fall_classification/efficientnetv2_rw_s.ra2_in1k.bin	8bb2555726585abc07991848cfa0de5732cff2d8bf9f88d6317a687dbdc1b303	Apache-2.0	safety-fall_classification
+hf_file	popkek00/fall_detection_model:model.safetensors	safety-fall_classification/fall_resnet18_popkek00.safetensors	b806b650fcfe490e1c438cd45614dcdbe4dfb6960163915a02393abf73ab039b	MIT	safety-fall_classification
+hf_file	popkek00/fall_detection_model:config.json	safety-fall_classification/fall_resnet18_popkek00_config.json	69e9159f30c9ca852feb32b8196d6c64b9f8724f47eb34ee844784ca28bb729f	MIT	safety-fall_classification
+github	https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt	safety-fall_classification/_imagenet_classes.json		BSD	safety-fall_classification	[label map]
+hf_file	timm/mobilenetv4_conv_small.e2400_r224_in1k:pytorch_model.bin	safety-fall_classification/mobilenetv4_conv_small.e2400_r224_in1k.bin	28f2109728e2b5b4296397f0ea2aa8fd1896c8dca1e7f5ff217ae5ec22049e39	Apache-2.0	safety-fall_classification
+github	https://storage.googleapis.com/tf_model_garden/vision/movinet/movinet_a1_base.tar.gz	safety-fall_classification/movinet_a1_base.tar.gz	4c80bd477321d2483279358049191e151cb071a762efbe4efc9afa953e29920f	Apache-2.0	safety-fall_classification
+github	https://storage.googleapis.com/tf_model_garden/vision/movinet/movinet_a2_base.tar.gz	safety-fall_classification/movinet_a2_base.tar.gz	478f2ac53744ec81309c37c8ed9fae627dccb382bab181569d7943fe81ca775e	Apache-2.0	safety-fall_classification
+github	https://storage.googleapis.com/tf_model_garden/vision/movinet/movinet_a2_stream.tar.gz	safety-fall_classification/movinet_a2_stream.tar.gz	611af11e3d32c254477206165b8fdd5735fd94bea23bb5362ca9906909b08449	Apache-2.0	safety-fall_classification
+github	https://storage.googleapis.com/tf_model_garden/vision/movinet/movinet_a3_base.tar.gz	safety-fall_classification/movinet_a3_base.tar.gz	1cd1a8c00e9692a982619a12df68c1b30f95af970258b1c63f477f1dc1f02b0c	Apache-2.0	safety-fall_classification
+github	https://dl.fbaipublicfiles.com/pytorchvideo/model_zoo/kinetics/SLOWFAST_8x8_R50.pyth	safety-fall_classification/slowfast_r50_k400.pyth	454f39e1c1f985df2bee2aa27887ed53ff56e74ed8b8cca11203a1a1264d7cc2	Apache-2.0	safety-fall_classification
+github	https://dl.fbaipublicfiles.com/pytorchvideo/model_zoo/kinetics/SLOWFAST_8x8_R101.pyth	safety-fall_classification/slowfast_r101_k400.pyth	62966206aa4c1e06262aa48f600e24d871469c7a92c23aa08636776944df3e94	Apache-2.0	safety-fall_classification
+hf_file	Andy1621/uniformerv2:uniformerv2_b16_k400_k710_8x224.pyth	safety-fall_classification/uniformerv2_b16_k400_k710.pyth	743da61c97f6281bd11ef1d364c2101698c8e89ff7722ee957378e36ef344005	CC-BY-NC-4.0	safety-fall_classification
+hf_file	MCG-NJU/videomae-base-finetuned-kinetics:pytorch_model.bin	safety-fall_classification/videomae-base-finetuned-kinetics.bin	f8462908e843373183868b89c56699f675839f1bebf43694a6c987c6df9d3ce4	CC-BY-NC-4.0	safety-fall_classification
+hf_file	MCG-NJU/videomae-small-finetuned-kinetics:pytorch_model.bin	safety-fall_classification/videomae-small-finetuned-kinetics.bin	d69585904fec7e507bf2edfba4a7abe2b92def9afc76460d1dc14dbbf864bcfc	CC-BY-NC-4.0	safety-fall_classification
+hf_file	OpenGVLab/VideoMAEv2-Base:vit_b_k710_dl_from_giant.safetensors	safety-fall_classification/videomaev2_base_k710.safetensors	ebffa1874066ea227330016e58a848e9e2bb1ff5605746459bded1122a42176d	CC-BY-NC-4.0	safety-fall_classification
+hf_file	OpenGVLab/VideoMAEv2-Large:vit_l_k710_dl_from_giant.safetensors	safety-fall_classification/videomaev2_large_k710.safetensors	c27064402bfec2c7495e2226a5e0d8f46374b4df4b03026af1e10a57e11b2996	CC-BY-NC-4.0	safety-fall_classification
+github	https://dl.fbaipublicfiles.com/pytorchvideo/model_zoo/kinetics/X3D_L.pyth	safety-fall_classification/x3d_l.pyth	19c99d8ab8f2aceab4f8a59a85f6dbc3c7f3a262a798ca95b906709ed100866b	Apache-2.0	safety-fall_classification
+github	https://dl.fbaipublicfiles.com/pytorchvideo/model_zoo/kinetics/X3D_M.pyth	safety-fall_classification/x3d_m.pyth	eb9583d5f5a988a5c5f06f75760b070a5c9715794bd3b0536b78bd30595dcf67	Apache-2.0	safety-fall_classification
+github	https://dl.fbaipublicfiles.com/pytorchvideo/model_zoo/kinetics/X3D_S.pyth	safety-fall_classification/x3d_s.pyth	26b95f1605d49650b54049db40ba3a56e023b86b58c3b3e0e10e0992a9c8682f	Apache-2.0	safety-fall_classification
+github	https://dl.fbaipublicfiles.com/pytorchvideo/model_zoo/kinetics/X3D_XS.pyth	safety-fall_classification/x3d_xs.pyth	6dafc96144c88f800b190d2cb179ff69b8fd48c40afd4deca6c1e61f76fdfe86	Apache-2.0	safety-fall_classification
+hf_file	melihuzunoglu/human-fall-detection:best.pt	safety-fall_classification/yolov11_fall_melihuzunoglu.pt	3f56ad30358d5c63bf8dbc0c1299cf68818c3d291dfb10c94107b94110aadd4c	AGPL-3.0	safety-fall_classification
+hf_file	kamalchibrani/yolov8_fall_detection_25:best.pt	safety-fall_classification/yolov8_fall_kamalchibrani.pt	4a7eba2e982955d7c5f2ea65968f23332c123275116e75e2bac915f40ba749e0	OpenRAIL/AGPL	safety-fall_classification
+# ============================================================================
+# safety-fall_pose_estimation
+# ============================================================================
+hf_file	yzd-v/DWPose:dw-ll_ucoco_384.onnx	safety-fall_pose_estimation/dw-ll_ucoco_384.onnx	724f4ff2439ed61afb86fb8a1951ec39c6220682803b4a8bd4f598cd913b1843	Apache-2.0	safety-fall_pose_estimation
+github	https://download.openmmlab.com/mmpose/top_down/hrnet/hrnet_w48_coco_256x192-b9e0b3ab_20200708.pth	safety-fall_pose_estimation/hrnet_w48_coco_256x192.pth	b9e0b3ab0439cb68e166c7543e59d2587cd8d7e9acf5ea62a8378eeb82fb50e5	MIT	safety-fall_pose_estimation
+manual	https://download.openmmlab.com/mmaction/skeleton/posec3d/slowonly_r50_u48_240e_ntu60_xsub_keypoint/slowonly_r50_u48_240e_ntu60_xsub_keypoint-f3adabf1.pth	safety-fall_pose_estimation/posec3d_slowonly_r50_ntu60_xsub_keypoint.pth	f3adabf19d56bd4fb458e59570d5bbe0208f1e8a9a79c3d5f7fe03a0d5825d2a	NTU-NC	safety-fall_pose_estimation	[NTU non-commercial — check mmaction2 model-zoo for exact URL]
+github	https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task	safety-fall_pose_estimation/pose_landmarker_full.task	4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad	Apache-2.0	safety-fall_pose_estimation
+github	https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task	safety-fall_pose_estimation/pose_landmarker_heavy.task	64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b	Apache-2.0	safety-fall_pose_estimation
+github	https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task	safety-fall_pose_estimation/pose_landmarker_lite.task	59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a	Apache-2.0	safety-fall_pose_estimation
+github	https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.pth	safety-fall_pose_estimation/rtmdet-nano_person.pth	0e2da635c75e25dc88af08d01eb34bfe9cac06a7841cba223bdf04eed288b3dc	Apache-2.0	safety-fall_pose_estimation
+github	https://download.openmmlab.com/mmpose/v1/projects/rtmo/rtmo-l_16xb16-600e_body7-640x640-b37118ce_20231211.pth	safety-fall_pose_estimation/rtmo-l_body7_640x640.pth	b37118cee39b43531c23d9e443fbb4f0b8987f590d9c6ed61978d12ecfce84df	Apache-2.0	safety-fall_pose_estimation
+github	https://download.openmmlab.com/mmpose/v1/projects/rtmo/rtmo-s_8xb32-600e_body7-640x640-dac2bf74_20231211.pth	safety-fall_pose_estimation/rtmo-s_body7_640x640.pth	dac2bf749bbfb51e69ca577ca0327dff4433e3be9a56b782f0b7ef94fb45247e	Apache-2.0	safety-fall_pose_estimation
+github	https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-s_simcc-aic-coco_pt-aic-coco_420e-256x192-fcb2599b_20230126.pth	safety-fall_pose_estimation/rtmpose-s_coco_256x192.pth	8d57b1112021367bb6857e468be383b2bd24a0b69f121b3f54177635fb742907	Apache-2.0	safety-fall_pose_estimation
+manual	https://download.openmmlab.com/mmaction/skeleton/stgcn/stgcn_80e_ntu60_xsub_keypoint/stgcn_80e_ntu60_xsub_keypoint-e7bb9653.pth	safety-fall_pose_estimation/stgcn_80e_ntu60_xsub_keypoint.pth	e7bb965330622f3eb602406af995add6de3f679ca08ff4d1686d984c2084bebe	NTU-NC	safety-fall_pose_estimation	[NTU non-commercial]
+hf_file	usyd-community/vitpose-plus-base:model.safetensors	safety-fall_pose_estimation/vitpose-plus-base.pth	640225e4a9dd544239f1da0ae36af865a6e76e21e5f33a12656aa7b77fa5a5fa	Apache-2.0	safety-fall_pose_estimation	[rename model.safetensors -> .pth]
+hf_file	usyd-community/vitpose-plus-small:model.safetensors	safety-fall_pose_estimation/vitpose-plus-small.pth	f7bad8ed09eeeb2a7de6b38faaa8a88d07838e23e9c06a2a782099bca7467cb9	Apache-2.0	safety-fall_pose_estimation	[rename model.safetensors -> .pth]
+hf_file	hr16/yolo-nas-pose:yolo_nas_pose_s.onnx	safety-fall_pose_estimation/yolo_nas_pose_s.onnx	80f9b2113dfe5e720cfcf911a95034fb9e26c57e951537488d7e5b3e21951fe0	Deci-NC	safety-fall_pose_estimation
+hf_file	hr16/yolo-nas-pose:yolo_nas_pose_m.onnx	safety-fall_pose_estimation/yolo_nas_pose_m.onnx	9602e05d0bcebbb3a6b6b4e1e42fe904bc4479fa0e7f35a719e1466c059aa94a	Deci-NC	safety-fall_pose_estimation
+hf_file	hr16/yolo-nas-pose:yolo_nas_pose_l.onnx	safety-fall_pose_estimation/yolo_nas_pose_l.onnx	412322c226889a3bfc4a0990fa6c6937527dc89c97e7b37d508865d6d1628463	Deci-NC	safety-fall_pose_estimation
+hf	facebook/sapiens-pose-0.3b	safety-fall_pose_estimation/_hf_facebook_sapiens-pose-0.3b		Sapiens-NC	safety-fall_pose_estimation	[gated — one-time HF agree]
+# ============================================================================
+# safety-poketenashi
+# ============================================================================
+hf_file	yzd-v/DWPose:dw-ll_ucoco_384.onnx	safety-poketenashi/dw-ll_ucoco_384.onnx	724f4ff2439ed61afb86fb8a1951ec39c6220682803b4a8bd4f598cd913b1843	Apache-2.0	safety-poketenashi
+github	https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-m_simcc-coco-wholebody_pt-aic-coco_270e-256x192-cd5e845c_20230123.pth	safety-poketenashi/rtmpose-s_coco-wholebody.pth	3da02694cd6479d3b333ff42ebd0723f96bfa06adac1db1e2e815ed2e9e1b02d	Apache-2.0	safety-poketenashi
+github	https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-256x192_20231122.zip	safety-poketenashi/rtmw-l_256x192.zip	1e3e77558dfc199129bfff1c583e51b4ee190914de6ae30688243c20163c148c	Apache-2.0	safety-poketenashi
+github	https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip	safety-poketenashi/rtmw-l_384x288.zip	a87e1af41a0a067776dba7d46e1c21c8f6e9f18e247e0e606718dd1f31e96ffd	Apache-2.0	safety-poketenashi
+github	https://download.openmmlab.com/mmpose/v1/projects/rtmw/rtmw-dw-x-l_simcc-cocktail14_270e-384x288-20231122.pth	safety-poketenashi/rtmw-l_cocktail14_384x288.pth	afa589fa16bf8b9bab0807c806538a43bead39ed0151b79f41adcf551e3bcfb0	Apache-2.0	safety-poketenashi
+hf	facebook/sapiens-pose-0.6b-torchscript	safety-poketenashi/_hf_facebook_sapiens-pose-0.6b-torchscript		Sapiens-NC	safety-poketenashi	[gated — one-time HF agree]
+# ============================================================================
+# non-reproducible rsync-only entries follow (sibling-project symlinks)
+# ============================================================================
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage1_step/asformer/gtea_split1.pt	safety-fall_classification/visualcore_asformer_gtea_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage1_step/mstcn/gtea_split1.pt	safety-fall_classification/visualcore_mstcn_gtea_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/c2f_tcn/gtea_split1.pt	safety-fall_classification/visualcore_c2f_tcn_gtea_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/diffact/gtea_split1.pt	safety-fall_classification/visualcore_diffact_gtea_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/diffact/gtea_split2.pt	safety-fall_classification/visualcore_diffact_gtea_split2.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/diffact/gtea_split3.pt	safety-fall_classification/visualcore_diffact_gtea_split3.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/diffact/gtea_split4.pt	safety-fall_classification/visualcore_diffact_gtea_split4.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/breakfast_split1.pt	safety-fall_classification/visualcore_fact_breakfast_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/breakfast_split2.pt	safety-fall_classification/visualcore_fact_breakfast_split2.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/breakfast_split3.pt	safety-fall_classification/visualcore_fact_breakfast_split3.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/breakfast_split4.pt	safety-fall_classification/visualcore_fact_breakfast_split4.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/egoprocel_split1.pt	safety-fall_classification/visualcore_fact_egoprocel_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/epic_kitchens_split1.pt	safety-fall_classification/visualcore_fact_epic_kitchens_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/gtea_split1.pt	safety-fall_classification/visualcore_fact_gtea_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/gtea_split2.pt	safety-fall_classification/visualcore_fact_gtea_split2.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/gtea_split3.pt	safety-fall_classification/visualcore_fact_gtea_split3.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/fact/gtea_split4.pt	safety-fall_classification/visualcore_fact_gtea_split4.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/ltcontext/breakfast_split1.pth	safety-fall_classification/visualcore_ltcontext_breakfast_split1.pth		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/ltcontext/breakfast_split2.pth	safety-fall_classification/visualcore_ltcontext_breakfast_split2.pth		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/ltcontext/breakfast_split3.pth	safety-fall_classification/visualcore_ltcontext_breakfast_split3.pth		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/ltcontext/breakfast_split4.pth	safety-fall_classification/visualcore_ltcontext_breakfast_split4.pth		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/stage2_action/ltcontext/gtea_split1.pt	safety-fall_classification/visualcore_ltcontext_gtea_split1.pt		internal	safety-fall_classification	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/feat_detect/yolov8/yolov8l.pt	access-zone_intrusion/visualcore_yolov8l.pt		internal	access-zone_intrusion	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/visual_core/01_code/checkpoints/feat_detect/rfdetr/rf-detr-base.pth	access-zone_intrusion/visualcore_rf-detr-base.pth		internal	access-zone_intrusion	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/dms_oms/pretrained/person/rtdetr_r18vd/model.safetensors	access-zone_intrusion/dmsoms_rtdetr_r18vd.safetensors		internal	access-zone_intrusion	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/dms_oms/pretrained/face_detection/yolov11n_face/model.pt	access-face_recognition/dmsoms_yolov11n_face.pt		internal	access-face_recognition	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/dms_oms/pretrained/face_detection/yolov11n_face/model.onnx	access-face_recognition/dmsoms_yolov11n_face.onnx		internal	access-face_recognition	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/dms_oms/pretrained/face_detection/yolov11n_face/model_nms.onnx	access-face_recognition/dmsoms_yolov11n_face_nms.onnx		internal	access-face_recognition	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/dms_oms/pretrained/face_detection/yolov11n_face/model_fp16.onnx	access-face_recognition/dmsoms_yolov11n_face_fp16.onnx		internal	access-face_recognition	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/dms_oms/pretrained/face_detection/yolov11n_face/model_gpu.onnx	access-face_recognition/dmsoms_yolov11n_face_gpu.onnx		internal	access-face_recognition	[sibling-project symlink]
+rsync_only	/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/dms_oms/pretrained/face_detection/RetinaFace-R50.pth	access-face_recognition/dmsoms_RetinaFace-R50.pth		internal	access-face_recognition	[sibling-project symlink]

@@ -1,0 +1,21 @@
+# Dataset config — Fire Detection
+dataset_name: "fire_detection"
+path: "../../dataset_store/fire_detection"
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+names:
+  0: fire
+  1: smoke
+num_classes: 2
+input_size: [640, 640]
+
+# Normalization (ImageNet defaults, updated by compute_normalization.py)
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
+
+# SAM3-friendly text prompts for auto-annotation
+text_prompts:
+  fire: "flames, burning fire, visible fire"
+  smoke: "smoke, gray or white smoke plume, haze from fire"

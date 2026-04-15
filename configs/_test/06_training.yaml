@@ -1,0 +1,57 @@
+# Training config — Fire Detection (100 real images test)
+model:
+  arch: yolox-m
+  pretrained: null
+  num_classes: 2
+  input_size: [640, 640]
+  depth: 0.67
+  width: 0.75
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 4
+  num_workers: 2
+  pin_memory: true
+
+augmentation:
+  mosaic: true
+  mixup: false
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  fliplr: 0.5
+  flipud: 0.0
+  scale: [0.5, 1.5]
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: pytorch
+  epochs: 10
+  optimizer: adam
+  lr: 0.001
+  weight_decay: 0.0005
+  warmup_epochs: 1
+  scheduler: cosine
+  patience: 5
+  amp: false
+  grad_clip: 35.0
+  ema: true
+  ema_decay: 0.9998
+
+loss:
+  type: yolox
+
+logging:
+  wandb_project: camera-edge-test
+  run_name: test_100_images
+  save_dir: ../../runs/test_fire_100
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 5
+
+seed: 42

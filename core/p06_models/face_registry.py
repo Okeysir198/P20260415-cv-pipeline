@@ -1,0 +1,104 @@
+"""Face model registry for architecture selection via config.
+
+Face detector and embedder models register themselves with
+:func:`register_face_detector` and :func:`register_face_embedder`.  At build
+time, :func:`build_face_detector` looks up ``config["face_detector"]["arch"]``
+and :func:`build_face_embedder` looks up ``config["face_embedder"]["arch"]`,
+dispatching to the corresponding builder function.
+"""
+
+from typing import Callable, Dict
+
+from core.p06_models.face_base import FaceDetector, FaceEmbedder
+from core.p06_models.registry import GenericRegistry
+
+# ---------------------------------------------------------------------------
+# Face detector registry
+# ---------------------------------------------------------------------------
+
+FACE_DETECTOR_REGISTRY: Dict[str, Callable] = {}
+_FACE_DETECTOR_VARIANT_MAP: Dict[str, str] = {}
+
+_detector_registry = GenericRegistry(
+    registry=FACE_DETECTOR_REGISTRY,
+    variant_map=_FACE_DETECTOR_VARIANT_MAP,
+    default_arch="scrfd",
+    config_key="face_detector",
+    entity_name="face detector",
+)
+
+
+def register_face_detector(name: str):
+    """Decorator that registers a face detector builder function.
+
+    Args:
+        name: Architecture name used in config (e.g. ``"scrfd"``).
+
+    Returns:
+        Decorator that stores *fn* in :data:`FACE_DETECTOR_REGISTRY`.
+    """
+    return _detector_registry.register(name)
+
+
+def build_face_detector(config: dict) -> FaceDetector:
+    """Build a face detector from a config dictionary.
+
+    Looks up ``config["face_detector"]["arch"]`` in the registry and calls
+    the corresponding builder.
+
+    Args:
+        config: Full face config with a ``"face_detector"`` section.
+
+    Returns:
+        Instantiated :class:`FaceDetector`.
+
+    Raises:
+        ValueError: If the architecture is not registered.
+    """
+    return _detector_registry.build(config)
+
+
+# ---------------------------------------------------------------------------
+# Face embedder registry
+# ---------------------------------------------------------------------------
+
+FACE_EMBEDDER_REGISTRY: Dict[str, Callable] = {}
+_FACE_EMBEDDER_VARIANT_MAP: Dict[str, str] = {}
+
+_embedder_registry = GenericRegistry(
+    registry=FACE_EMBEDDER_REGISTRY,
+    variant_map=_FACE_EMBEDDER_VARIANT_MAP,
+    default_arch="mobilefacenet",
+    config_key="face_embedder",
+    entity_name="face embedder",
+)
+
+
+def register_face_embedder(name: str):
+    """Decorator that registers a face embedder builder function.
+
+    Args:
+        name: Architecture name used in config (e.g. ``"mobilefacenet"``).
+
+    Returns:
+        Decorator that stores *fn* in :data:`FACE_EMBEDDER_REGISTRY`.
+    """
+    return _embedder_registry.register(name)
+
+
+def build_face_embedder(config: dict) -> FaceEmbedder:
+    """Build a face embedder from a config dictionary.
+
+    Looks up ``config["face_embedder"]["arch"]`` in the registry and calls
+    the corresponding builder.
+
+    Args:
+        config: Full face config with a ``"face_embedder"`` section.
+
+    Returns:
+        Instantiated :class:`FaceEmbedder`.
+
+    Raises:
+        ValueError: If the architecture is not registered.
+    """
+    return _embedder_registry.build(config)

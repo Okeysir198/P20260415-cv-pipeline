@@ -1,0 +1,21 @@
+# Training config — TODO replace placeholders.
+model:
+  arch: yolox-m
+  pretrained: ../../../pretrained/yolox_m.pth
+  num_classes: 2
+  input_size: [640, 640]
+  depth: 0.67
+  width: 0.75
+
+data:
+  config: ../05_data.yaml
+
+training:
+  backend: pytorch      # or: hf | custom
+  epochs: 100
+  optimizer: adamw
+  lr: 0.01
+  batch_size: 16
+
+logging:
+  run_name: <feature_name>_v1

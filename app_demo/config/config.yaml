@@ -1,0 +1,204 @@
+# Comprehensive Demo Application Config
+# Usage: uv run app_demo/run.py --config configs/app_demo/default.yaml
+
+# Model sources — all models fully declared here
+models:
+  # COCO pretrained detectors (always available for generic detection)
+  coco_pretrained:
+    YOLOX-M:
+      model_path: pretrained/yolox_m.pth
+      normalize: false
+    YOLOX-L:
+      model_path: pretrained/yolox_l_coco.pt
+      normalize: false
+    D-FINE-N:
+      hf_config:
+        model:
+          arch: dfine-n
+          num_classes: 80
+          input_size: [640, 640]
+          pretrained: ustc-community/dfine_n_coco
+      cache_path: pretrained/dfine_n_coco.pt
+      normalize: true
+    D-FINE-S:
+      hf_config:
+        model:
+          arch: dfine-s
+          num_classes: 80
+          input_size: [640, 640]
+          pretrained: ustc-community/dfine_s_coco
+      cache_path: pretrained/dfine_s_coco.pt
+      normalize: true
+    D-FINE-M:
+      hf_config:
+        model:
+          arch: dfine-m
+          num_classes: 80
+          input_size: [640, 640]
+          pretrained: ustc-community/dfine_m_coco
+      cache_path: pretrained/dfine_m_coco.pt
+      normalize: true
+    RT-DETRv2-R18:
+      hf_config:
+        model:
+          arch: rtdetr-r18
+          num_classes: 80
+          input_size: [640, 640]
+          pretrained: PekingU/rtdetr_v2_r18vd
+      cache_path: pretrained/rtdetr_v2_r18_coco.pt
+      normalize: true
+    RT-DETRv2-R50:
+      hf_config:
+        model:
+          arch: rtdetr-r50
+          num_classes: 80
+          input_size: [640, 640]
+          pretrained: PekingU/rtdetr_v2_r50vd
+      cache_path: pretrained/rtdetr_v2_r50_coco.pt
+      normalize: true
+
+  # Fine-tuned models — search paths in order, first existing file wins
+  fine_tuned:
+    fire:
+      model_paths:
+        - features/safety-fire_detection/release/latest/best.pt
+        - features/safety-fire_detection/runs/best.pt
+    helmet:
+      model_paths:
+        - features/ppe-helmet_detection/release/latest/best.pt
+        - features/ppe-helmet_detection/runs/best.pt
+    shoes_det:
+      model_paths:
+        - features/ppe-shoes_detection/release/latest/best.pt
+        - features/ppe-shoes_detection/runs/best.pt
+    fall_cls:
+      model_paths:
+        - features/safety-fall_classification/release/latest/best.pt
+        - features/safety-fall_classification/runs/best.pt
+    fall_pose:
+      model_paths:
+        - features/safety-fall_pose_estimation/release/latest/best.pt
+        - features/safety-fall_pose_estimation/runs/best.pt
+    phone:
+      model_paths:
+        - features/safety-poketenashi/release/latest/best.pt
+        - features/safety-poketenashi/runs/best.pt
+
+# Tab order — each entry maps to a build function; remove/reorder to customize
+tabs:
+  - id: generic
+    builder: app_demo.src.generic_tab.build_tab_generic
+  - id: stream
+    builder: app_demo.tabs.tab_stream.build_tab_stream
+  - id: detection
+    builder: app_demo.tabs.tab_detection.build_tab_detection
+  - id: fire
+    builder: app_demo.tabs.tab_fire.build_tab_fire
+  - id: ppe
+    builder: app_demo.tabs.tab_ppe.build_tab_ppe
+  - id: fall
+    builder: app_demo.tabs.tab_fall.build_tab_fall
+  - id: phone
+    builder: app_demo.tabs.tab_phone.build_tab_phone
+  - id: zone
+    builder: app_demo.tabs.tab_zone.build_tab_zone
+  - id: face
+    builder: app_demo.tabs.tab_face.build_tab_face
+  - id: analytics
+    builder: app_demo.tabs.tab_analytics.build_tab_analytics
+
+# COCO class names config (local to app_demo/config)
+coco_names_config: config/coco_names.yaml
+
+# Per-use-case configurations
+use_cases:
+  fire:
+    data_config: features/safety-fire_detection/configs/05_data.yaml
+    alert_classes:
+      - fire
+      - smoke
+    description: "Fire & smoke detection for early warning systems"
+  helmet:
+    data_config: features/ppe-helmet_detection/configs/05_data.yaml
+    violation_classes:
+      - head_without_helmet
+    compliance_classes:
+      - head_with_helmet
+    description: "Helmet compliance monitoring for construction sites"
+  shoes_det:
+    data_config: features/ppe-shoes_detection/configs/05_data.yaml
+    violation_classes:
+      - foot_without_safety_shoes
+    compliance_classes:
+      - foot_with_safety_shoes
+    description: "Safety shoes compliance monitoring"
+  fall_cls:
+    data_config: features/safety-fall_classification/configs/05_data.yaml
+    alert_classes:
+      - fallen_person
+    description: "Fall detection using classification approach"
+  fall_pose:
+    data_config: features/safety-fall_pose_estimation/configs/05_data.yaml
+    pose_config: features/safety-fall_pose_estimation/configs/rtmpose_s.yaml
+    torso_angle_threshold: 60
+    hip_shoulder_ratio_threshold: 0.6
+    description: "Fall detection using pose estimation"
+  phone:
+    data_config: features/safety-poketenashi/configs/05_data.yaml
+    alert_classes:
+      - phone
+    pose_config: features/safety-fall_pose_estimation/configs/rtmpose_s.yaml
+    description: "Phone usage detection in restricted areas"
+  zone:
+    person_class_id: 0
+    default_zones: []
+    description: "Restricted zone intrusion detection"
+
+# Face recognition
+face:
+  config: features/access-face_recognition/configs/face.yaml
+  gallery_path: data/face_gallery/demo.npz
+
+# Supervision annotator settings
+supervision:
+  bbox:
+    thickness: 2
+    color_lookup: CLASS
+  label:
+    text_scale: 0.5
+    text_thickness: 1
+    text_padding: 5
+  trace:
+    trace_length: 60
+    thickness: 2
+  heatmap:
+    opacity: 0.5
+    kernel_size: 25
+
+# ByteTrack tracker
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.25
+  lost_track_buffer: 30
+  minimum_iou_threshold: 0.1
+  frame_rate: 30
+
+# Alerts are authoritative in features/<name>/configs/10_inference.yaml.
+# Tabs call `manager.get_feature_alert_config(<name>)` to load them.
+
+# Default confidence threshold for all tabs
+default_confidence: 0.25
+
+# Live camera streaming settings
+streaming:
+  stream_every: 0.1       # seconds between frames (~10 FPS capture rate)
+  time_limit: 300         # max streaming duration in seconds (5 min)
+
+# Gradio UI settings
+gradio:
+  title: "Camera Edge - Safety Detection Demo"
+  description: "Comprehensive demo for all safety detection use cases"
+  server_name: "0.0.0.0"
+  server_port: 7861
+  share: false
+  theme: ocean

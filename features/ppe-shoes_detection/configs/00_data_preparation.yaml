@@ -1,0 +1,62 @@
+# Shoes Detection Data Preparation Config
+# Combines multiple source datasets into training-ready YOLO format
+
+# Task type
+task: detection
+
+# Dataset identification
+dataset_name: "shoes_detection"
+output_dir: "../../dataset_store/shoes_detection"
+
+# Output format
+output_format: "yolo"
+
+# Target classes (canonical names)
+classes:
+  - person
+  - foot_with_safety_shoes
+  - foot_without_safety_shoes
+
+# Source datasets to combine
+sources:
+  # Pre-split YOLO format
+  - name: "shoe_ppe"
+    path: "../../dataset_store/raw/shoes_detection/shoe_ppe"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Shoe": "foot_with_safety_shoes"
+      "No_Shoe": "foot_without_safety_shoes"
+
+  # COCO JSON format
+  - name: "keremberke_ppe"
+    path: "../../dataset_store/raw/shoes_detection/keremberke_ppe/data"
+    format: "coco"
+    has_splits: true
+    splits_to_use: ["train_extracted", "valid_extracted", "test_extracted"]
+    class_map:
+      "shoes": "foot_with_safety_shoes"
+      "no_shoes": "foot_without_safety_shoes"
+
+  # Site collected data
+  - name: "site_collected"
+    path: "../../dataset_store/site_collected/shoes_detection"
+    format: "yolo"
+    has_splits: false
+    class_map:
+      "foot_with_safety_shoes": "foot_with_safety_shoes"
+      "foot_without_safety_shoes": "foot_without_safety_shoes"
+
+# Split configuration (stratified by default)
+splits:
+  train: 0.8
+  val: 0.1
+  test: 0.1
+  seed: 42
+
+# Processing options
+options:
+  copy_images: true
+  handle_duplicates: "rename"
+  validate_labels: true

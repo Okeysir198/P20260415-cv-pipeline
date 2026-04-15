@@ -1,0 +1,20 @@
+# Inference + alert config (consumed by video_inference.VideoProcessor).
+
+model:
+  weights: ../runs/best.pt
+  conf: 0.25
+  iou: 0.45
+
+alerts:
+  confidence_thresholds: {}   # {class_name: float}
+  frame_windows: {}           # {class_name: int}
+  window_ratio: 0.8
+  cooldown_frames: 90
+
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.25
+
+samples:
+  images: []
+  videos: []

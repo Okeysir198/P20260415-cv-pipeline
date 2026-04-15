@@ -1,0 +1,58 @@
+# Training config — PPE: Safety Shoes Compliance (YOLOX-M)
+# NOTE: Small dataset (3.7K images) — more aggressive augmentation to compensate
+model:
+  arch: yolox-m
+  pretrained: ../../pretrained/yolox_m.pth
+  num_classes: 3
+  input_size: [640, 640]
+  depth: 0.67
+  width: 0.75
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+
+augmentation:
+  mosaic: true
+  mixup: true
+  hsv_h: 0.02
+  hsv_s: 0.8
+  hsv_v: 0.5
+  fliplr: 0.5
+  flipud: 0.0
+  scale: [0.5, 1.5]
+  degrees: 15.0
+  translate: 0.15
+  shear: 3.0
+
+training:
+  backend: pytorch
+  epochs: 300
+  optimizer: sgd
+  lr: 0.005
+  momentum: 0.9
+  weight_decay: 0.0005
+  warmup_epochs: 10
+  scheduler: cosine
+  patience: 80
+  amp: true
+  grad_clip: 35.0
+  ema: true
+  ema_decay: 0.9998
+
+loss:
+  type: yolox
+
+logging:
+  wandb_project: smart-camera
+  run_name: shoes_yoloxm_v1
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 10
+
+seed: 42

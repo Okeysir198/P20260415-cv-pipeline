@@ -1,0 +1,37 @@
+# Auto-Annotation Pipeline Config
+auto_annotate:
+  splits: ["train", "val", "test"]
+
+processing:
+  batch_size: 32
+  mode: "text"                    # "text" | "auto" | "hybrid"
+  output_format: "bbox"           # "bbox" | "polygon" | "both"
+  filter_mode: "missing"          # "missing" (no label/empty) | "all"
+  confidence_threshold: 0.3
+  dry_run: false
+
+# Auto-label service (s18104) connection settings.
+# The pipeline delegates all annotation to this REST service,
+# which in turn calls SAM3 for segmentation.
+auto_label_service:
+  url: "http://localhost:18104"   # Auto-label service URL
+  timeout: 120                    # Request timeout in seconds
+
+nms:
+  per_class_iou_threshold: 0.5
+  cross_class_enabled: true
+  cross_class_iou_threshold: 0.8
+  merge_with_existing: false
+
+polygon:
+  simplify_tolerance: 2.0         # approxPolyDP epsilon in pixels
+  min_vertices: 4
+  min_area_fraction: 0.001        # Minimum mask area relative to image
+
+reporting:
+  preview_count: 20
+  save_previews: true
+
+# SAM3-friendly text prompts (per class name)
+# Overridden by data config text_prompts or CLI --text-prompts
+text_prompts: {}

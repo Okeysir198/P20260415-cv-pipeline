@@ -1,0 +1,16 @@
+# Dataset config — Fire Detection (100 real images for testing)
+dataset_name: "test_fire_100"
+path: "../../dataset_store/test_fire_100"
+train: "train/images"
+val: "val/images"
+test: "val/images"
+
+names:
+  0: fire
+  1: smoke
+num_classes: 2
+input_size: [640, 640]
+
+# Normalization (ImageNet defaults)
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]

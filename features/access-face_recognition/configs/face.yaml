@@ -1,0 +1,31 @@
+# Default face recognition config for violation identification.
+#
+# Usage:
+#   from utils.config import load_config
+#   config = load_config("configs/face/default.yaml")
+
+face_detector:
+  arch: scrfd-500m
+  model_path: pretrained/scrfd_500m.onnx
+  input_size: [640, 640]
+  conf_threshold: 0.5
+  nms_threshold: 0.4
+
+face_embedder:
+  arch: mobilefacenet
+  model_path: pretrained/mobilefacenet_arcface.onnx
+  input_size: [112, 112]
+  embedding_dim: 512
+
+gallery:
+  path: data/face_gallery/default.npz
+  similarity_threshold: 0.4
+
+inference:
+  # Class IDs from the violation detector that trigger face recognition.
+  # Example for helmet model: 2 = head_without_helmet
+  violation_class_ids: [2]
+  # Expand violation bbox by this ratio to capture full head for face detection.
+  expand_ratio: 1.5
+  # Minimum face detection confidence to accept.
+  face_conf_threshold: 0.5

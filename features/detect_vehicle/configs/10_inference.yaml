@@ -1,0 +1,25 @@
+# Inference + alert config for the `vehicle` feature.
+# Loaded by `core.p10_inference.video_inference.load_alert_config`.
+# Empty per-class maps ⇒ use predictor global conf / fire immediately.
+
+model:
+  weights: ../runs/best.pt     # relative to this file
+  conf: 0.25
+  iou: 0.45
+
+alerts:
+  confidence_thresholds: {}
+  frame_windows: {}
+  window_ratio: 0.8
+  cooldown_frames: 90
+
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.25
+  lost_track_buffer: 30
+  minimum_iou_threshold: 0.1
+  frame_rate: 30
+
+samples:
+  images: []   # fill with paths under ../samples/
+  videos: []

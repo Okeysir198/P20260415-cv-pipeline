@@ -1,0 +1,20 @@
+# Export config — ONNX model export settings
+format: onnx
+opset: 18
+simplify: true
+dynamic_batch: false
+input_size: [640, 640]
+fp16: false
+output_dir: ../../models/
+naming: "{model}_{arch}_{imgsz}_v{version}"
+
+# Graph optimization (applies to all models after export)
+# Levels: O1 (basic), O2 (extended + Transformer fusions), O3 (O2 + GELU approx), O4 (O3 + fp16, GPU only)
+optimization_level: "O2"
+
+# Quantization settings
+quantization:
+  enabled: false
+  mode: dynamic          # dynamic (no calibration) or static (requires calibration data)
+  preset: avx512_vnni    # avx512_vnni (server), arm64 (edge ARM), avx2 (older x86)
+  calibration_samples: 100

@@ -1,0 +1,59 @@
+# Training config — Fall Detection, Pose Approach (YOLOX-M)
+# NOTE: Very small dataset (111 images) — pretrain on COCO-Pose, then fine-tune
+model:
+  arch: yolox-m
+  pretrained: ../../pretrained/yolox_m.pth
+  num_classes: 1
+  input_size: [640, 640]
+  depth: 0.67
+  width: 0.75
+  kpt_shape: [17, 3]
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+
+augmentation:
+  mosaic: true
+  mixup: false
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  fliplr: 0.5
+  flipud: 0.0
+  scale: [0.5, 1.5]
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: pytorch
+  epochs: 150
+  optimizer: sgd
+  lr: 0.005
+  momentum: 0.9
+  weight_decay: 0.0005
+  warmup_epochs: 10
+  scheduler: cosine
+  patience: 60
+  amp: true
+  grad_clip: 35.0
+  ema: true
+  ema_decay: 0.9998
+
+loss:
+  type: yolox
+
+logging:
+  wandb_project: smart-camera
+  run_name: fall_pose_yoloxm_v1
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 10
+
+seed: 42

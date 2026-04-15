@@ -1,0 +1,10 @@
+# Dataset config — TODO replace placeholders.
+dataset_name: "safety-poketenashi"
+path: "../../../dataset_store/training_ready/safety-poketenashi"
+train: "train/images"
+val: "val/images"
+names:
+  0: class_a
+  1: class_b
+num_classes: 2
+input_size: [640, 640]

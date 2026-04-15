@@ -1,0 +1,17 @@
+# Dataset config — Vehicle Detection
+dataset_name: "vehicle_detection"
+path: "../../dataset_store/vehicle_detection"
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+names:
+  0: car
+  1: truck
+  2: bus
+num_classes: 3
+input_size: [640, 640]
+
+# Normalization (ImageNet defaults, updated by compute_normalization.py)
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
