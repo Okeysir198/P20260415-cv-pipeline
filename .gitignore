@@ -45,3 +45,6 @@ htmlcov/
 dist/
 build/
 
+# Third-party MCP servers (cloned, not vendored)
+roboflow-mcp/
+
