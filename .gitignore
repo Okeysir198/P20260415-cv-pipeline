@@ -1,6 +1,5 @@
-# Data
-dataset_store/
-pretrained/
+# Data — large binary/data dirs; metadata tracked via per-dir .gitignore
+# (pretrained/ and dataset_store/ each have their own .gitignore for README*/CLAUDE.md)
 site_collected/
 
 # Outputs & runs
