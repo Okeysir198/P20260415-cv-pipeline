@@ -1,6 +1,6 @@
 # Dataset config — PPE: Safety Shoes Compliance
 dataset_name: "shoes_detection"
-path: "../../dataset_store/shoes_detection"
+path: "../../dataset_store/training_ready/shoes_detection"
 train: "train/images"
 val: "val/images"
 test: "test/images"

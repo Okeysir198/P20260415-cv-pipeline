@@ -1,6 +1,6 @@
 # Safety: Fall Pose Estimation
 > ID: g | Owner: TBD | Phase: 1 | Status: training | Config: `features/safety-fall_pose_estimation/configs/06_training.yaml`
-> See also: [Safety: Fall Classification](safety-fall_classification.md) — complementary classification-based approach
+> See also: [Safety: Fall Classification](safety-fall-detection.md) — complementary classification-based approach
 
 ## Customer Requirements
 
@@ -643,7 +643,7 @@ MediaPipe Pose (.task bundle)
 ### Mitigation
 
 - **Data expansion:** Collect 2K+ factory-specific fall simulation videos for threshold calibration and pose model fine-tuning.
-- **Ensemble with classification** (see [Fall Classification](safety-fall_classification.md)): both models must agree for alert, significantly reducing false positives.
+- **Ensemble with classification** (see [Fall Classification](safety-fall-detection.md)): both models must agree for alert, significantly reducing false positives.
 - **Temporal consistency** (80% of 30-frame window) filters transient keypoint errors.
 - **Velocity check** (Rule 4) distinguishes active falls from persons already lying down.
 - **RTMPose proven path:** RTMPose-S has reference code running on AX650N at 4.79ms -- avoids MediaPipe conversion risk.

@@ -1,28 +1,46 @@
-# Helmet Detection Data Preparation Config
-# Combines multiple source datasets into training-ready YOLO format
+# Helmet Detection — Data Preparation Config (v1, 2026-04-15)
+#
+# Quality-first selection: 3 sources totaling ~55.5K imgs.
+#   1. sh17_ppe — Pexels-sourced, paper-authored, genuine diversity (backbone)
+#   2. shlokraval_ppe_yolov8 — only large source with NO-Hardhat negatives
+#   3. roboflow_ppe_6class — MIT-licensed, cross-PPE context
+#
+# Excluded (v2 candidates): hardhat_vest_v3 (community-scraped near-duplicates),
+# roboflow_hardhat, hard_hat_workers, rf_chemical_ppe_11class, rf_siabar_ppe,
+# roboflow_vest_helmet_9k (flagged "spot-check"), sfchd (Baidu-only), shwd (21 imgs).
+#
+# head_with_nitto_hat — empty in v1; populate from site_collected/ when available.
 
-# Task type
 task: detection
-
-# Dataset identification
 dataset_name: "helmet_detection"
-output_dir: "../../dataset_store/helmet_detection"
-
-# Output format
+output_dir: "../../../dataset_store/training_ready/helmet_detection"
 output_format: "yolo"
 
-# Target classes (canonical names)
+# Canonical target classes
 classes:
   - person
   - head_with_helmet
   - head_without_helmet
   - head_with_nitto_hat
 
-# Source datasets to combine
 sources:
-  # Pre-split YOLO format (Roboflow)
-  - name: "ppe_yolov8"
-    path: "../../dataset_store/raw/helmet_detection/ppe_yolov8"
+  # Primary backbone — sh17 VOC labels, 8,099 imgs, 17-class human-audited
+  # We use VOC format (has explicit class names); YOLO labels also present but index order is unclear
+  - name: "sh17_ppe"
+    path: "../../../dataset_store/raw/helmet_detection/sh17_ppe"
+    format: "voc"
+    voc_annotations_dir: "voc_labels"
+    voc_images_dir: "images"
+    has_splits: false
+    class_map:
+      "helmet": "head_with_helmet"
+      "head": "head_without_helmet"
+      "person": "person"
+      # other sh17 classes (face, foot, gloves, etc.) are dropped for this model
+
+  # Large negatives source — 44,002 imgs, 14-class incl. NO-Hardhat
+  - name: "shlokraval_ppe_yolov8"
+    path: "../../../dataset_store/raw/helmet_detection/shlokraval_ppe_yolov8"
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
@@ -30,44 +48,48 @@ sources:
       "Hardhat": "head_with_helmet"
       "NO-Hardhat": "head_without_helmet"
       "Person": "person"
+      # drop: Gloves/Goggles/Mask/Vest/Fall-Detected/Ladder/Safety Cone etc.
 
-  # VOC XML format
-  - name: "hard_hat_workers"
-    path: "../../dataset_store/raw/helmet_detection/hard_hat_workers/data"
-    format: "voc"
-    has_splits: false
-    class_map:
-      "helmet": "head_with_helmet"
-      "no_helmet": "head_without_helmet"
-      "person": "person"
-
-  # Flat YOLO format
-  - name: "sfchd"
-    path: "../../dataset_store/raw/helmet_detection/sfchd/dataset_SFCHD"
+  # Bump cap (Nitto soft hat) — 664 imgs, 2-class Bump-cap / No BumpCap
+  # Fills previously-empty head_with_nitto_hat class
+  - name: "rf_bump_cap"
+    path: "../../../dataset_store/raw/helmet_detection/rf_bump_cap"
     format: "yolo"
-    has_splits: false
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
     class_map:
-      "helmet": "head_with_helmet"
-      "person": "person"
+      "Bump-cap": "head_with_nitto_hat"
+      "No BumpCap": "head_without_helmet"
 
-  # Site collected data
+  # Cross-PPE context — 3,481 imgs, MIT
+  - name: "roboflow_ppe_6class"
+    path: "../../../dataset_store/raw/helmet_detection/roboflow_ppe_6class"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Helmet": "head_with_helmet"
+      "Person": "person"
+      # drop: Boots/Gloves/Goggles/Vest
+
+  # Site-collected overlay — Nitto soft-hat samples populate here
   - name: "site_collected"
-    path: "../../dataset_store/site_collected/helmet_detection"
+    path: "../../../dataset_store/site_collected/helmet_detection"
     format: "yolo"
     has_splits: false
+    optional: true
     class_map:
       "head_with_helmet": "head_with_helmet"
       "head_without_helmet": "head_without_helmet"
+      "head_with_nitto_hat": "head_with_nitto_hat"
       "person": "person"
 
-# Split configuration (stratified by default)
 splits:
   train: 0.8
   val: 0.1
   test: 0.1
   seed: 42
 
-# Processing options
 options:
   copy_images: true
   handle_duplicates: "rename"

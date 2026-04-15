@@ -1,6 +1,6 @@
 # Safety / Fall — OSS Pretrained Deep-Dive (2025–2026)
 
-Deeper follow-up to `safety-fall_classification-sota.md` and `safety-fall_pose_estimation-sota.md`. Those first passes concluded that license-clean backbones exist (EfficientNetV2-S, MobileNetV4, DINOv2, X3D-M, RTMPose/RTMO) but no off-the-shelf **fall-specific** checkpoint was evaluated. This document surveys the open-source landscape for weights trained *directly* on fall datasets across all three methodology families and records what is downloadable, verified, and license-clean.
+Deeper follow-up to `safety-fall-detection-sota.md` and `safety-fall_pose_estimation-sota.md`. Those first passes concluded that license-clean backbones exist (EfficientNetV2-S, MobileNetV4, DINOv2, X3D-M, RTMPose/RTMO) but no off-the-shelf **fall-specific** checkpoint was evaluated. This document surveys the open-source landscape for weights trained *directly* on fall datasets across all three methodology families and records what is downloadable, verified, and license-clean.
 
 ## 1. Scope
 
@@ -18,7 +18,7 @@ New in this pass:
 - OmniFall 2025 unified benchmark
 - Roboflow Universe + HF fall-specific weights census
 
-The prior `fall_classification` internal eval already established that every surveyed public checkpoint fails out-of-box on the internal factory hard-negatives; this pass is therefore about **fine-tune starting points**, not plug-and-play models.
+The prior `fall_detection` internal eval already established that every surveyed public checkpoint fails out-of-box on the internal factory hard-negatives; this pass is therefore about **fine-tune starting points**, not plug-and-play models.
 
 ## 2. Single-frame fall classification weights
 
@@ -78,12 +78,12 @@ Deliberately not top-3:
 
 All downloads verified with `curl -IL` (HTTP 200 after redirect). File paths are absolute.
 
-### `ai/pretrained/safety-fall_classification/`
+### `ai/pretrained/safety-fall-detection/`
 
 | File | Size (B) | SHA256 | Source | License |
 |---|---|---|---|---|
-| `/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/pretrained/safety-fall_classification/fall_resnet18_popkek00.safetensors` | 44,764,336 | `b806b650fcfe490e1c438cd45614dcdbe4dfb6960163915a02393abf73ab039b` | hf.co/popkek00/fall_detection_model | MIT |
-| `/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/pretrained/safety-fall_classification/fall_resnet18_popkek00_config.json` | 690 | `69e9159f30c9ca852feb32b8196d6c64b9f8724f47eb34ee844784ca28bb729f` | hf.co/popkek00/fall_detection_model | MIT |
+| `/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/pretrained/safety-fall-detection/fall_resnet18_popkek00.safetensors` | 44,764,336 | `b806b650fcfe490e1c438cd45614dcdbe4dfb6960163915a02393abf73ab039b` | hf.co/popkek00/fall_detection_model | MIT |
+| `/home/nthanhtrung/Documents/05_Team/02_Vietsol/01_Projects/edge_ai/ai/pretrained/safety-fall-detection/fall_resnet18_popkek00_config.json` | 690 | `69e9159f30c9ca852feb32b8196d6c64b9f8724f47eb34ee844784ca28bb729f` | hf.co/popkek00/fall_detection_model | MIT |
 
 Previously-downloaded files (prior pass, unchanged) remain in the same directory: `efficientnetv2_rw_s.ra2_in1k.bin`, `mobilenetv4_conv_small.e2400_r224_in1k.bin`, `dinov2-small.bin`, `videomae-small-finetuned-kinetics.bin`, `x3d_m.pyth`.
 
@@ -120,4 +120,4 @@ Previously-downloaded files remain: `rtmdet-nano_person.pth`, `rtmo-s_body7_640x
 - popkek00 ResNet-18 fall classifier: hf.co/popkek00/fall_detection_model (MIT).
 - hiennguyen9874 fall dataset: hf.co/datasets/hiennguyen9874/fall-detection-dataset.
 - NTU-RGBD license: github.com/shahroudy/NTURGB-D (non-commercial academic).
-- Companion prior surveys: `ai/docs/technical_study/safety-fall_classification-sota.md`, `ai/docs/technical_study/safety-fall_pose_estimation-sota.md`.
+- Companion prior surveys: `ai/docs/technical_study/safety-fall-detection-sota.md`, `ai/docs/technical_study/safety-fall_pose_estimation-sota.md`.

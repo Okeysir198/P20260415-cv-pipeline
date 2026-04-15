@@ -1,6 +1,6 @@
 # Dataset config — Fire Detection
 dataset_name: "fire_detection"
-path: "../../dataset_store/fire_detection"
+path: "../../dataset_store/training_ready/fire_detection"
 train: "train/images"
 val: "val/images"
 test: "test/images"

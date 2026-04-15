@@ -1,0 +1,73 @@
+{
+  "use_case": "mask",
+  "classes": {
+    "0": "with_mask",
+    "1": "without_mask"
+  },
+  "text_prompts": {
+    "with_mask": "face with mask",
+    "without_mask": "face without mask"
+  },
+  "items": [
+    {
+      "image": "without_mask_1667_jpg.rf.3b12a5745c04715ca7d1b5c491ac4325.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "with_mask_1492_jpg.rf.005d23937b894484a20afce1077a2e01.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "without_mask_1254_jpg.rf.54e6e26c765bd8da89c18e718165b81f.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "with_mask_1375_jpg.rf.fb7b9a5ee597d81e758cab715c31a484.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "with_mask_1044_jpg.rf.13e39397ce7515bfde57eb50b18e99f8.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "without_mask_2256_jpg.rf.92d9305f8851ac77148c9e410cd290cc.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "without_mask_2320_jpg.rf.4881bf79dbb66d96263ec605525e42c3.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "with_mask_1546_jpg.rf.6e317f12b5cb23a3dad46c7c1d3ec5a8.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "with_mask_1763_jpg.rf.d24bc0da1c62419cf760518644ac635d.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    },
+    {
+      "image": "without_mask_14_jpg.rf.cf36b50804b4a48bcbb7d12d8944fb35.jpg",
+      "width": 512,
+      "height": 512,
+      "num_annotations": 1
+    }
+  ]
+}

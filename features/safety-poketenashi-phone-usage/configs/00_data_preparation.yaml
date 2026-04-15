@@ -1,0 +1,101 @@
+# Poketenashi Phone Usage — Data Preparation Config (v1, 2026-04-15)
+#
+# Phase 1 Model H sub-model: detect `phone_usage` (using mobile phone while walking).
+# Only phone_usage is detection-trained; hands_in_pockets + no_handrail + unsafe_stair_crossing
+# are derived from pose/zone logic in the inference pipeline, not this model.
+#
+# Canonical classes: person, phone_usage
+# person comes from shlokraval_ppe_yolov8 (44k person labels).
+# phone_usage comes from 5 phone-detection sources totaling ~13K imgs.
+
+task: detection
+dataset_name: "safety_poketenashi_phone_usage"
+output_dir: "../../../dataset_store/training_ready/safety_poketenashi_phone_usage"
+output_format: "yolo"
+
+classes:
+  - person
+  - phone_usage
+
+sources:
+  # Primary — explicit "Using Phone" + "mobile" labels, 3748 imgs
+  - name: "rf_using_phone_unimonitor"
+    path: "../../../dataset_store/raw/phone_detection/rf_using_phone_unimonitor"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Using Phone": "phone_usage"
+      "mobile": "phone_usage"
+
+  # 4216 imgs, Phone object in person-using-phone context
+  - name: "rf_phone_using_fyp"
+    path: "../../../dataset_store/raw/phone_detection/rf_phone_using_fyp"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Phone": "phone_usage"
+
+  # 3193 imgs, has `using phone` class; opaque v9 class is dropped
+  - name: "rf_phone_texting_4class"
+    path: "../../../dataset_store/raw/phone_detection/rf_phone_texting_4class"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "using phone": "phone_usage"
+      # drop: "mobile_dataset - v9 2025-04-05 7-31pm" (opaque label)
+
+  # Action-level Texting + Calling → phone_usage; Drinking dropped
+  - name: "rf_texting_calling_drinking"
+    path: "../../../dataset_store/raw/phone_detection/rf_texting_calling_drinking"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid"]
+    class_map:
+      "c0-Texting": "phone_usage"
+      "c1-Calling": "phone_usage"
+      # drop: c2-Drinking
+
+  # FPI-Det — 22,879 imgs, face+phone paired labels. License: AGPL-3.0.
+  # Every frame has a person-using-phone by design, so `phone` bbox → phone_usage.
+  - name: "fpi_det"
+    path: "../../../dataset_store/raw/phone_detection/fpi_det/reorganized_dataset"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "val", "test"]
+    source_classes: ["phone", "face"]
+    class_map:
+      "phone": "phone_usage"
+      # drop: face (not needed for phone_usage taxonomy)
+
+  # 997 imgs, explicit "phone usage" class
+  - name: "roboflow_phone_usage_dms"
+    path: "../../../dataset_store/raw/phone_detection/roboflow_phone_usage_dms"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "phone usage": "phone_usage"
+
+  # Person class — reuse shlokraval (44k Person labels, high coverage)
+  - name: "shlokraval_ppe_yolov8"
+    path: "../../../dataset_store/raw/helmet_detection/shlokraval_ppe_yolov8"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Person": "person"
+      # drop all other PPE classes — only person contributes here
+
+splits:
+  train: 0.8
+  val: 0.1
+  test: 0.1
+  seed: 42
+
+options:
+  copy_images: true
+  handle_duplicates: "rename"
+  validate_labels: true

@@ -1,6 +1,6 @@
 # Dataset config — Fall Classification (100 images for pipeline testing)
-dataset_name: "test_fall_classification_100"
-path: "../../dataset_store/test_fall_classification_100"
+dataset_name: "test_fall_detection_100"
+path: "../../dataset_store/test_fall_detection_100"
 train: "train/images"
 val: "val/images"
 test: "val/images"

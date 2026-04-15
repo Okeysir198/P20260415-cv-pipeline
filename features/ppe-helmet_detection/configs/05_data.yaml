@@ -1,6 +1,6 @@
 # Dataset config — PPE: Helmet Compliance
 dataset_name: "helmet_detection"
-path: "../../dataset_store/helmet_detection"
+path: "../../dataset_store/training_ready/helmet_detection"
 train: "train/images"
 val: "val/images"
 test: "test/images"

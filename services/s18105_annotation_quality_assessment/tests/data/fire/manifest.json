@@ -1,0 +1,193 @@
+{
+  "use_case": "fire",
+  "classes": {
+    "0": "fire",
+    "1": "smoke"
+  },
+  "text_prompts": {
+    "fire": "fire flames",
+    "smoke": "smoke"
+  },
+  "items": [
+    {
+      "image": "bothFireAndSmoke_CV001983.jpg",
+      "width": 224,
+      "height": 224,
+      "num_annotations": 2
+    },
+    {
+      "image": "bothFireAndSmoke_CV004528.jpg",
+      "width": 600,
+      "height": 400,
+      "num_annotations": 2
+    },
+    {
+      "image": "bothFireAndSmoke_CV003812.jpg",
+      "width": 599,
+      "height": 1036,
+      "num_annotations": 2
+    },
+    {
+      "image": "bothFireAndSmoke_CV005275.jpg",
+      "width": 374,
+      "height": 282,
+      "num_annotations": 2
+    },
+    {
+      "image": "bothFireAndSmoke_CV017274.jpg",
+      "width": 1280,
+      "height": 720,
+      "num_annotations": 2
+    },
+    {
+      "image": "bothFireAndSmoke_CV016107.jpg",
+      "width": 640,
+      "height": 352,
+      "num_annotations": 8
+    },
+    {
+      "image": "bothFireAndSmoke_CV006490.jpg",
+      "width": 224,
+      "height": 224,
+      "num_annotations": 4
+    },
+    {
+      "image": "bothFireAndSmoke_CV006173.jpg",
+      "width": 630,
+      "height": 1040,
+      "num_annotations": 2
+    },
+    {
+      "image": "bothFireAndSmoke_CV000166.jpg",
+      "width": 1280,
+      "height": 720,
+      "num_annotations": 2
+    },
+    {
+      "image": "bothFireAndSmoke_CV001605.jpg",
+      "width": 259,
+      "height": 194,
+      "num_annotations": 2
+    },
+    {
+      "image": "fire_CV011286.jpg",
+      "width": 284,
+      "height": 177,
+      "num_annotations": 1
+    },
+    {
+      "image": "fire_CV000409.jpg",
+      "width": 224,
+      "height": 224,
+      "num_annotations": 1
+    },
+    {
+      "image": "fire_CV005682.jpg",
+      "width": 660,
+      "height": 411,
+      "num_annotations": 1
+    },
+    {
+      "image": "fire_CV003017.jpg",
+      "width": 512,
+      "height": 270,
+      "num_annotations": 1
+    },
+    {
+      "image": "fire_CV009561.jpg",
+      "width": 224,
+      "height": 224,
+      "num_annotations": 1
+    },
+    {
+      "image": "fire_CV009855.jpg",
+      "width": 224,
+      "height": 224,
+      "num_annotations": 3
+    },
+    {
+      "image": "fire_CV010967.jpg",
+      "width": 2816,
+      "height": 2112,
+      "num_annotations": 2
+    },
+    {
+      "image": "fire_CV003759.jpg",
+      "width": 500,
+      "height": 376,
+      "num_annotations": 1
+    },
+    {
+      "image": "fire_CV005940.jpg",
+      "width": 500,
+      "height": 667,
+      "num_annotations": 1
+    },
+    {
+      "image": "fire_CV004940.jpg",
+      "width": 374,
+      "height": 280,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV020405.jpg",
+      "width": 1920,
+      "height": 1080,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV004519.jpg",
+      "width": 800,
+      "height": 530,
+      "num_annotations": 3
+    },
+    {
+      "image": "smoke_CV013330.jpg",
+      "width": 1920,
+      "height": 1080,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV018275.jpg",
+      "width": 1920,
+      "height": 1080,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV014115.jpg",
+      "width": 1920,
+      "height": 1080,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV016435.jpg",
+      "width": 1920,
+      "height": 1080,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV017962.jpg",
+      "width": 1920,
+      "height": 1080,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV001612.jpg",
+      "width": 628,
+      "height": 1030,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV005420.jpg",
+      "width": 1100,
+      "height": 619,
+      "num_annotations": 1
+    },
+    {
+      "image": "smoke_CV020422.jpg",
+      "width": 1920,
+      "height": 1080,
+      "num_annotations": 1
+    }
+  ]
+}

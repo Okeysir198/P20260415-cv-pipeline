@@ -64,7 +64,7 @@ configs/
 ├── helmet_detection/          # 00, 05, 06, 03_generative_augment.yaml (override)
 ├── shoes_detection/           # 00, 05, 06, 03_generative_augment.yaml (override)
 ├── shoes_classification/      # 05_data.yaml, 06_training.yaml (timm MobileNetV3)
-├── fall_classification/       # 05, 06
+├── fall_detection/       # 05, 06
 ├── fall_pose_estimation/      # 05, 06 (with kpt_shape)
 ├── phone_detection/           # 00, 05, 06
 ├── vehicle_detection/         # 05, 06

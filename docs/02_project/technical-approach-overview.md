@@ -17,7 +17,7 @@ Per-use-case technical details (architecture, dataset, training, alert logic, ed
 | **A: Fire & smoke detection** | [`docs/03_platform/safety-fire_detection.md`](../../03_platform/safety-fire_detection.md) |
 | **B: PPE helmet compliance** | [`docs/03_platform/ppe-helmet_detection.md`](../../03_platform/ppe-helmet_detection.md) |
 | **F: PPE safety shoes** | [`docs/03_platform/ppe-shoes_detection.md`](../../03_platform/ppe-shoes_detection.md) |
-| **G: Fall detection (classification)** | [`docs/03_platform/safety-fall_classification.md`](../../03_platform/safety-fall_classification.md) |
+| **G: Fall detection (classification)** | [`docs/03_platform/safety-fall-detection.md`](../../03_platform/safety-fall-detection.md) |
 | **G: Fall detection (pose)** | [`docs/03_platform/safety-fall_pose_estimation.md`](../../03_platform/safety-fall_pose_estimation.md) |
 | **H: Behavioral violations (poketenashi)** | [`docs/03_platform/safety-poketenashi.md`](../../03_platform/safety-poketenashi.md) |
 | **I: Zone intrusion** | [`docs/03_platform/access-zone_intrusion.md`](../../03_platform/access-zone_intrusion.md) |

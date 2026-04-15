@@ -2,7 +2,7 @@
 
 Date: 2026-04-14
 Scope: Evaluate as candidate for edge_ai Phase 1 action-classification use
-cases — specifically `fall_classification` (g) and `poketenashi` (h).
+cases — specifically `fall_detection` (g) and `poketenashi` (h).
 
 ## 1. Model overview
 
@@ -116,7 +116,7 @@ Honest assessment against our constraints:
 | Label coverage for `poketenashi`   | None — not in training data, requires custom dataset + fine-tune |
 | Input format (clip of 32 frames)   | Adds buffering latency; OK for fall, acceptable for poketenashi |
 
-For `fall_classification`: the `fall_floor` class is in the pretrain set,
+For `fall_detection`: the `fall_floor` class is in the pretrain set,
 which gives a warm-start advantage over Kinetics-only alternatives. BUT the
 pretrain corpus (HMDB5, 123 fall clips) is small and the license/ops lock-in
 outweighs the warm-start.

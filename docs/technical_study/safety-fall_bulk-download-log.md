@@ -2,7 +2,7 @@
 
 Follow-up to the three surveys:
 
-- `safety-fall_classification-sota.md`
+- `safety-fall-detection-sota.md`
 - `safety-fall_pose_estimation-sota.md`
 - `safety-fall_oss-pretrained-deep-dive.md`
 
@@ -10,7 +10,7 @@ Operator instruction: "don't worry about license, just download first — bulk p
 
 ## 1. Destinations
 
-- `ai/pretrained/safety-fall_classification/`
+- `ai/pretrained/safety-fall-detection/`
 - `ai/pretrained/safety-fall_pose_estimation/`
 - `ai/pretrained/safety-poketenashi/` (overlap destination)
 
@@ -87,7 +87,7 @@ All three directories are gitignored under `ai/.gitignore` (`pretrained/*`). Per
 | Poketenashi overlap | 3 | 3 | 0 |
 | **Total** | **47** | **42** | **5** |
 
-Total bytes on disk for fall_classification (new + existing) ≈ 4.6 GB. Fall pose ≈ 1.7 GB. Poketenashi (unchanged) ≈ 0.4 GB.
+Total bytes on disk for fall_detection (new + existing) ≈ 4.6 GB. Fall pose ≈ 1.7 GB. Poketenashi (unchanged) ≈ 0.4 GB.
 
 ## 6. License landmines (informational)
 
@@ -114,7 +114,7 @@ Re-validate per the rules in `safety-fall_oss-pretrained-deep-dive.md` §7 befor
 
 Full byte-exact per-directory manifests (gitignored):
 
-- `ai/pretrained/safety-fall_classification/DOWNLOAD_MANIFEST.md`
+- `ai/pretrained/safety-fall-detection/DOWNLOAD_MANIFEST.md`
 - `ai/pretrained/safety-fall_pose_estimation/DOWNLOAD_MANIFEST.md`
 - `ai/pretrained/safety-poketenashi/DOWNLOAD_MANIFEST.md`
 

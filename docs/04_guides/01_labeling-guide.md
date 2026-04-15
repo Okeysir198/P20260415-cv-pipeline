@@ -856,8 +856,8 @@ kpt_shape: [17, 3]
 ```
 
 ```yaml
-# features/safety-fall_classification/configs/05_data.yaml
-path: ../merged/fall_classification
+# features/safety-fall-detection/configs/05_data.yaml
+path: ../merged/fall_detection
 train: train/images
 val: val/images
 test: test/images

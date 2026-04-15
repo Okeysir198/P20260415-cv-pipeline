@@ -71,7 +71,7 @@ def load_prep_config(config_path: str) -> dict:
         raise FileNotFoundError(f"Config file not found: {path}")
 
     base_dir = path.parent
-    config = load_config(str(path), base_dir=str(base_dir))
+    config = load_config(str(path))
 
     if "output_dir" in config:
         config["output_dir"] = resolve_path(config["output_dir"], base_dir)

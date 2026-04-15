@@ -1,0 +1,65 @@
+# Fall Detection — Data Preparation Config (v1, 2026-04-15)
+#
+# Quality-first selection: 3 sources totaling ~12.5K imgs. coco_keypoints
+# (58K) is excluded — keypoints only, no bbox; reserve for pose model.
+
+task: detection
+dataset_name: "fall_detection"
+output_dir: "../../../dataset_store/training_ready/fall_detection"
+output_format: "yolo"
+
+# Canonical target classes
+classes:
+  - person
+  - fallen_person
+
+sources:
+  # Primary — clean 2-class fall/nofall, matches our taxonomy directly
+  - name: "roboflow_person_fall_8k"
+    path: "../../../dataset_store/raw/fall_detection/roboflow_person_fall_8k"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "person-fall": "fallen_person"
+      "person-nofall": "person"
+
+  # Adds angle/scene diversity; only has fall positives
+  - name: "roboflow_fall"
+    path: "../../../dataset_store/raw/fall_detection/roboflow_fall"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Fall-Detected": "fallen_person"
+
+  # CCTV-angle — critical for deployment-angle match
+  # Note: labels include pose keypoints; YOLO parser uses first 5 fields (cls+bbox), ignores keypoints
+  - name: "cctv_fall"
+    path: "../../../dataset_store/raw/fall_detection/cctv_fall/laying_dataset"
+    format: "yolo"
+    has_splits: false
+    class_map:
+      "laying": "fallen_person"
+      "standing": "person"
+
+  # Site-collected overlay (optional)
+  - name: "site_collected"
+    path: "../../../dataset_store/site_collected/fall_detection"
+    format: "yolo"
+    has_splits: false
+    optional: true
+    class_map:
+      "person": "person"
+      "fallen_person": "fallen_person"
+
+splits:
+  train: 0.8
+  val: 0.1
+  test: 0.1
+  seed: 42
+
+options:
+  copy_images: true
+  handle_duplicates: "rename"
+  validate_labels: true

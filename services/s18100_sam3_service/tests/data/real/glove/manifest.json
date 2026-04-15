@@ -1,0 +1,71 @@
+{
+  "use_case": "glove",
+  "classes": {
+    "0": "hand_glove"
+  },
+  "text_prompts": {
+    "hand_glove": "hand wearing glove"
+  },
+  "items": [
+    {
+      "image": "202241_jpg.rf.4902ce07feb3d57933b6dfc6b4f5d6a4.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    },
+    {
+      "image": "202250_jpg.rf.774949742b99ed5035a0e99f071c1442.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 3
+    },
+    {
+      "image": "dataset202243-3-_jpg.rf.854318cacc110aeb33570613d381f6ed.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    },
+    {
+      "image": "dataset202223_jpg.rf.0713adaa9368a68d6a6e7a245b1f1f1e.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 1
+    },
+    {
+      "image": "202231_jpg.rf.01aa36ef6790a7c7d3644b94385d06b6.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 1
+    },
+    {
+      "image": "dataset20223-7-_jpg.rf.dbc274dd9e647bd08c861c37203416ad.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    },
+    {
+      "image": "202272_jpg.rf.d671247d706c34c3c59ceb5336daaf4c.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 1
+    },
+    {
+      "image": "202265_jpg.rf.830f29dc4be91dc6a2503be7fdc96849.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 1
+    },
+    {
+      "image": "20226_jpg.rf.81fc184414eb387fe3dc9d7549ba6c92.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    },
+    {
+      "image": "dataset202234_jpg.rf.99fea1d556cde97359280dbddb41d08a.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    }
+  ]
+}

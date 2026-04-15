@@ -1,61 +1,155 @@
-# Shoes Detection Data Preparation Config
-# Combines multiple source datasets into training-ready YOLO format
+# Safety Shoes Detection — Data Preparation Config (v1, 2026-04-15)
+#
+# Quality-first selection: 3 sources totaling ~15K imgs.
+#   1. keremberke_ppe — only source with shoes/no_shoes + person in same frames (COCO JSON)
+#   2. rf_barefoot — dedicated barefoot negative (class-imbalance fix)
+#   3. rf_footwear_sandal_shoe — Sandal = non-compliant footwear
+#
+# Excluded (v2 candidates): rf_feet_segmentation (reserve for two-stage shoe_region
+# pipeline), multi-class PPE sets with Boots labels (sh17, roboflow_ppe_6class,
+# rf_siabar_ppe, rf_chemical_ppe_11class — add in v2 for Boots diversity),
+# shoe_ppe (opaque class "14" — unusable).
 
-# Task type
 task: detection
-
-# Dataset identification
 dataset_name: "shoes_detection"
-output_dir: "../../dataset_store/shoes_detection"
-
-# Output format
+output_dir: "../../../dataset_store/training_ready/shoes_detection"
 output_format: "yolo"
 
-# Target classes (canonical names)
+# Canonical target classes
 classes:
   - person
   - foot_with_safety_shoes
   - foot_without_safety_shoes
 
-# Source datasets to combine
 sources:
-  # Pre-split YOLO format
-  - name: "shoe_ppe"
-    path: "../../dataset_store/raw/shoes_detection/shoe_ppe"
+  # Safety-boots backbone — 3,481 imgs, MIT. Provides foot_with_safety_shoes + person.
+  - name: "roboflow_ppe_6class"
+    path: "../../../dataset_store/raw/helmet_detection/roboflow_ppe_6class"
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
     class_map:
-      "Shoe": "foot_with_safety_shoes"
-      "No_Shoe": "foot_without_safety_shoes"
+      "Boots": "foot_with_safety_shoes"
+      "Person": "person"
+      # drop: Gloves/Goggles/Helmet/Vest
 
-  # COCO JSON format
+  # Chemical-context PPE — 1,180 imgs, has Shoes/NO-Shoes + Person all together
+  - name: "rf_chemical_ppe_11class"
+    path: "../../../dataset_store/raw/helmet_detection/rf_chemical_ppe_11class"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Shoes": "foot_with_safety_shoes"
+      "No-Shoes": "foot_without_safety_shoes"
+      "Person": "person"
+
+  # Keremberke — COCO JSON, mostly glove/goggle labels but ~1,361 shoe/no_shoe anns overall
   - name: "keremberke_ppe"
-    path: "../../dataset_store/raw/shoes_detection/keremberke_ppe/data"
+    path: "../../../dataset_store/raw/shoes_detection/keremberke_ppe/data"
     format: "coco"
     has_splits: true
-    splits_to_use: ["train_extracted", "valid_extracted", "test_extracted"]
+    splits_to_use: ["train", "valid", "test"]
+    annotations_file: "_annotations.coco.json"
     class_map:
       "shoes": "foot_with_safety_shoes"
       "no_shoes": "foot_without_safety_shoes"
 
-  # Site collected data
+  # Barefoot negatives — 1,258 imgs, 1-class
+  - name: "rf_barefoot"
+    path: "../../../dataset_store/raw/shoes_detection/rf_barefoot"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "no_shoes": "foot_without_safety_shoes"
+
+  # Sandal = non-compliant; Shoe class ambiguous → drop
+  - name: "rf_footwear_sandal_shoe"
+    path: "../../../dataset_store/raw/shoes_detection/rf_footwear_sandal_shoe"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Sandal": "foot_without_safety_shoes"
+      # drop: Shoe (ambiguous safety vs. casual), Unidentified
+
+  # Big safety-shoes source — 19,976 imgs, 1-class (all positive)
+  - name: "rf_safety_shoes_11k"
+    path: "../../../dataset_store/raw/shoes_detection/rf_safety_shoes_11k"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    source_classes: ["safety_shoes"]
+    class_map:
+      "safety_shoes": "foot_with_safety_shoes"
+
+  # 7,982 imgs, 3-class — perfect taxonomy match incl. slippers as negative
+  - name: "rf_footwear_3class_mohamed"
+    path: "../../../dataset_store/raw/shoes_detection/rf_footwear_3class_mohamed"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "shoes": "foot_with_safety_shoes"
+      "no_shoes": "foot_without_safety_shoes"
+      "slippers": "foot_without_safety_shoes"
+
+  # 4,695 imgs, 9-class footwear taxonomy — Boots→safety, others→non-safety
+  - name: "rf_footwear_9class"
+    path: "../../../dataset_store/raw/shoes_detection/rf_footwear_9class"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "Boots": "foot_with_safety_shoes"
+      "Sandals": "foot_without_safety_shoes"
+      "Flip Flops": "foot_without_safety_shoes"
+      "Sneakers": "foot_without_safety_shoes"
+      "Dress_Shoes": "foot_without_safety_shoes"
+      "Heels": "foot_without_safety_shoes"
+      "Clogs": "foot_without_safety_shoes"
+      "Flats": "foot_without_safety_shoes"
+      "Mules": "foot_without_safety_shoes"
+
+  # 3,405 imgs — safety_shoes vs FlipFlops
+  - name: "rf_safety_shoes_flipflop"
+    path: "../../../dataset_store/raw/shoes_detection/rf_safety_shoes_flipflop"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "safety_shoes_Detection  v3 20231011 213pm": "foot_with_safety_shoes"
+      "FlipFlops": "foot_without_safety_shoes"
+      "shoe": "foot_without_safety_shoes"
+      # drop: opaque class "0"
+
+  # Pure sneaker negatives — 1,630 imgs
+  - name: "rf_sneakers"
+    path: "../../../dataset_store/raw/shoes_detection/rf_sneakers"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "valid", "test"]
+    class_map:
+      "sneaker": "foot_without_safety_shoes"
+
+  # Site-collected overlay — factory footwear + person labels (optional)
   - name: "site_collected"
-    path: "../../dataset_store/site_collected/shoes_detection"
+    path: "../../../dataset_store/site_collected/shoes_detection"
     format: "yolo"
     has_splits: false
+    optional: true
     class_map:
+      "person": "person"
       "foot_with_safety_shoes": "foot_with_safety_shoes"
       "foot_without_safety_shoes": "foot_without_safety_shoes"
 
-# Split configuration (stratified by default)
 splits:
   train: 0.8
   val: 0.1
   test: 0.1
   seed: 42
 
-# Processing options
 options:
   copy_images: true
   handle_duplicates: "rename"

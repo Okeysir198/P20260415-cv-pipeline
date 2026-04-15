@@ -103,7 +103,7 @@ Core detection features for Nitto Denko factory safety system.
 | a | Fire Detection | Safety | YOLOX-M | LOW | [safety-fire_detection](03_platform/safety-fire_detection.md) |
 | b | Helmet Detection | PPE | YOLOX-M | LOW-MED | [ppe-helmet_detection](03_platform/ppe-helmet_detection.md) |
 | f | Safety Shoes | PPE | YOLOX-Tiny + MobileNetV3 | HIGH | [ppe-shoes_detection](03_platform/ppe-shoes_detection.md) |
-| g | Fall Classification | Safety | YOLOX-M | HIGH | [safety-fall_classification](03_platform/safety-fall_classification.md) |
+| g | Fall Classification | Safety | YOLOX-M | HIGH | [safety-fall-detection](03_platform/safety-fall-detection.md) |
 | g | Fall Pose Estimation | Safety | YOLOX-Tiny + RTMPose-S | HIGH | [safety-fall_pose_estimation](03_platform/safety-fall_pose_estimation.md) |
 | h | Poketenashi Violations | Safety | YOLOX-Tiny + RTMPose-S | HIGH | [safety-poketenashi](03_platform/safety-poketenashi.md) |
 | i | Zone Intrusion | Access | YOLOX-Tiny (pretrained) | LOW | [access-zone_intrusion](03_platform/access-zone_intrusion.md) |

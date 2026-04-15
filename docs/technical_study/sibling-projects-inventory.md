@@ -34,16 +34,16 @@ By extension across both sources: `.pt` 22, `.pth` 9, `.onnx` 6,
 | `01_code/rf-detr-base.pth` | 372 MB | (dup) | — | Identical copy of above; not linked |
 | `01_code/checkpoints/feat_detect/yolov8/yolov8l.pt` | 88 MB | access-zone_intrusion | `visualcore_yolov8l.pt` | Generic COCO YOLOv8-L |
 | `01_code/yolov8l.pt` | 88 MB | (dup) | — | Same file, not linked |
-| `checkpoints/stage1_step/asformer/gtea_split1.pt` | 4.7 MB | safety-fall_classification | `visualcore_asformer_gtea_split1.pt` | Temporal action segmentation (GTEA cooking) — feature extractor candidate for action models |
-| `checkpoints/stage1_step/mstcn/gtea_split1.pt` | 3.3 MB | safety-fall_classification | `visualcore_mstcn_gtea_split1.pt` | MS-TCN segmentation head |
-| `checkpoints/stage2_action/c2f_tcn/gtea_split1.pt` | 27 MB | safety-fall_classification | `visualcore_c2f_tcn_gtea_split1.pt` | C2F-TCN action seg |
-| `checkpoints/stage2_action/diffact/gtea_split{1..4}.pt` | 5 MB ea | safety-fall_classification | `visualcore_diffact_gtea_split{1..4}.pt` | DiffAct (diffusion action) |
-| `checkpoints/stage2_action/fact/gtea_split{1..4}.pt` | 62 MB ea | safety-fall_classification | `visualcore_fact_gtea_split{1..4}.pt` | FACT action transformer |
-| `checkpoints/stage2_action/fact/breakfast_split{1..4}.pt` | 498 MB ea | safety-fall_classification | `visualcore_fact_breakfast_split{1..4}.pt` | FACT, Breakfast dataset |
-| `checkpoints/stage2_action/fact/epic_kitchens_split1.pt` | 232 MB | safety-fall_classification | `visualcore_fact_epic_kitchens_split1.pt` | FACT, EpicKitchens |
-| `checkpoints/stage2_action/fact/egoprocel_split1.pt` | 187 MB | safety-fall_classification | `visualcore_fact_egoprocel_split1.pt` | FACT, EgoProceL |
-| `checkpoints/stage2_action/ltcontext/breakfast_split{1..4}.pth` | 3 MB ea | safety-fall_classification | `visualcore_ltcontext_breakfast_split{1..4}.pth` | LTContext head |
-| `checkpoints/stage2_action/ltcontext/gtea_split1.pt` | 3 MB | safety-fall_classification | `visualcore_ltcontext_gtea_split1.pt` | LTContext head |
+| `checkpoints/stage1_step/asformer/gtea_split1.pt` | 4.7 MB | safety-fall-detection | `visualcore_asformer_gtea_split1.pt` | Temporal action segmentation (GTEA cooking) — feature extractor candidate for action models |
+| `checkpoints/stage1_step/mstcn/gtea_split1.pt` | 3.3 MB | safety-fall-detection | `visualcore_mstcn_gtea_split1.pt` | MS-TCN segmentation head |
+| `checkpoints/stage2_action/c2f_tcn/gtea_split1.pt` | 27 MB | safety-fall-detection | `visualcore_c2f_tcn_gtea_split1.pt` | C2F-TCN action seg |
+| `checkpoints/stage2_action/diffact/gtea_split{1..4}.pt` | 5 MB ea | safety-fall-detection | `visualcore_diffact_gtea_split{1..4}.pt` | DiffAct (diffusion action) |
+| `checkpoints/stage2_action/fact/gtea_split{1..4}.pt` | 62 MB ea | safety-fall-detection | `visualcore_fact_gtea_split{1..4}.pt` | FACT action transformer |
+| `checkpoints/stage2_action/fact/breakfast_split{1..4}.pt` | 498 MB ea | safety-fall-detection | `visualcore_fact_breakfast_split{1..4}.pt` | FACT, Breakfast dataset |
+| `checkpoints/stage2_action/fact/epic_kitchens_split1.pt` | 232 MB | safety-fall-detection | `visualcore_fact_epic_kitchens_split1.pt` | FACT, EpicKitchens |
+| `checkpoints/stage2_action/fact/egoprocel_split1.pt` | 187 MB | safety-fall-detection | `visualcore_fact_egoprocel_split1.pt` | FACT, EgoProceL |
+| `checkpoints/stage2_action/ltcontext/breakfast_split{1..4}.pth` | 3 MB ea | safety-fall-detection | `visualcore_ltcontext_breakfast_split{1..4}.pth` | LTContext head |
+| `checkpoints/stage2_action/ltcontext/gtea_split1.pt` | 3 MB | safety-fall-detection | `visualcore_ltcontext_gtea_split1.pt` | LTContext head |
 
 ### dms_oms
 
@@ -86,7 +86,7 @@ By extension across both sources: `.pt` 22, `.pth` 9, `.onnx` 6,
   PPE/helmet weights, so duplication was not needed.
 - The visual_core `stage2_action/fact` `breakfast_*` and `epic_kitchens_*`
   weights are large (500 MB+ each). They are linked under
-  **safety-fall_classification** as candidate temporal-action backbones, but
+  **safety-fall-detection** as candidate temporal-action backbones, but
   they are trained on cooking datasets, not falls — treat them as
   *transfer-learning starting points*, not ready inference models.
 
@@ -97,13 +97,13 @@ By extension across both sources: `.pt` 22, `.pth` 9, `.onnx` 6,
 | `safety-fire_detection/` | 0 |
 | `ppe-helmet_detection/` | 0 |
 | `ppe-shoes_detection/` | 0 |
-| `safety-fall_classification/` | 22 |
+| `safety-fall-detection/` | 22 |
 | `safety-fall_pose_estimation/` | 0 |
 | `safety-poketenashi/` | 0 |
 | `access-zone_intrusion/` | 6 (3 new from sibling repos + 3 pre-existing local symlinks) |
 | `access-face_recognition/` | 6 |
 
-Total: **34 symlinks** across **3 features** (`safety-fall_classification`,
+Total: **34 symlinks** across **3 features** (`safety-fall-detection`,
 `access-zone_intrusion`, `access-face_recognition`).
 
 The other five Phase 1 features (fire detection, helmet PPE, shoes PPE, fall

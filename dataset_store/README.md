@@ -39,7 +39,7 @@ dataset_store/
 | Fire Detection | `features/safety-fire_detection/configs/05_data.yaml` | `training_ready/fire_detection/` | `0:fire, 1:smoke` | ~122K |
 | Helmet Detection | `features/ppe-helmet_detection/configs/05_data.yaml` | `training_ready/helmet_detection/` | `0:person, 1:head_with_helmet, 2:head_without_helmet, 3:head_with_nitto_hat` | ~62K |
 | Shoes Detection | `features/ppe-shoes_detection/configs/05_data.yaml` | `training_ready/shoes_detection/` | `0:person, 1:foot_with_safety_shoes, 2:foot_without_safety_shoes` | ~3.7K |
-| Fall (Classify) | `features/safety-fall_classification/configs/05_data.yaml` | `training_ready/fall_classification/` | `0:person, 1:fallen_person` | ~17K |
+| Fall (Classify) | `features/safety-fall-detection/configs/05_data.yaml` | `training_ready/fall_detection/` | `0:person, 1:fallen_person` | ~17K |
 | Fall (Pose) | `features/safety-fall_pose_estimation/configs/05_data.yaml` | `training_ready/fall_pose_estimation/` | `0:person` (17 keypoints) | ~111 |
 | Zone Intrusion | — | `zone_intrusion/` | Pretrained person detection (no custom data) | — |
 

@@ -1,36 +1,45 @@
-# Fire Detection Data Preparation Config
-# Combines multiple source datasets into training-ready YOLO format
+# Fire Detection — Data Preparation Config (v1, 2026-04-15)
+#
+# Quality-first selection: 3 clean, diverse sources. fasdd_cv (95K) and
+# roboflow_fire_seg (seg masks) are deferred to v2; site_collected stays
+# as optional overlay when populated.
 
-# Task type
 task: detection
-
-# Dataset identification
 dataset_name: "fire_detection"
-output_dir: "../../dataset_store/fire_detection"
-
-# Output format
+output_dir: "../../../dataset_store/training_ready/fire_detection"
 output_format: "yolo"
 
-# Target classes (canonical names)
+# Canonical target classes
 classes:
   - fire
   - smoke
 
-# Source datasets to combine
 sources:
-  # Pre-split YOLO format
-  - name: "roboflow_fire"
-    path: "../../dataset_store/raw/fire_detection/roboflow_fire"
+  # Primary — paper-authored D-Fire, 21,527 imgs, clean YOLO labels
+  - name: "d_fire"
+    path: "../../../dataset_store/raw/fire_detection/d_fire/data"
+    format: "yolo"
+    has_splits: true
+    splits_to_use: ["train", "val", "test"]
+    class_map:
+      "smoke": "smoke"
+      "fire": "fire"
+
+  # Indoor diversity — Zenodo 15826133, 10,000 imgs. Roboflow YOLO with
+  # numeric class names (0=fire, 1=smoke per the indoor-fire-smoke project)
+  - name: "zenodo_indoor_fire"
+    path: "../../../dataset_store/raw/fire_detection/zenodo_indoor_fire/Indoor Fire Smoke"
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
     class_map:
-      "fire": "fire"
-      "smoke": "smoke"
+      "0": "fire"
+      "1": "smoke"
 
-  # Pre-split YOLO format
+  # Factory context — critical for Nitto domain; 1,343 imgs
+  # (also has chemical/no-helmet/water-leak classes we discard here)
   - name: "industrial_hazards"
-    path: "../../dataset_store/raw/fire_detection/industrial_hazards"
+    path: "../../../dataset_store/raw/fire_detection/industrial_hazards"
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid"]
@@ -38,42 +47,22 @@ sources:
       "fire": "fire"
       "smoke": "smoke"
 
-  # Flat YOLO format
-  - name: "d_fire"
-    path: "../../dataset_store/raw/fire_detection/d_fire/data/data/train"
-    format: "yolo"
-    has_splits: false
-    class_map:
-      "smoke": "smoke"
-      "fire": "fire"
-
-  # COCO JSON format
-  - name: "fasdd_cv"
-    path: "../../dataset_store/raw/fire_detection/fasdd_cv/data"
-    format: "coco"
-    has_splits: true
-    splits_to_use: ["train", "val", "test"]
-    class_map:
-      "fire": "fire"
-      "smoke": "smoke"
-
-  # Site collected data
+  # Site-collected overlay (populated on-site, may be empty)
   - name: "site_collected"
-    path: "../../dataset_store/site_collected/fire_detection"
+    path: "../../../dataset_store/site_collected/fire_detection"
     format: "yolo"
     has_splits: false
+    optional: true
     class_map:
       "fire": "fire"
       "smoke": "smoke"
 
-# Split configuration (stratified by default)
 splits:
   train: 0.8
   val: 0.1
   test: 0.1
   seed: 42
 
-# Processing options
 options:
   copy_images: true
   handle_duplicates: "rename"

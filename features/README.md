@@ -43,7 +43,7 @@ The sole exception is `detect_vehicle`, which has no platform doc yet.
 | `detect_vehicle` | Detection | Generic vehicle detection |
 | `ppe-shoes_detection` | Detection | Safety-shoes PPE detection |
 | `access-zone_intrusion` | Detection + logic | Person/vehicle intrusion into restricted zones |
-| `safety-fall_classification` | Classification | Fall event classification from crops |
+| `safety-fall-detection` | Classification | Fall event classification from crops |
 | `safety-fall_pose_estimation` | Keypoint | Fall detection via pose keypoints |
 | `access-face_recognition` | Face | Enrollment + verification |
 

@@ -31,7 +31,7 @@
 | a | [Fire Detection](03_platform/safety-fire_detection.md) | Safety | Tri | 1 | Training |
 | b | [Helmet Detection](03_platform/ppe-helmet_detection.md) | PPE | Nguyen | 1 | Training |
 | f | [Safety Shoes](03_platform/ppe-shoes_detection.md) | PPE | Nguyen | 1 | Training |
-| g | [Fall Classification](03_platform/safety-fall_classification.md) | Safety | Tri | 1 | Training |
+| g | [Fall Classification](03_platform/safety-fall-detection.md) | Safety | Tri | 1 | Training |
 | g | [Fall Pose Estimation](03_platform/safety-fall_pose_estimation.md) | Safety | Tri | 1 | Training |
 | h | [Poketenashi Violations](03_platform/safety-poketenashi.md) | Safety | Bang | 1 | Training |
 | i | [Zone Intrusion](03_platform/access-zone_intrusion.md) | Access | Nguyen | 1 | Training |

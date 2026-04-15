@@ -1,0 +1,75 @@
+{
+  "use_case": "zone",
+  "classes": {
+    "0": "face",
+    "1": "not_face",
+    "2": "person"
+  },
+  "text_prompts": {
+    "face": "human face",
+    "not_face": "not a face",
+    "person": "person"
+  },
+  "items": [
+    {
+      "image": "frame_1_1140_jpg.rf.223c29e95b0d287ce85edbd23b1a43e4.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    },
+    {
+      "image": "frame_8_1125_b90d73aa-ec60-4758-abce-026097eac7f0_jpg.rf.29806c7daf68fd2bcea32b6e1d0cfd6b.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 4
+    },
+    {
+      "image": "frame_5_0200_2abbf1e0-616c-4570-96b3-84696a31abb8_jpg.rf.7d4ccad1a95490e5fefe23fbae8d6042.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    },
+    {
+      "image": "frame_30_0015_jpg.rf.c132615789f3abe940d37a7d9712196c.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    },
+    {
+      "image": "frame_3_0475_7cca6636-d823-4b3a-8f67-e6ed73d40037_jpg.rf.b65dccc27e63bdb7d6eb2ffd603f6b37.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 4
+    },
+    {
+      "image": "frame_25_0345_jpg.rf.9fa7deab9edcfc66a21852b7b0db5f0a.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 6
+    },
+    {
+      "image": "frame_1_17100_32883b49-6040-48df-989d-b0b5053b501d_jpg.rf.dbea01aab656be0408e31ed8fa3a25ea.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 6
+    },
+    {
+      "image": "frame_4_0765_jpg.rf.6e12aa9965d1d07b6394e10306c6c40d.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 6
+    },
+    {
+      "image": "frame_6_1450_b928cf6f-343f-4e5d-88ba-6f125b81c20f_jpg.rf.9c31fac39a74e00f1682b206a093cca2.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 2
+    },
+    {
+      "image": "frame_3_1425_jpg.rf.25d154ca4a4d087d1f9757a0dc80d04e.jpg",
+      "width": 416,
+      "height": 416,
+      "num_annotations": 4
+    }
+  ]
+}

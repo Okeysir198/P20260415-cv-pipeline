@@ -123,7 +123,7 @@ ai/
 │   ├── ppe-shoes_detection/           # release — uniform layout (see
 │   ├── detect_vehicle/                # features/README.md)
 │   ├── access-zone_intrusion/
-│   ├── safety-fall_classification/
+│   ├── safety-fall-detection/
 │   ├── safety-fall_pose_estimation/
 │   └── access-face_recognition/
 │

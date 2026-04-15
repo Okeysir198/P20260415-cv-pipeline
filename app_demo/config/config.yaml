@@ -73,8 +73,8 @@ models:
         - features/ppe-shoes_detection/runs/best.pt
     fall_cls:
       model_paths:
-        - features/safety-fall_classification/release/latest/best.pt
-        - features/safety-fall_classification/runs/best.pt
+        - features/safety-fall-detection/release/latest/best.pt
+        - features/safety-fall-detection/runs/best.pt
     fall_pose:
       model_paths:
         - features/safety-fall_pose_estimation/release/latest/best.pt
@@ -133,7 +133,7 @@ use_cases:
       - foot_with_safety_shoes
     description: "Safety shoes compliance monitoring"
   fall_cls:
-    data_config: features/safety-fall_classification/configs/05_data.yaml
+    data_config: features/safety-fall-detection/configs/05_data.yaml
     alert_classes:
       - fallen_person
     description: "Fall detection using classification approach"

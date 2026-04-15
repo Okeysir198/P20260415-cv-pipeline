@@ -1,0 +1,73 @@
+{
+  "use_case": "phone",
+  "classes": {
+    "0": "phone",
+    "1": "face"
+  },
+  "text_prompts": {
+    "phone": "mobile phone",
+    "face": "human face"
+  },
+  "items": [
+    {
+      "image": "UrNAu2hev7FVZzOxnBaQq3DpSLC4IEjs.jpg",
+      "width": 250,
+      "height": 250,
+      "num_annotations": 1
+    },
+    {
+      "image": "SetufH9xTZvgd12FckonIl3a5CUwN0Or.jpg",
+      "width": 104,
+      "height": 161,
+      "num_annotations": 1
+    },
+    {
+      "image": "ZLy79jfrxNFnbKQDJowCTVp2c8sz3qYh.jpg",
+      "width": 142,
+      "height": 404,
+      "num_annotations": 2
+    },
+    {
+      "image": "qb7Ay0FCuh5UOeVoKJEc2P4fNYtG9xIj.jpg",
+      "width": 273,
+      "height": 655,
+      "num_annotations": 1
+    },
+    {
+      "image": "XcwvQunlb3zDYCUi2sMBr95IO4EeFfqy.jpg",
+      "width": 141,
+      "height": 530,
+      "num_annotations": 2
+    },
+    {
+      "image": "WmXvTxhA4CNn3qzj1PHryEQ06SUcDuJB.jpg",
+      "width": 502,
+      "height": 490,
+      "num_annotations": 3
+    },
+    {
+      "image": "YDhcyA6M45keVUJ9gTfSREnmLN2v8CXs.jpg",
+      "width": 380,
+      "height": 622,
+      "num_annotations": 2
+    },
+    {
+      "image": "SagTtGwzuUAI6eH84PcRYfLEyvjkJDos.jpg",
+      "width": 346,
+      "height": 668,
+      "num_annotations": 1
+    },
+    {
+      "image": "nmlHXMzIxFhAZPJidU8aCRQE6vyNVSB9.jpg",
+      "width": 404,
+      "height": 588,
+      "num_annotations": 2
+    },
+    {
+      "image": "WzCn9Prvgo7uM1SVDEU4xkt6J3eO28B5.jpg",
+      "width": 116,
+      "height": 267,
+      "num_annotations": 4
+    }
+  ]
+}

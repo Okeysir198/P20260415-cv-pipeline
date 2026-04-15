@@ -1,0 +1,77 @@
+{
+  "use_case": "helmet",
+  "classes": {
+    "0": "helmet",
+    "1": "vest",
+    "2": "head",
+    "3": "person"
+  },
+  "text_prompts": {
+    "helmet": "safety helmet hard hat",
+    "vest": "safety vest",
+    "head": "human head",
+    "person": "person"
+  },
+  "items": [
+    {
+      "image": "003878.jpg",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 8
+    },
+    {
+      "image": "hard_hat_workers4545.png",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 1
+    },
+    {
+      "image": "005543.jpg",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 2
+    },
+    {
+      "image": "pos_1776.jpg",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 7
+    },
+    {
+      "image": "004531.jpg",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 5
+    },
+    {
+      "image": "hard_hat_workers2120.png",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 4
+    },
+    {
+      "image": "001094.jpg",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 3
+    },
+    {
+      "image": "bPartB_01475.jpg",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 5
+    },
+    {
+      "image": "a03014.jpg",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 9
+    },
+    {
+      "image": "a01152.jpg",
+      "width": 640,
+      "height": 640,
+      "num_annotations": 3
+    }
+  ]
+}
