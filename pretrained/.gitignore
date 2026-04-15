@@ -1,0 +1,10 @@
+# Ignore all weights/binaries; track only metadata (CLAUDE.md, README* files)
+*
+!.gitignore
+!CLAUDE.md
+!README*
+!*/
+
+# Never track HF download cache or metadata sidecar files
+.cache/
+*.metadata
