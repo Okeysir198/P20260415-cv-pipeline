@@ -1,8 +1,8 @@
 """Face recognition predictor — identify violators by face.
 
-Given detection results from a violation detector (e.g. helmet model),
-crops head regions, detects faces, extracts embeddings, and matches
-against an enrolled gallery to identify the person.
+Given detection results from any upstream detector, crops the relevant
+regions, detects faces, extracts embeddings, and matches against an
+enrolled gallery to identify the person.
 """
 
 import logging
@@ -27,8 +27,7 @@ class FacePredictor:
         face_detector: FaceDetector for finding faces in head crops.
         face_embedder: FaceEmbedder for extracting face embeddings.
         gallery: FaceGallery with enrolled identities.
-        violation_class_ids: Class IDs that trigger face recognition
-            (e.g. ``[2]`` for ``head_without_helmet``).
+        violation_class_ids: Class IDs that trigger face recognition.
         expand_ratio: Expand violation bbox by this ratio to capture
             the full head region for face detection.
         face_conf_threshold: Minimum face detection confidence.

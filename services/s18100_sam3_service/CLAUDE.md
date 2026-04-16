@@ -126,11 +126,11 @@ Interactive Gradio UI at port 7860. Calls the REST service — no local model lo
 docker compose up -d
 
 # Launch demo (from services/s18100_sam3_service/)
-uv run python demo.py
-uv run python demo.py --url http://localhost:18100 --server-port 7861 --share
+uv run demo.py
+uv run demo.py --url http://localhost:18100 --server-port 7861 --share
 
 # Custom SAM3 URL via env
-SAM3_URL=http://192.168.1.5:18100 uv run python demo.py
+SAM3_URL=http://192.168.1.5:18100 uv run demo.py
 ```
 
 **Tabs**: Text Prompt · Box Prompt · Auto Mask · Text Tracking · Box Tracker

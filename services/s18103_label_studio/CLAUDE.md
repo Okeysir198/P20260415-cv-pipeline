@@ -67,17 +67,17 @@ All Label Studio interaction goes through `core/p04_label_studio/bridge.py`:
 export LS_API_KEY=<token from bootstrap.sh>
 
 # Create project with class labels + local-files storage connector
-uv run python core/p04_label_studio/bridge.py \
+uv run core/p04_label_studio/bridge.py \
   --email admin@admin.com --password admin123 \
   setup --data-config features/<feature>/configs/05_data.yaml
 
 # Import YOLO pre-annotations as tasks
-uv run python core/p04_label_studio/bridge.py \
+uv run core/p04_label_studio/bridge.py \
   --email admin@admin.com --password admin123 \
   import --data-config features/<feature>/configs/05_data.yaml
 
 # Export reviewed annotations back to YOLO format
-uv run python core/p04_label_studio/bridge.py \
+uv run core/p04_label_studio/bridge.py \
   --email admin@admin.com --password admin123 \
   export --data-config features/<feature>/configs/05_data.yaml
 ```

@@ -220,7 +220,12 @@ def verify_image_task(
     service_url = service_cfg.get("url", "http://localhost:18105")
     timeout = float(service_cfg.get("timeout", 120))
     validation_config = qa_config.get("validation", {})
-    text_prompts: Dict[str, str] = qa_config.get("text_prompts", {})
+    # Prefer feature-local prompts in 05_data.yaml; fall back to shared qa_config (legacy).
+    data_config = state.get("data_config", {}) or {}
+    text_prompts: Dict[str, str] = (
+        data_config.get("text_prompts")
+        or qa_config.get("text_prompts", {})
+    )
 
     if not img_path.exists():
         logger.warning("Image not found for SAM3: %s", img_path)

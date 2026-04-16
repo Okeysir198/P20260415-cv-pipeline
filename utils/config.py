@@ -108,15 +108,24 @@ def resolve_path(path_str: str, base_dir: Union[str, Path]) -> Path:
 
 
 def feature_name_from_config_path(config_path: Union[str, Path]) -> str:
-    """Derive the feature folder name from a config file path.
+    """Derive the feature folder name from a config file or config-dir path.
 
     Assumes the repo convention ``features/<feature>/configs/<step>.yaml``:
-    grandparent of the config file is the feature folder.
+    - Given a config **file** path → grandparent is the feature folder.
+    - Given the ``configs/`` **directory** → parent is the feature folder.
+
+    Both cases resolve to the same ``<feature>`` so callers don't have to
+    care which shape they hand in.
     """
     p = Path(config_path)
     if str(p) in (".", ""):
         return "unknown"
-    return p.resolve().parent.parent.name
+    resolved = p.resolve()
+    # If caller passed a directory named "configs", the feature folder is its parent.
+    # Otherwise treat it as a file and go up two levels.
+    if resolved.name == "configs" and resolved.is_dir():
+        return resolved.parent.name
+    return resolved.parent.parent.name
 
 
 def generate_run_dir(

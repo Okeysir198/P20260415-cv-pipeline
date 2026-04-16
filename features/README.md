@@ -22,7 +22,6 @@ features/<name>/
   eval/            Evaluation reports & metrics (gitignored)
   export/          Exported ONNX / TFLite / INT8 (gitignored)
   predict/         Inference outputs (images, videos, JSON) (gitignored)
-  release/         Versioned deploy bundles (v<semver>/, symlink latest/)
   .gitignore       Scoped to this feature
 ```
 
@@ -30,34 +29,47 @@ Shared pipeline templates live at `configs/_shared/` (non-authoritative).
 CI fixtures live at `configs/_test/`. Features **never** fall back to
 `_shared` at runtime — every feature is authoritative for itself.
 
-## Current Features (8)
+## Naming Contract
 
-Folder names follow a **`<category>-<name>`** convention aligned with
-`docs/03_platform/`. Categories: `access-`, `ppe-`, `safety-`, `traffic-`.
-The sole exception is `detect_vehicle`, which has no platform doc yet.
+| Concept | Convention | Example |
+|---|---|---|
+| Feature folder | `<category>-<name>` (kebab-hyphen + snake) | `safety-fire_detection` |
+| Categories | `access-`, `ppe-`, `safety-`, `traffic-` (per `docs/03_platform/`) | `ppe-helmet_detection` |
+| `dataset_name` in 05_data.yaml | snake_case — **folder name with `-` → `_`** | `safety_fire_detection` |
+| `training_ready/` subdir | equals `dataset_name` | `dataset_store/training_ready/safety_fire_detection/` |
+
+`scripts/new_feature.sh` derives `dataset_name` automatically from the
+folder name, so you never edit the mapping by hand. The one legacy
+exception is `detect_vehicle` (no platform doc yet).
+
+## Current Features
 
 | Folder | Task | Notes |
 |---|---|---|
 | `safety-fire_detection` | Detection | Fire + smoke bounding boxes |
-| `ppe-helmet_detection` | Detection | Hard-hat PPE compliance |
-| `detect_vehicle` | Detection | Generic vehicle detection |
-| `ppe-shoes_detection` | Detection | Safety-shoes PPE detection |
-| `access-zone_intrusion` | Detection + logic | Person/vehicle intrusion into restricted zones |
-| `safety-fall-detection` | Classification | Fall event classification from crops |
+| `safety-fall-detection` | Detection | Fallen-person bounding boxes |
 | `safety-fall_pose_estimation` | Keypoint | Fall detection via pose keypoints |
+| `safety-poketenashi-phone-usage` | Detection | Phone-use violation detection |
+| `safety-poketenashi` | Detection | Poketenashi (umbrella container) |
+| `ppe-helmet_detection` | Detection | Hard-hat PPE compliance |
+| `ppe-shoes_detection` | Detection | Safety-shoes PPE detection |
+| `ppe-gloves_detection` | Detection | Glove PPE compliance |
 | `access-face_recognition` | Face | Enrollment + verification |
+| `access-zone_intrusion` | Detection + logic | Person/vehicle intrusion into restricted zones |
+| `detect_vehicle` | Detection | Generic vehicle detection (legacy name) |
 
 ## Add a New Feature
 
 ```bash
-bash scripts/new_feature.sh my_new_feature
-# then edit features/my_new_feature/configs/{05_data,06_training}.yaml
-uv run python core/p06_training/train.py \
-  --config features/my_new_feature/configs/06_training.yaml
+bash scripts/new_feature.sh ppe-my_new_feature
+# edit features/ppe-my_new_feature/configs/{05_data,06_training}.yaml
 ```
 
-The scaffold copies `features/_TEMPLATE/` and substitutes the name. No
-changes to `core/` or `app_demo/tabs/` are required — tabs and training
-pipeline resolve everything from configs.
+The scaffold copies `features/_TEMPLATE/`, substitutes the name, and
+derives the snake-case `dataset_name`. No changes to `core/` or
+`app_demo/tabs/` are required — everything resolves from configs.
 
-See `features/_TEMPLATE/README.md` for the feature README template.
+For the end-to-end **train / evaluate / export / deploy** workflow and
+the **raw-unlabeled → SAM3 auto-label → QA → train** flow, see the root
+[`README.md`](../README.md) — commands are identical for every feature,
+only the config paths change.

@@ -161,13 +161,13 @@ summary = processor.process_video(video_path, output_path)
 uv sync --extra demo --extra face --extra train
 
 # Launch demo on default port 7861
-uv run python app_demo/run.py
+uv run app_demo/run.py
 
 # Launch with public sharing
-uv run python app_demo/run.py --share
+uv run app_demo/run.py --share
 
 # Custom port
-uv run python app_demo/run.py --server-port 8080
+uv run app_demo/run.py --server-port 8080
 ```
 
 ### Common Workflows
@@ -217,14 +217,14 @@ Place model in `release/<use_case>/best.pt` or `runs/<use_case>/best.pt`. Demo a
 # Open browser console, look for "Warming up models..." log messages
 
 # Verify config loading
-uv run python -c "
+uv run -c "
 from utils.config import load_config
 config = load_config('app_demo/config/config.yaml')
 print(config.get('models', {}).get('coco_pretrained', {}).keys())
 "
 
 # Test model loading directly
-uv run python -c "
+uv run -c "
 from app_demo.model_manager import ModelManager
 from utils.config import load_config
 config = load_config('app_demo/config/config.yaml')
@@ -255,12 +255,12 @@ Key sections:
 uv sync --extra demo --extra face --extra train
 
 # Launch demo
-uv run python app_demo/run.py
-uv run python app_demo/run.py --share
-uv run python app_demo/run.py --server-port 8080
+uv run app_demo/run.py
+uv run app_demo/run.py --share
+uv run app_demo/run.py --server-port 8080
 
 # Custom config
-uv run python app_demo/run.py --config app_demo/config/config.yaml
+uv run app_demo/run.py --config app_demo/config/config.yaml
 ```
 
 ## Adding a New Tab

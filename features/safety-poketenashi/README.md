@@ -30,8 +30,7 @@ Weights live in `ai/pretrained/safety-poketenashi/`:
 ## Running the SOTA quality check
 
 ```bash
-cd edge_ai/ai
-uv run python features/safety-poketenashi/code/eval_sota.py
+uv run features/safety-poketenashi/code/eval_sota.py
 ```
 
 Outputs:
@@ -40,13 +39,5 @@ Outputs:
 - `predict/summary.json` — machine-readable verdicts.
 - `predict/QUALITY_REPORT.md` — write-up.
 
-## Layout
-
-```
-features/safety-poketenashi/
-  configs/        phase YAMLs (TBD — current run uses script defaults)
-  code/           eval_sota.py
-  samples/        10 standing-worker reference images
-  predict/        SOTA quality-check outputs
-  runs/ eval/ export/ release/ tests/ notebooks/
-```
+For the standard feature layout and the end-to-end pipeline CLI, see
+[`features/README.md`](../README.md) and the [root README](../../README.md).

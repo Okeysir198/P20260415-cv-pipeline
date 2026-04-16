@@ -143,7 +143,7 @@ Interactive web UI for SAM3 segmentation, exposing all 5 segmentation modes as s
 
 ```bash
 uv sync --extra demo
-uv run python demo.py
+uv run demo.py
 # Open http://localhost:7860
 ```
 

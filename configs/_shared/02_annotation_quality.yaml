@@ -47,15 +47,6 @@ reporting:
   visualize_count: 20
   save_fixes: true
 
-# SAM3-friendly text prompts for each class name
-text_prompts:
-  fire: "fire"
-  smoke: "smoke"
-  person: "person"
-  head_with_helmet: "helmet on head"
-  head_without_helmet: "person head without helmet"
-  head_with_nitto_hat: "nitto soft hat on head"
-  foot_with_safety_shoes: "safety shoes on feet"
-  foot_without_safety_shoes: "feet without safety shoes"
-  phone: "mobile phone"
-  fallen_person: "person lying on the ground"
+# text_prompts intentionally omitted here — each feature defines its own
+# SAM3-friendly prompts in `features/<name>/configs/05_data.yaml::text_prompts:`.
+# This keeps the shared QA config free of use-case names.

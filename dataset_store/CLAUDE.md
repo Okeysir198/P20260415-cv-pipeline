@@ -180,7 +180,7 @@ All empty placeholders — populate on-site. No public source. Layout:
 
 Empty. Build per feature with:
 ```bash
-uv run python core/p00_data_prep/run.py --config features/<feature>/configs/00_data_preparation.yaml
+uv run core/p00_data_prep/run.py --config features/<feature>/configs/00_data_preparation.yaml
 ```
 
 ### Phase 1 v1 — planned distribution (dry-run verified)

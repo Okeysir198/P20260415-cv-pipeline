@@ -26,18 +26,24 @@
 
 ## Platform Features
 
-| ID | Feature | Cluster | Owner | Phase | Status |
-|----|---------|---------|-------|-------|--------|
-| a | [Fire Detection](03_platform/safety-fire_detection.md) | Safety | Tri | 1 | Training |
-| b | [Helmet Detection](03_platform/ppe-helmet_detection.md) | PPE | Nguyen | 1 | Training |
-| f | [Safety Shoes](03_platform/ppe-shoes_detection.md) | PPE | Nguyen | 1 | Training |
-| g | [Fall Classification](03_platform/safety-fall-detection.md) | Safety | Tri | 1 | Training |
-| g | [Fall Pose Estimation](03_platform/safety-fall_pose_estimation.md) | Safety | Tri | 1 | Training |
-| h | [Poketenashi Violations](03_platform/safety-poketenashi.md) | Safety | Bang | 1 | Training |
-| i | [Zone Intrusion](03_platform/access-zone_intrusion.md) | Access | Nguyen | 1 | Training |
-| — | [Face Recognition](03_platform/access-face_recognition.md) | Access | TBD | 1 | Training |
-| — | [Smart Parking](03_platform/traffic-smart_parking.md) | Traffic | TBD | — | Planned |
-| — | [Traffic Signal](03_platform/traffic-signal_control.md) | Traffic | TBD | — | Planned |
+| ID | Feature | Cluster | Owner | Phase | Status | Platform doc |
+|----|---------|---------|-------|-------|--------|--------------|
+| a | Fire Detection | Safety | Tri | 1 | Training | [safety-fire_detection.md](03_platform/safety-fire_detection.md) |
+| b | Helmet Detection | PPE | Nguyen | 1 | Training | [ppe-helmet_detection.md](03_platform/ppe-helmet_detection.md) |
+| f | Safety Shoes | PPE | Nguyen | 1 | Training | [ppe-shoes_detection.md](03_platform/ppe-shoes_detection.md) |
+| — | Gloves Detection | PPE | TBD | 1 | Training | _doc TODO_ |
+| g | Fall Detection | Safety | Tri | 1 | Training | [safety-fall-detection.md](03_platform/safety-fall-detection.md) |
+| g | Fall Pose Estimation | Safety | Tri | 1 | Training | [safety-fall_pose_estimation.md](03_platform/safety-fall_pose_estimation.md) |
+| h | Poketenashi Violations | Safety | Bang | 1 | Training | [safety-poketenashi.md](03_platform/safety-poketenashi.md) |
+| h | Phone Usage | Safety | Bang | 1 | Training | _doc TODO_ |
+| i | Zone Intrusion | Access | Nguyen | 1 | Training | [access-zone_intrusion.md](03_platform/access-zone_intrusion.md) |
+| — | Face Recognition | Access | TBD | 1 | Training | [access-face_recognition.md](03_platform/access-face_recognition.md) |
+| — | Traffic Signal | Traffic | TBD | — | Planned | [traffic-signal_control.md](03_platform/traffic-signal_control.md) |
+| — | Smart Parking | Traffic | TBD | — | Planned | _doc TODO_ |
+
+Code lives under `../features/<category>-<name>/` — see
+[`features/README.md`](../features/README.md) for the 11 production
+feature folders.
 
 ## Applications
 
@@ -48,8 +54,10 @@
 
 ## Adding a New Feature
 
-1. Copy `03_platform/_TEMPLATE.md` to `03_platform/{cluster}-{feature_name}.md`
-2. Fill in all TODO sections
-3. Add a row to the Platform Features table above
-4. Create config at `configs/{feature_name}/05_data.yaml` + `06_training.yaml`
-5. Create experiment workspace at `experiments/{feature_name}/`
+1. Copy `03_platform/_TEMPLATE.md` to `03_platform/<cluster>-<name>.md`
+   and fill in all TODO sections.
+2. Add a row to the Platform Features table above.
+3. Scaffold the code workspace: `bash scripts/new_feature.sh <cluster>-<name>`
+   — this creates `features/<cluster>-<name>/configs/{05_data,06_training,10_inference}.yaml`.
+4. See the root [`README.md`](../README.md) for the end-to-end CLI
+   (train / evaluate / export / infer) and the naming contract.

@@ -193,32 +193,32 @@ Any config value can be overridden at runtime using `--override key=value`:
 
 ```bash
 # Override single hyperparameter
-uv run python core/p06_training/train.py \
+uv run core/p06_training/train.py \
   --config features/safety-fire_detection/configs/06_training.yaml \
   --override training.lr=0.005
 
 # Override multiple values
-uv run python core/p06_training/train.py \
+uv run core/p06_training/train.py \
   --config features/safety-fire_detection/configs/06_training.yaml \
   --override training.lr=0.005 training.epochs=100 training.batch_size=32
 
 # Override nested values (use dot notation)
-uv run python core/p06_training/train.py \
+uv run core/p06_training/train.py \
   --config features/safety-fire_detection/configs/06_training.yaml \
   --override data.num_workers=8 augmentation.mosaic=false
 
 # Override model architecture
-uv run python core/p06_training/train.py \
+uv run core/p06_training/train.py \
   --config features/safety-fire_detection/configs/06_training.yaml \
   --override model.arch=dfine-s model.pretrained=true
 
 # Override logging
-uv run python core/p06_training/train.py \
+uv run core/p06_training/train.py \
   --config features/safety-fire_detection/configs/06_training.yaml \
   --override logging.wandb_project=my_project logging.run_name=experiment_v2
 
 # Override evaluation settings
-uv run python core/p08_evaluation/evaluate.py \
+uv run core/p08_evaluation/evaluate.py \
   --model features/safety-fire_detection/runs/best.pt \
   --config features/safety-fire_detection/configs/05_data.yaml \
   --override conf_threshold=0.3

@@ -43,7 +43,7 @@ uv run core/p02_annotation_qa/run_qa.py --data-config features/safety-fire_detec
     --resume runs/qa/fire/checkpoint.json
 
 # Run all datasets
-for cfg in configs/<usecase>/05_data.yaml; do
+for cfg in features/*/configs/05_data.yaml; do
     uv run core/p02_annotation_qa/run_qa.py --data-config "$cfg" --no-sam3
 done
 ```
@@ -134,7 +134,7 @@ runs/qa/fire/
 
 ## Config Reference
 
-All values in `configs/_shared/02_annotation_quality.yaml`:
+All values in `configs/_shared/02_annotation_quality.yaml` unless noted:
 
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
@@ -149,7 +149,7 @@ All values in `configs/_shared/02_annotation_quality.yaml`:
 | `scoring.thresholds` | `good` | `0.8` | Minimum score for "good" grade |
 | `scoring.thresholds` | `review` | `0.5` | Minimum score for "review" grade |
 | `validation` | `duplicate_iou_threshold` | `0.95` | IoU above this = duplicate |
-| `text_prompts` | per class | — | SAM3-friendly text prompts for each class name |
+| `text_prompts` | per class | — | **Defined per-feature** in `features/<feature>/configs/05_data.yaml::text_prompts:`, not in the shared config. p02 reads from the data config first; falls back to the shared file only for legacy use. |
 
 ## Dependencies
 

@@ -10,71 +10,24 @@ Fall detection via body-keypoint pose estimation.
 | Dataset | `dataset_store/training_ready/fall_pose_estimation/` |
 | Dataset report | `../../dataset_store/training_ready/fall_pose_estimation/DATASET_REPORT.md` |
 
-## Layout
+---
 
-```
-features/safety-fall_pose_estimation/
-  configs/     phase YAMLs (00_data_preparation, 05_data, 06_training,
-               08_evaluation, 09_export, 10_inference)
-  code/        OPTIONAL custom code (custom_trainer.py, train.py, …)
-  samples/     small smoke-test images & clips (tracked)
-  notebooks/   exploration notebooks
-  tests/       per-feature pytest (optional)
-  runs/        training checkpoints (gitignored; DVC-tracked best.pt)
-  eval/        evaluation reports (gitignored)
-  export/      exported ONNX / TFLite (gitignored)
-  predict/     inference outputs (gitignored)
-  release/     versioned deploy bundles (v<semver>/, latest/ symlink)
-```
+**Layout, workflow, commands.** Every feature shares the same folder
+layout and CLI — don't duplicate them here. See:
 
-## Commands
+- [`features/README.md`](../README.md) — uniform layout + naming contract
+- [root `README.md`](../../README.md) — end-to-end train / evaluate /
+  export / infer, plus the raw-unlabeled → SAM3 auto-label → QA flow.
+  Swap `<name>` into the config paths shown there.
 
-```bash
-cd edge_ai/ai
-
-# Train
-uv run python core/p06_training/train.py \
-  --config features/safety-fall_pose_estimation/configs/06_training.yaml
-
-# Evaluate
-uv run python core/p08_evaluation/evaluate.py \
-  --model features/safety-fall_pose_estimation/runs/best.pt \
-  --config features/safety-fall_pose_estimation/configs/05_data.yaml
-
-# Export to ONNX
-uv run python core/p09_export/export.py \
-  --model features/safety-fall_pose_estimation/runs/best.pt \
-  --training-config features/safety-fall_pose_estimation/configs/06_training.yaml
-
-# Inference with alert logic
-uv run python core/p10_inference/video.py \
-  --config features/safety-fall_pose_estimation/configs/10_inference.yaml \
-  --video features/safety-fall_pose_estimation/samples/demo.mp4
-```
-
-## Custom code (optional)
-
-When the stock `core/` pipeline isn't enough, drop code into `code/` and
-reference it from your config:
+Custom code (optional): drop code into `code/` and reference it from a
+config, e.g.
 
 ```yaml
-# features/safety-fall_pose_estimation/configs/06_training.yaml
+# configs/06_training.yaml
 training:
   backend: custom
-  custom_trainer_class: features.safety-fall_pose_estimation.code.custom_trainer.MyTrainer
+  custom_trainer_class: features.<name>.code.custom_trainer.MyTrainer
 ```
 
-See `ai/CLAUDE.md` → "Custom feature code" for the three escape hatches.
-
-## Release
-
-```
-release/
-  v0.1.0/
-    model.onnx       # DVC-tracked
-    config.yaml      # deploy config snapshot (tracked)
-    classes.txt      # class names (tracked)
-    metrics.json     # eval scores at release (tracked)
-    MANIFEST.md      # git sha, dataset hash, notes (tracked)
-  latest -> v0.1.0
-```
+See root README → "Bringing Your Own Code" for the three escape hatches.

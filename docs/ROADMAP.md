@@ -130,7 +130,7 @@ Core detection features for Nitto Denko factory safety system.
 | FP Rate | < 2–5% |
 | Edge latency | < 40ms per frame |
 
-**Details:** [phase1-executive-summary](02_project/phase1-executive-summary.md) | [phase1-development-plan](02_project/phase1-development-plan.md) | [phase1-requirements](01_requirements/phase1-requirements.md)
+**Details:** [phase1-executive-summary](02_project/phase1-executive-summary.md) | [phase1-requirements](01_requirements/phase1-requirements.md)
 
 ---
 

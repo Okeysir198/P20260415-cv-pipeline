@@ -47,5 +47,5 @@ augmentation:
 
 ## Config Reference
 
-- Dataset paths: `configs/<usecase>/05_data.yaml`
-- Augmentation params: `configs/<usecase>/06_training.yaml` → `augmentation:` section
+- Dataset paths: `features/<name>/configs/05_data.yaml`
+- Augmentation params: `features/<name>/configs/06_training.yaml` → `augmentation:` section

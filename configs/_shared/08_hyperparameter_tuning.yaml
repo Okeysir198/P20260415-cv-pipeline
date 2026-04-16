@@ -1,5 +1,6 @@
 # Optuna Hyperparameter Optimization Configuration
-# Usage: uv run core/p07_hpo/run_hpo.py --config configs/_shared/08_hyperparameter_tuning.yaml --data-config features/safety-fire_detection/configs/05_data.yaml
+# Usage: uv run core/p07_hpo/run_hpo.py --config features/<feature>/configs/06_training.yaml \
+#                                         --hpo-config configs/_shared/08_hyperparameter_tuning.yaml
 
 # --- Study settings ---
 study:

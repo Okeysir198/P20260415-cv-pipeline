@@ -356,7 +356,7 @@ Tag convention: `<use_case>-data-v<N>` for datasets.
 Run data exploration to validate a dataset after merging:
 
 ```bash
-uv run python utils/exploration.py --config configs/<use_case>/05_data.yaml
+uv run utils/exploration.py --config configs/<use_case>/05_data.yaml
 ```
 
 Update `mean`/`std` in the data config with the computed values.

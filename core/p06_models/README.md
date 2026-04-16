@@ -77,7 +77,7 @@ class MyModel(DetectionModel):
 
 ## Config Reference
 
-- `model.arch` in `configs/<usecase>/02_training.yaml` selects the model
+- `model.arch` in `features/<name>/configs/06_training.yaml` selects the model
 - All HF config keys pass through to `from_pretrained()`
 - Pose models: `features/safety-fall_pose_estimation/configs/*.yaml`
 - Face models: `features/access-face_recognition/configs/face.yaml`

@@ -4,13 +4,13 @@
 
 ```bash
 # Full sequential pipeline (stops on first failure — later tests depend on earlier outputs)
-uv run python tests/run_all.py
+uv run tests/run_all.py
 
 # Single test file
-uv run python tests/test_p06_training.py
+uv run tests/test_p06_training.py
 
 # Via pytest (alternative)
-uv run python -m pytest tests/test_p06_training.py -v
+uv run -m pytest tests/test_p06_training.py -v
 ```
 
 ## Test Layout

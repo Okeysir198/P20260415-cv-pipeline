@@ -118,14 +118,12 @@ ai/
 │
 ├── features/                          # Self-contained per-feature folders
 │   ├── _TEMPLATE/                     # Copy via scripts/new_feature.sh
-│   ├── safety-fire_detection/         # configs, code, samples, notebooks,
-│   ├── ppe-helmet_detection/          # tests, runs, eval, export, predict,
-│   ├── ppe-shoes_detection/           # release — uniform layout (see
-│   ├── detect_vehicle/                # features/README.md)
-│   ├── access-zone_intrusion/
-│   ├── safety-fall-detection/
-│   ├── safety-fall_pose_estimation/
-│   └── access-face_recognition/
+│   ├── safety-*/                      # fire, fall, poketenashi (phone usage)
+│   ├── ppe-*/                         # helmet, shoes, gloves
+│   ├── access-*/                      # face_recognition, zone_intrusion
+│   └── detect_vehicle/                # uniform layout: configs, code, samples,
+│                                      # notebooks, tests, runs, eval, export,
+│                                      # predict — see features/README.md
 │
 ├── configs/                           # Non-authoritative shared infra
 │   ├── _shared/                       # Pipeline templates (01–04, HPO, export)
@@ -158,10 +156,17 @@ ai/
 ## Quick Start
 
 ```bash
-# Install
-uv sync --extra train       # Training + evaluation
-uv sync --extra all         # Everything except export (dep conflict)
-uv sync --extra export      # ONNX export (install separately from sam3/qa)
+# Install — bare sync installs the full p00→p10 pipeline, demo UI,
+# Jupyter, MediaPipe, Playwright, pytest/ruff/dvc. No extras needed.
+uv sync
+
+# Optional: isolated venv for ONNX INT8 quantization (optimum +
+# onnxruntime-quantize conflict with transformers@git; kept out of the
+# main env on purpose).
+bash scripts/setup-export-venv.sh     # creates .venv-export/
+
+# Optional: heavyweight analytics (fiftyone + cleanlab)
+uv sync --extra analysis
 
 # Download YOLOX-M pretrained weights
 wget -P pretrained/ https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_m.pth
@@ -170,61 +175,89 @@ wget -P pretrained/ https://github.com/Megvii-BaseDetection/YOLOX/releases/downl
 cp .env.example .env        # add HF_TOKEN, WANDB_API_KEY
 ```
 
-### Train → Evaluate → Export → Infer
+### Naming contract
+
+Two conventions you'll see everywhere — `scripts/new_feature.sh` derives
+the mapping automatically, so you never edit it by hand:
+
+| Concept | Convention | Example |
+|---|---|---|
+| Feature folder | `<category>-<name>` (kebab-hyphen) | `safety-fire_detection` |
+| `dataset_name` in 05_data.yaml | snake_case (folder `-` → `_`) | `safety_fire_detection` |
+| `dataset_store/training_ready/` subdir | = `dataset_name` | `training_ready/safety_fire_detection/` |
+
+Categories: `access-`, `ppe-`, `safety-`, `traffic-` (aligned with
+`docs/03_platform/`). Feature-level details: [`features/README.md`](features/README.md).
+
+### End-to-end: labeled dataset → deployed ONNX
 
 ```bash
-# Explore dataset
-uv run python utils/exploration.py --config features/safety-fire_detection/configs/05_data.yaml
+FEATURE=features/safety-fire_detection
 
-# Train
-uv run python core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml
+# 1. Merge raw sources into training_ready (split-subdir YOLO layout)
+uv run core/p00_data_prep/run.py --config $FEATURE/configs/00_data_preparation.yaml
 
-# Evaluate
-uv run python core/p08_evaluation/evaluate.py \
-  --model features/safety-fire_detection/runs/best.pt --config features/safety-fire_detection/configs/05_data.yaml --split test
+# 2. Explore — class distribution, mean/std, pixel stats
+uv run utils/exploration.py --config $FEATURE/configs/05_data.yaml
 
-# Export to ONNX
-uv run python core/p09_export/export.py \
-  --model features/safety-fire_detection/runs/best.pt --training-config features/safety-fire_detection/configs/06_training.yaml
+# 3. Train
+uv run core/p06_training/train.py --config $FEATURE/configs/06_training.yaml
 
-# Interactive demo
+# 4. Evaluate on test split + error analysis (FP/FN categorization)
+uv run core/p08_evaluation/evaluate.py \
+  --model $FEATURE/runs/best.pt --config $FEATURE/configs/05_data.yaml --split test
+
+# 5. Export to ONNX (float32; use .venv-export/ for INT8 quantization)
+uv run core/p09_export/export.py \
+  --model $FEATURE/runs/best.pt --training-config $FEATURE/configs/06_training.yaml
+
+# 6. Interactive demo (multi-tab Gradio UI — per-feature tabs read
+#    10_inference.yaml for alert thresholds, tracker, and sample videos)
 uv run demo
+```
+
+### End-to-end: raw unlabeled images → deployed ONNX
+
+```bash
+FEATURE=features/safety-fire_detection
+
+# 0. Bring up annotation services
+cd services/s18100_sam3_service && docker compose up -d      # SAM3 :18100 (GPU)
+cd services/s18103_label_studio && bash bootstrap.sh         # Label Studio :18103
+cd services/s18104_auto_label && docker compose up -d        # auto-label :18104
+cd services/s18105_annotation_quality_assessment && docker compose up -d  # QA :18105
+
+for p in 18100 18103 18104 18105; do curl -s http://localhost:$p/health; done
+
+# 1. Auto-annotate with SAM3 text prompts → YOLO labels (flat-dir mode)
+uv run core/p01_auto_annotate/run_auto_annotate.py \
+  --image-dir /path/to/unlabeled/images --classes fire,smoke --mode text
+
+# 2. Merge into training_ready (80/10/10 stratified split)
+uv run core/p00_data_prep/run.py --config $FEATURE/configs/00_data_preparation.yaml
+
+# 3. Validate: structural + SAM3 verification + score 0–1 + fix suggestions
+uv run core/p02_annotation_qa/run_qa.py --data-config $FEATURE/configs/05_data.yaml
+
+# 4. (Optional) Human review in Label Studio with split-aware round-trip
+uv run core/p04_label_studio/bridge.py setup  --data-config $FEATURE/configs/05_data.yaml
+uv run core/p04_label_studio/bridge.py import --data-config $FEATURE/configs/05_data.yaml
+#    … reviewers edit labels + split assignment at http://localhost:18103 …
+uv run core/p04_label_studio/bridge.py export --data-config $FEATURE/configs/05_data.yaml
+
+# 5. (Optional) Generative augmentation — SAM3 + Flux inpainting
+uv run core/p03_generative_aug/run_generative_augment.py \
+  --config $FEATURE/configs/03_generative_augment.yaml
+
+# 6. Re-QA, then train / eval / export / infer as above.
 ```
 
 ### Override any parameter from CLI
 
 ```bash
-uv run python core/p06_training/train.py \
+uv run core/p06_training/train.py \
   --config features/safety-fire_detection/configs/06_training.yaml \
   --override training.lr=0.005 training.epochs=100
-```
-
-## Annotation Tools (Docker Services)
-
-```bash
-# Start services
-cd services/s18100_sam3_service && docker compose up -d      # SAM3 GPU :18100
-cd services/s18104_auto_label && docker compose up -d        # Auto-label CPU :18104
-cd services/s18105_annotation_quality_assessment && docker compose up -d  # QA :18105
-
-# Health checks
-curl http://localhost:18100/health
-curl http://localhost:18104/health
-curl http://localhost:18105/health
-```
-
-```bash
-# Auto-annotate an unlabeled dataset (text mode)
-uv run python core/p01_auto_annotate/run_auto_annotate.py \
-  --data-config features/safety-fire_detection/configs/05_data.yaml --mode text
-
-# Rule-based annotation (detect intermediate objects → derive final classes via overlap rules)
-uv run python core/p01_auto_annotate/run_auto_annotate.py \
-  --data-config features/ppe-helmet_detection/configs/05_data.yaml --mode text
-
-# Validate annotation quality
-uv run python core/p02_annotation_qa/run_qa.py \
-  --data-config features/safety-fire_detection/configs/05_data.yaml
 ```
 
 ## Adding a New Detection Task
@@ -232,7 +265,7 @@ uv run python core/p02_annotation_qa/run_qa.py \
 **Zero code changes required.** Create 2 YAML configs:
 
 ```bash
-uv run python utils/scaffold.py vehicle_detection \
+uv run utils/scaffold.py vehicle_detection \
   --model yolox-m --classes "0:car,1:truck,2:bus"
 # Creates features/detect_vehicle/configs/05_data.yaml + 06_training.yaml
 #         features/detect_vehicle/code/train.py, evaluate.py, export.py, inference.py
@@ -249,7 +282,7 @@ input_size: [640, 640]
 ```
 
 ```bash
-uv run python core/p06_training/train.py --config features/detect_vehicle/configs/06_training.yaml
+uv run core/p06_training/train.py --config features/detect_vehicle/configs/06_training.yaml
 ```
 
 ### Extension Difficulty
@@ -315,8 +348,9 @@ All parameters from YAML — no hardcoded values.
 
 | Config | Location | Purpose |
 |--------|----------|---------|
-| Data | `configs/<usecase>/05_data.yaml` | Dataset paths, class names, normalization |
-| Training | `configs/<usecase>/06_training.yaml` | Model arch, optimizer, scheduler, augmentation |
+| Data | `features/<name>/configs/05_data.yaml` | Dataset paths, class names, normalization |
+| Training | `features/<name>/configs/06_training.yaml` | Model arch, optimizer, scheduler, augmentation |
+| Inference + alerts | `features/<name>/configs/10_inference.yaml` | Per-feature alert thresholds, tracker, samples |
 | Auto-annotate | `configs/_shared/01_auto_annotate.yaml` | Mode, output format, NMS, service URL |
 | QA | `configs/_shared/02_annotation_quality.yaml` | Sampling, SAM3 thresholds, scoring |
 | Export | `configs/_shared/09_export.yaml` | ONNX opset, output dir |
@@ -324,111 +358,51 @@ All parameters from YAML — no hardcoded values.
 | Face | `features/access-face_recognition/configs/face.yaml` | SCRFD/MobileFaceNet, gallery, threshold |
 | Demo | `app_demo/config/config.yaml` | Annotators, tracker, Gradio server |
 
-## Developer Workflow
+Full schema reference: [`configs/CLAUDE.md`](configs/CLAUDE.md).
 
-### Day 0 — Setup
+## More Commands
 
-```bash
-git clone <repo> && cd ai
-uv sync --extra train
-wget -P pretrained/ https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_m.pth
-cp .env.example .env    # add HF_TOKEN, WANDB_API_KEY
-uv run python tests/run_all.py   # verify environment
-```
-
-### Day 1 — New Use Case
+The Quick Start blocks above cover the primary workflow. A few additional
+commands that don't fit there:
 
 ```bash
-# Scaffold workspace
-uv run python utils/scaffold.py vehicle_detection --model yolox-m --classes "0:car,1:truck,2:bus"
+# Hyperparameter tuning (Optuna)
+uv run core/p07_hpo/run_hpo.py --config $FEATURE/configs/06_training.yaml
 
-# Validate configs
-uv run python utils/validate_config.py features/detect_vehicle/configs/
+# Resume from checkpoint
+uv run core/p06_training/train.py --config $FEATURE/configs/06_training.yaml \
+  --resume $FEATURE/runs/last.pth
+
+# INT8 quantization (requires .venv-export/)
+source .venv-export/bin/activate
+python core/p09_export/export.py --model $FEATURE/runs/best.pt \
+  --training-config $FEATURE/configs/06_training.yaml --quantize
+
+# Verify environment
+uv run tests/run_all.py
 ```
 
-### Day 2 — Prepare Data
-
-```bash
-# Option A: merge raw datasets into YOLO format
-uv run python core/p00_data_prep/run.py --config features/detect_vehicle/configs/00_data_preparation.yaml
-
-# Option B: auto-annotate unlabeled images with SAM3
-cd services/s18100_sam3_service && docker compose up -d
-cd services/s18104_auto_label && docker compose up -d
-uv run python core/p01_auto_annotate/run_auto_annotate.py \
-  --data-config features/detect_vehicle/configs/05_data.yaml --mode text
-
-# Validate annotation quality
-uv run python core/p02_annotation_qa/run_qa.py \
-  --data-config features/detect_vehicle/configs/05_data.yaml
-```
-
-### Day 3+ — Training Loop
-
-```bash
-# Train
-uv run python core/p06_training/train.py --config features/detect_vehicle/configs/06_training.yaml
-
-# Resume
-uv run python core/p06_training/train.py --config features/detect_vehicle/configs/06_training.yaml \
-  --resume runs/vehicle_detection/last.pth
-
-# Evaluate
-uv run python core/p08_evaluation/evaluate.py \
-  --model runs/vehicle_detection/best.pth --config features/detect_vehicle/configs/05_data.yaml
-
-# Tune hyperparameters
-uv run python core/p07_hpo/run_hpo.py --config features/detect_vehicle/configs/06_training.yaml
-
-# Override without editing YAML
-uv run python core/p06_training/train.py --config features/detect_vehicle/configs/06_training.yaml \
-  --override training.lr=0.005 augmentation.mosaic=false
-```
-
-**WandB**: auto-logs to `smart-camera` project if `WANDB_API_KEY` is set. Disable with `--override logging.wandb_project=null`.
-
-### Day N — Export and Deploy
-
-```bash
-# Export to ONNX
-uv run python core/p09_export/export.py \
-  --model runs/vehicle_detection/best.pth \
-  --training-config features/detect_vehicle/configs/06_training.yaml
-
-# Quantize to INT8
-uv run python core/p09_export/export.py \
-  --model runs/vehicle_detection/best.pth \
-  --training-config features/detect_vehicle/configs/06_training.yaml --quantize
-
-# Benchmark PyTorch vs ONNX vs INT8
-uv run python core/p09_export/benchmark.py \
-  --model runs/vehicle_detection/best.onnx \
-  --config features/detect_vehicle/configs/05_data.yaml
-```
+**WandB**: auto-logs to `smart-camera` if `WANDB_API_KEY` is set. Disable
+with `--override logging.wandb_project=null`.
 
 ### Multi-Person Development
 
-Each developer works in their own directory — zero file conflicts:
-
-| Developer | Works in | Never touches |
-|-----------|----------|--------------|
-| Dev A (fire) | `features/safety-fire_detection/configs/`, `features/safety-fire_detection/code/` | others |
-| Dev B (helmet) | `features/ppe-helmet_detection/configs/`, `features/ppe-helmet_detection/code/` | others |
-| Dev C (new task) | `features/<new>/` | others |
-
-`core/` is shared and model-agnostic. Changes must pass `uv run python tests/run_all.py`. New models extend via `@register_model` — no editing existing files.
+Each developer works in their own `features/<name>/` directory — zero
+file conflicts. `core/` is shared and model-agnostic. New models extend
+via `@register_model`; no editing existing files. Changes to `core/`
+must pass `uv run tests/run_all.py`.
 
 ## Testing
 
 ```bash
 # Full pipeline integration tests (33 files, sequential)
-uv run python tests/run_all.py
+uv run tests/run_all.py
 
 # Single test file
-uv run python tests/test_p06_training.py
+uv run tests/test_p06_training.py
 
 # Via pytest
-uv run python -m pytest tests/test_p06_training.py -v
+uv run -m pytest tests/test_p06_training.py -v
 ```
 
 Tests use real data only (no mocks). Services (SAM3 :18100, QA :18105, auto-label :18104) skip gracefully when down. See [`tests/CLAUDE.md`](tests/CLAUDE.md) for the full test map.

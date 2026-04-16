@@ -4,32 +4,39 @@
 
 ```bash
 # Install (use uv, not pip)
-uv sync --extra train          # Training + evaluation
-uv sync --extra all            # Everything except export (dep conflict)
-uv sync --extra export         # ONNX export (install separately)
+uv sync                        # Full p00→p10 pipeline + QA + LS + HPO + Gradio + Jupyter + Playwright + dev tools
+uv sync --extra analysis       # Add FiftyOne + Cleanlab (heavy, optional)
+bash scripts/setup-export-venv.sh   # Create .venv-export/ for quantized ONNX (optional)
+
+# Auto-label a raw dir of JPEGs (no existing labels) via SAM3 → YOLO txt
+uv run core/p01_auto_annotate/run_auto_annotate.py \
+  --image-dir /path/to/raw_images \
+  --classes "0:hand_with_glove" \
+  --mode text \
+  --text-prompts "hand_with_glove=a person's hand wearing a work glove"
+# Writes labels next to images; report at <image_dir>/../auto_annotate_report/
 
 # Prepare training-ready dataset (merge multi-source raw data, class-remap, stratified split)
-uv run python core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml
-uv run python core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml --dry-run
+uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml
+uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml --dry-run
 
 # Train
-uv run python core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml
-uv run python core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml \
+uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml
+uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml \
   --override training.lr=0.005 training.epochs=100
 
 # Evaluate
-uv run python core/p08_evaluation/evaluate.py \
+uv run core/p08_evaluation/evaluate.py \
   --model features/safety-fire_detection/runs/best.pt --config features/safety-fire_detection/configs/05_data.yaml
 
 # Export to ONNX
-uv run python core/p09_export/export.py \
+uv run core/p09_export/export.py \
   --model features/safety-fire_detection/runs/best.pt \
   --training-config features/safety-fire_detection/configs/06_training.yaml
 
-# Inference (per-feature alert config)
-uv run python core/p10_inference/video.py \
-  --config features/safety-fire_detection/configs/10_inference.yaml \
-  --video features/safety-fire_detection/samples/demo.mp4
+# Inference via the multi-tab Gradio demo (per-feature alert config is
+# loaded from 10_inference.yaml by the feature tab)
+uv run demo
 
 # Scaffold a new feature (copies features/_TEMPLATE/, substitutes <feature_name>)
 bash scripts/new_feature.sh my_new_feature
@@ -39,9 +46,9 @@ bash scripts/new_feature.sh my_new_feature
 uv run demo
 
 # Tests
-uv run python tests/run_all.py              # Full pipeline (sequential, stops on failure)
-uv run python -m pytest tests/ -v           # Via pytest
-uv run python tests/test_p06_training.py    # Single test file
+uv run tests/run_all.py              # Full pipeline (sequential, stops on failure)
+uv run -m pytest tests/ -v           # Via pytest
+uv run tests/test_p06_training.py    # Single test file
 ```
 
 ## Architecture
@@ -78,6 +85,10 @@ app_demo/              Gradio demo UI (see app_demo/CLAUDE.md)
 dataset_store/         raw/ + site_collected/ + training_ready/ — all datasets.
                        Downloads via MCP (Roboflow/Kaggle/HF), not bootstrap scripts.
                        See dataset_store/CLAUDE.md for per-source registry + v1 plan.
+releases/              Versioned model releases.
+                       `utils/release.py --run-dir <ts_dir>` →
+                       releases/<dataset_name>/v<N>_<YYYY-MM-DD>/
+                         {best.pth, *.onnx, 05_data.yaml, 06_training.yaml, model_card.yaml}
 ../smart_parking/      Sibling repo (split from this tree)
 ```
 
@@ -141,7 +152,7 @@ import from any `features/<name>/code/`**.
 - **40 test files** in four groups: `utils` (independent), `p00–p04` (annotation), `p05–p11` (train/eval/export/infer), `p12` (raw pipeline end-to-end).
 - Test configs in `configs/_test/` — includes `00_raw_pipeline.yaml` (created at runtime by p12).
 - `tests/run_all.py` runs sequentially; p08/p09/p10 depend on checkpoint from `p06_training` (`outputs/08_training/best.pth`).
-- Each file also runs standalone: `uv run python tests/test_p06_training.py`
+- Each file also runs standalone: `uv run tests/test_p06_training.py`
 - See `tests/CLAUDE.md` for the full file map, output dirs, fixture API, and gotchas.
 
 ## Gotchas
@@ -149,6 +160,8 @@ import from any `features/<name>/code/`**.
 - **`uv` not `pip`**: Project uses uv with custom PyTorch CUDA 13.0 index. Always `uv run` or `uv sync`.
 - **Bare `uv sync` installs everything** for the full pipeline (p00→p10, QA, Label Studio, HPO, Gradio, Jupyter, MediaPipe, pytest, ruff, dvc, Playwright). Only `--extra analysis` is opt-in (FiftyOne ~1 GB).
 - **Quantized ONNX export needs a separate venv**: `optimum[onnxruntime]` requires `transformers<4.58` which conflicts with the git transformers pinned in the main venv. Run `bash scripts/setup-export-venv.sh` once to create `.venv-export/`, then use it only for quantization: `.venv-export/bin/python core/p09_export/export.py --optimize O2 --quantize dynamic ...`. The main venv's default export (`--skip-optimize`) still works for unquantized ONNX.
+- **Feature folder vs `dataset_name` casing**: feature folders use `kebab-case` (e.g. `ppe-helmet_detection`); `dataset_name` in `05_data.yaml`, `training_ready/` subdirs, `releases/` subdirs, and LS project names use `snake_case` (hyphens replaced with underscores). `scripts/new_feature.sh` derives both correctly from a single `<feature_name>` arg. Every pipeline-step run_dir is derived via `utils.config.feature_name_from_config_path()` — never pass `dataset_name` where a feature folder is expected or you'll create ghost `features/<snake_name>/` folders.
+- **`text_prompts:` live per-feature, not in shared QA config**: each feature's `05_data.yaml::text_prompts:` is the authoritative SAM3 prompt source. `core/p02_annotation_qa` reads from the data config first. Never add feature-specific prompts back to `configs/_shared/02_annotation_quality.yaml` — that shared file intentionally omits them.
 - **DVC for large files**: `.pt`, `.pth`, `.onnx` files are gitignored, tracked via DVC.
 - **`sys.path.insert`**: Many modules add project root to path. Use `uv run` to avoid issues.
 - **Overrides are nested dicts**: `DetectionTrainer(overrides={"training": {"epochs": 2}})`, not `{"training.epochs": 2}`.

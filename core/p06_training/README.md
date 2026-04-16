@@ -45,4 +45,4 @@ uv run core/p06_training/train.py --config features/safety-fire_detection/config
 
 ## Config Reference
 
-- `configs/<usecase>/06_training.yaml` — optimizer, scheduler, epochs, EMA, gradient clipping, augmentation, loss settings
+- `features/<name>/configs/06_training.yaml` — optimizer, scheduler, epochs, EMA, gradient clipping, augmentation, loss settings

@@ -27,52 +27,76 @@
 
 ### 1.1 Installation
 
+This repo ships a containerised Label Studio at `:18103` with a
+legacy-API-token flip so the bridge can authenticate programmatically.
+**Use it — don't install Label Studio separately.**
+
 ```bash
-# Option 1: uv (recommended — fast, isolated)
-uv tool install label-studio
-label-studio start --port 8080
-
-# Or run directly without installing globally:
-uvx label-studio start --port 8080
-
-# Option 2: uv with virtual environment (project-level)
-uv venv .venv
-source .venv/bin/activate
-uv pip install label-studio
-label-studio start --port 8080
-
-# Option 3: Docker (recommended for team/server use)
-docker run -it -p 8080:8080 \
-  -v $(pwd)/label-studio-data:/label-studio/data \
-  heartexlabs/label-studio:latest
+# From the repo root
+bash services/s18103_label_studio/bootstrap.sh   # idempotent
 ```
 
-Access at: `http://localhost:8080`
+The bootstrap script:
+- Starts Label Studio via `docker compose` on `http://localhost:18103`
+- Flips `legacy_api_tokens_enabled=True` on the default organisation
+- Prints the `ADMIN_TOKEN` to the console (bridge reads it from `.env`)
 
-### 1.2 Create Account & Organization
+For a one-off local install outside the repo (not recommended for the
+round-trip workflow below), see the upstream
+[Label Studio docs](https://labelstud.io/guide/install.html).
 
-1. Open `http://localhost:8080` in browser
-2. Create admin account
-3. Create organization (e.g., "Vietsol-SmartCamera")
-4. Invite annotators via Settings > Members
+### 1.2 Programmatic round-trip via the bridge
+
+Instead of clicking through the LS UI to create projects, import tasks,
+and export annotations, use `core/p04_label_studio/bridge.py` — it
+derives the project name, labelling config (including the split
+`<Choices>` block), and YOLO ↔ LS conversion from the feature's
+`05_data.yaml`.
+
+```bash
+FEATURE=features/safety-fire_detection
+
+# Create LS project + labelling config from 05_data.yaml::names
+uv run core/p04_label_studio/bridge.py setup  --data-config $FEATURE/configs/05_data.yaml
+
+# Import every image in training_ready/<dataset_name>/ as a pre-annotated
+# task (split choice pre-selected per the filesystem layout)
+uv run core/p04_label_studio/bridge.py import --data-config $FEATURE/configs/05_data.yaml
+
+#   … reviewers annotate at http://localhost:18103 …
+
+# Export submitted tasks back to YOLO, honouring any split changes
+# (val → train, drop, etc.) by physically moving files on disk
+uv run core/p04_label_studio/bridge.py export --data-config $FEATURE/configs/05_data.yaml
+```
+
+### 1.3 Project naming convention
+
+The bridge creates one project per feature, named `<dataset_name>_review`
+— e.g. `safety_fire_detection_review`. Do **not** create projects by
+hand; the bridge matches on this name.
 
 ---
 
 ## 2. Project Setup
 
-### 2.1 Create Projects (one per use case)
+### 2.1 Projects per use case
 
-Create the following projects in Label Studio:
+`bridge.py setup` (Section 1.2) creates one project per feature. Project
+name = `<dataset_name>_review`. Reference table:
 
-| Project Name | Task Type | Description |
+| Feature folder | LS project | Task Type |
 |---|---|---|
-| `PPE-Helmet` | Object Detection | Helmet detection (Phase 1 — Model B) |
-| `PPE-SafetyShoes` | Object Detection | Safety shoes detection (Phase 1 — Model F) |
-| `Poketenashi` | Object Detection | Behavior violations (Phase 1 — Model H) |
-| `Fire-Smoke` | Object Detection | Fire and smoke detection (Phase 1 — Model A) |
-| `Fall-Pose` | Keypoint / Pose | 17-point COCO pose annotation (Phase 1 — Model G) |
-| `PPE-Detection` | Object Detection | Helmet, vest, gloves, goggles detection (Phase 2 — full PPE) |
-| `Forklift-Proximity` | Object Detection | Forklift, person, pallet jack detection (Phase 2) |
+| `features/ppe-helmet_detection` | `ppe_helmet_detection_review` | Object Detection |
+| `features/ppe-shoes_detection` | `ppe_shoes_detection_review` | Object Detection |
+| `features/ppe-gloves_detection` | `ppe_gloves_detection_review` | Object Detection |
+| `features/safety-poketenashi-phone-usage` | `safety_poketenashi_phone_usage_review` | Object Detection |
+| `features/safety-fire_detection` | `safety_fire_detection_review` | Object Detection |
+| `features/safety-fall-detection` | `safety_fall_detection_review` | Object Detection |
+| `features/safety-fall_pose_estimation` | `safety_fall_pose_estimation_review` | Keypoint / Pose |
+| `features/access-face_recognition` | `access_face_recognition_review` | Face (enrollment flow) |
+| `features/access-zone_intrusion` | `access_zone_intrusion_review` | Object Detection |
+| `features/detect_vehicle` | `vehicle_detection_review` | Object Detection |
 
 ### 2.2 Import Data
 
@@ -804,9 +828,9 @@ echo "  Test:  $(ls $OUTPUT_DIR/test/images/ | wc -l) images"
 
 ## 10. YOLO Dataset YAML (for training)
 
-Phase 1 dataset configs already exist in `configs/<usecase>/`. These are the **actual files** used for training:
+Phase 1 dataset configs already exist in `features/<name>/configs/`. These are the **actual files** used for training:
 
-#### Phase 1 Dataset YAMLs (in `configs/<usecase>/`)
+#### Phase 1 Dataset YAMLs (in `features/<name>/configs/`)
 
 ```yaml
 # features/safety-fire_detection/configs/05_data.yaml

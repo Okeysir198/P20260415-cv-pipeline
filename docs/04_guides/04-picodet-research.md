@@ -148,7 +148,7 @@ Use PicoDet ONNX models (pretrained COCO or custom-trained in PaddleDetection) a
 
 ## Recommendations
 
-1. **Short-term (evaluation):** Use Option C — download official PicoDet ONNX models, test inference speed and accuracy on AX650N/CV186AH using `core/p10_inference/predictor.py` and `core/p09_export/benchmark.py`. Compare against YOLOX-Tiny for zone intrusion and phone detection use cases.
+1. **Short-term (evaluation):** Use Option C — download official PicoDet ONNX models and evaluate them via `core/p10_inference/predictor.py` (`DetectionPredictor` class) and `core/p09_export/benchmark.py` (`ModelBenchmark` class). Both are library APIs, not CLIs; wrap them in a short script. Compare against YOLOX-Tiny for zone intrusion and phone detection use cases. On-device latency must be measured with the vendor SDK on the real chip.
 
 2. **Mid-term (if evaluation passes):** Use Option A — full PyTorch integration for fine-tuning on domain datasets. The pipeline architecture is ready for it (registry, loss, postprocessor patterns all exist). Main effort is porting the ESNet backbone and TAL loss to PyTorch.
 
