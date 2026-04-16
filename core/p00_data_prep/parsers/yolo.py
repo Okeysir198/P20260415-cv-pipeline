@@ -46,7 +46,7 @@ def parse_yolo(source_config: Dict, base_dir: Path) -> List[Dict]:
             if not img_dir.exists():
                 continue
 
-            samples.extend(_parse_yolo_split(img_dir, label_dir, source_name, id_to_name))
+            samples.extend(_parse_yolo_split(img_dir, label_dir, source_name, id_to_name, original_split=split))
     else:
         img_dir = data_root / "images"
         label_dir = data_root / "labels"
@@ -89,7 +89,8 @@ def _parse_yolo_split(
     img_dir: Path,
     label_dir: Path,
     source_name: str,
-    id_to_name: Dict[str, str]
+    id_to_name: Dict[str, str],
+    original_split: str | None = None,
 ) -> List[Dict]:
     """
     Parse a single YOLO split.
@@ -122,13 +123,16 @@ def _parse_yolo_split(
         if id_to_name:
             labels = [id_to_name.get(label, label) for label in labels]
 
-        samples.append({
+        sample: Dict = {
             "filename": img_path.name,
             "image_path": img_path,
             "labels": labels,
             "bboxes": bboxes,
-            "source": source_name
-        })
+            "source": source_name,
+        }
+        if original_split is not None:
+            sample["original_split"] = original_split
+        samples.append(sample)
 
     return samples
 

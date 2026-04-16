@@ -153,14 +153,31 @@ def run_data_prep(config: dict, args) -> None:
         write_audit_snapshot,
     )
 
+    # Separate pre-split sources (has_splits=True) from flat sources needing random splitting.
+    pre_assigned: list[tuple[int, str]] = []  # (idx, split)
+    to_split_input: list[dict] = []
+    _VALID_SPLITS = {"train", "val", "test"}
+    _SPLIT_ALIASES = {"valid": "val"}
+
+    for i, s in enumerate(samples):
+        if "original_split" in s:
+            raw = s["original_split"]
+            mapped = _SPLIT_ALIASES.get(raw, raw)
+            pre_assigned.append((i, mapped if mapped in _VALID_SPLITS else "train"))
+        else:
+            to_split_input.append({"_idx": i, "filename": Path(s["image_path"]).name, "labels": s.get("labels", [])})
+
+    n_pre = len(pre_assigned)
+    n_random = len(to_split_input)
     print(f"\n✂️  Assigning splits ({ratios[0]:.0%}/{ratios[1]:.0%}/{ratios[2]:.0%})...")
-    splitter = SplitGenerator(ratios=ratios, seed=seed, stratified=True)
-    split_input = [
-        {"_idx": i, "filename": Path(s["image_path"]).name, "labels": s.get("labels", [])}
-        for i, s in enumerate(samples)
-    ]
-    assignment = splitter.assign_splits(split_input)  # {split: [dict, ...]}
-    idx_to_split = {item["_idx"]: split for split, items in assignment.items() for item in items}
+    print(f"   Pre-split (scene-aware): {n_pre}  |  Random-split: {n_random}")
+
+    idx_to_split: dict[int, str] = {i: split for i, split in pre_assigned}
+
+    if to_split_input:
+        splitter = SplitGenerator(ratios=ratios, seed=seed, stratified=True)
+        assignment = splitter.assign_splits(to_split_input)  # {split: [dict, ...]}
+        idx_to_split.update({item["_idx"]: split for split, items in assignment.items() for item in items})
 
     ensure_split_dirs(output_dir)
     split_dirs = {
@@ -463,6 +480,29 @@ def _write_dataset_report(
     cls_totals = " | ".join(f"{stats.get(c, 0):,}" for c in classes)
     lines += [
         f"| **Total** | **{total_images:,}** | **{total_annotations:,}** | **{avg_ann:.2f}** | {cls_totals} |",
+        "",
+        "---",
+        "",
+        "## Split Strategy",
+        "",
+        "> **Author-defined** — original train/val/test dirs from the source dataset are honored as-is.",
+        "> Scenes are guaranteed not to leak across splits if the dataset authors split by scene (e.g. video-derived datasets).",
+        "> **Random stratified** — shuffled by class label; no scene-separation guarantee.",
+        "",
+        "| Source | Strategy | Basis |",
+        "|--------|----------|-------|",
+    ]
+    for src in sources:
+        src_name = src.get("name", "?")
+        if src.get("has_splits"):
+            strategy = "Author-defined ✅"
+            basis = f"splits: {', '.join(src.get('splits_to_use', []))}"
+        else:
+            strategy = "Random stratified"
+            basis = f"flat source — {ratios[0]:.0%}/{ratios[1]:.0%}/{ratios[2]:.0%} seed={config.get('splits', {}).get('seed', 42)}"
+        lines.append(f"| {src_name} | {strategy} | {basis} |")
+
+    lines += [
         "",
         "---",
         "",

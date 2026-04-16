@@ -161,9 +161,9 @@ uv run core/p10_inference/face_enroll.py \
 
 ### safety-fire_detection
 
-- [ ] `00_data_preparation.yaml` — sources locked, class map verified
-- [ ] `p00_data_prep` — run, check `DATASET_REPORT.md`, fix class imbalance
-- [ ] `p02_annotation_qa` — SAM3 QA pass, re-label `bad` tier
+- [x] `00_data_preparation.yaml` — sources locked, class map verified
+- [x] `p00_data_prep` — 17,373 imgs (fire 53.7% / smoke 46.3%), DATASET_REPORT ✅
+- [x] `p02_annotation_qa` — 95.1% good / 1.1% bad → ✅ ACCEPT; LS project 13
 - [ ] **Benchmark pretrained candidates** — 5–10 epoch head-only run (YOLOX-M, D-FINE-M, RT-DETRv2-R18), pick best backbone (see Training Strategy above)
 - [ ] `06_training.yaml` — set winning arch, `pretrained`, `freeze_backbone_epochs`, `lr_backbone`
 - [ ] `p06_training` — train, monitor mAP
@@ -173,9 +173,9 @@ uv run core/p10_inference/face_enroll.py \
 
 ### safety-fall-detection
 
-- [ ] `00_data_preparation.yaml` — sources locked
-- [ ] `p00_data_prep`
-- [ ] `p02_annotation_qa`
+- [x] `00_data_preparation.yaml` — sources locked
+- [x] `p00_data_prep` — 12,402 imgs (person 62.4% / fallen_person 37.6%), DATASET_REPORT ✅
+- [x] `p02_annotation_qa` — 90.6% good / 0.2% bad → ✅ ACCEPT; LS project 16
 - [ ] **Benchmark pretrained candidates** — YOLOX-S, YOLOX-M, D-FINE-S
 - [ ] `06_training.yaml`
 - [ ] `p06_training`
@@ -208,9 +208,9 @@ uv run core/p10_inference/face_enroll.py \
 
 ### safety-poketenashi-phone-usage
 
-- [ ] `00_data_preparation.yaml` — sources locked
-- [ ] `p00_data_prep`
-- [ ] `p02_annotation_qa`
+- [x] `00_data_preparation.yaml` — sources locked
+- [x] `p00_data_prep` — 22,975 imgs (phone_usage 94.6% / person 5.4%), DATASET_REPORT ✅
+- [x] `p02_annotation_qa` — 90.6% good / 5.4% bad → ⚠️ borderline ACCEPT; SAM3 struggles with action-class semantics on small phone bboxes; LS project 17
 - [ ] **Benchmark pretrained candidates** — YOLOX-S, YOLOX-M, D-FINE-S
 - [ ] `06_training.yaml`
 - [ ] `p06_training`
@@ -220,9 +220,9 @@ uv run core/p10_inference/face_enroll.py \
 
 ### ppe-helmet_detection
 
-- [ ] `00_data_preparation.yaml` — sources locked
-- [ ] `p00_data_prep`
-- [ ] `p02_annotation_qa`
+- [x] `00_data_preparation.yaml` — sources locked; 4 classes: person, head_with_helmet, head_without_helmet, head_with_nitto_hat
+- [x] `p00_data_prep` — 22,323 imgs (head_with_helmet 74% / head_without_helmet 21% / person 3% / head_with_nitto_hat 1.6%), DATASET_REPORT ✅
+- [x] `p02_annotation_qa` — 94.7% good / 2.4% bad → ✅ ACCEPT; LS project 14
 - [ ] **Benchmark pretrained candidates** — YOLOX-M, D-FINE-M, RT-DETRv2-R18
 - [ ] `06_training.yaml`
 - [ ] `p06_training`
@@ -232,9 +232,9 @@ uv run core/p10_inference/face_enroll.py \
 
 ### ppe-shoes_detection
 
-- [ ] `00_data_preparation.yaml` — sources locked
-- [ ] `p00_data_prep`
-- [ ] `p02_annotation_qa`
+- [x] `00_data_preparation.yaml` — sources locked
+- [x] `p00_data_prep` — 37,026 imgs (foot_with_safety_shoes 68% / foot_without_safety_shoes 29% / person 2.4%), DATASET_REPORT ✅
+- [x] `p02_annotation_qa` — 88.5% good / 1.8% bad → ✅ ACCEPT; LS project 15
 - [ ] **Benchmark pretrained candidates** — YOLOX-S, YOLOX-M (no domain-specific base exists)
 - [ ] `06_training.yaml`
 - [ ] `p06_training`
@@ -287,6 +287,38 @@ Run `p00_data_prep` → `p02_annotation_qa` for each. Can run concurrently (CPU-
 ---
 
 ## Iteration Log
+
+### Iteration 2 — 2026-04-17
+
+**Phase A complete — all 5 ML features data-ready.**
+
+| Feature | Dataset | Images | QA | LS project |
+|---|---|---|---|---|
+| safety-fire_detection | fire_detection | 17,373 | 95.1% good / 1.1% bad ✅ | id=13 |
+| ppe-helmet_detection | helmet_detection | 22,323 | 94.7% good / 2.4% bad ✅ | id=14 |
+| ppe-shoes_detection | shoes_detection | 37,026 | 88.5% good / 1.8% bad ✅ | id=15 |
+| safety-fall-detection | fall_detection | 12,402 | 90.6% good / 0.2% bad ✅ | id=16 |
+| safety-poketenashi-phone-usage | safety_poketenashi_phone_usage | 22,975 | 90.6% good / 5.4% bad ⚠️ | id=17 |
+
+- [x] `ppe-helmet_detection` class decision: `person` retained (source datasets have person labels); `head_with_nitto_hat` kept at 1.6% — site_collected will strengthen it
+- [x] `ppe-shoes_detection` `person` at 2.4% — accepted; foot-centric datasets naturally lack person bboxes
+- [x] `safety-poketenashi-phone-usage` borderline QA — SAM3 action-semantic limitation on small phone bboxes; re-label only if post-training mAP is low
+- [x] All 5 datasets loaded into Label Studio at http://localhost:18103 for human review before training
+
+**Next (Phase B):** Backbone benchmarking — 5–10 epoch head-only runs per feature on GPU 2. Start with `safety-fire_detection`.
+
+---
+
+### Iteration 1 — 2026-04-17
+
+- [x] p00 DATASET_REPORT: `tiny` bbox tier added (w×h < 0.000479, <14² px on 640 px); `small` adjusted to 14²–32² px range
+- [x] p02 `run_qa.py`: auto-appends Label Quality section to feature `DATASET_REPORT.md` after each QA run; re-run replaces section only
+- [x] p02 `pipeline.py`: `sam3.include_missing_detection` wired from shared config (default `false` to prevent FP on class-restricted datasets)
+- [x] `cv-dataset-prep` skill: sampling size hint + missing-detection flag documented + step 9 handoff strengthened
+
+~~**Next:** run `p00_data_prep` → `p02_annotation_qa` for all 5 ML features (Phase A — data prep).~~ → Done in Iteration 2.
+
+---
 
 ### Iteration 0 — 2026-04-16
 

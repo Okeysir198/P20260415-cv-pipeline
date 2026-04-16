@@ -2,10 +2,11 @@
 label_studio:
   # Connection settings
   url: "http://localhost:18103"
-  api_key: ""  # Override via LS_API_KEY env var or --api-key CLI arg
+  api_key: "1fc75e70df419d5366bafa82f289e6ac3a4fb793"  # admin@admin.com — regenerate via services/s18103_label_studio/bootstrap.sh
 
   # Data directories
-  local_files_root: "/datasets"              # Container mount path for image access
+  local_files_root: "/datasets"              # Container mount point (dataset_store → /datasets)
+  document_root: "/datasets/training_ready"  # LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT — storage connectors must be sub-dirs of this
 
   # Project defaults
   project_suffix: "_review"                  # Appended to dataset_name for project naming

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import time
 
 import numpy as np
 import requests
@@ -179,6 +180,8 @@ def verify_with_sam3(
     auto_mask_min_area: float = cfg.get("auto_mask_min_area", DEFAULT_AUTO_MASK_MIN_AREA)
     auto_mask_max_area: float = cfg.get("auto_mask_max_area", DEFAULT_AUTO_MASK_MAX_AREA)
     missing_overlap_thresh: float = cfg.get("missing_overlap_threshold", DEFAULT_MISSING_OVERLAP_THRESH)
+    max_retries: int = cfg.get("max_retries", 1)
+    retry_delay_s: float = cfg.get("retry_delay_s", 2.0)
 
     valid_classes = {int(k): v for k, v in classes.items()}
 
@@ -186,6 +189,7 @@ def verify_with_sam3(
     mask_ious: list[float] = []
     misclassified: list[int] = []
     has_polygon_data = any(ann.polygon_norm for ann in annotations)
+    sam3_failed = False
 
     # --- (a) Box IoU and (b) Mask IoU ---
     for ann_idx, ann in enumerate(annotations):
@@ -193,14 +197,28 @@ def verify_with_sam3(
         norm_xyxy = norm_cxcywh_to_xyxy(cx, cy, w, h)
         pixel_box = norm_xyxy_to_pixel(norm_xyxy, img_w, img_h)
 
-        try:
-            sam3_result = call_sam3_box(image_b64, pixel_box)
-        except Exception as exc:
-            logger.debug("SAM3 /segment_box failed for annotation %d: %s", ann_idx, exc)
-            box_ious.append(0.0)
-            if has_polygon_data:
-                mask_ious.append(0.0)
-            continue
+        sam3_result = None
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                sam3_result = call_sam3_box(image_b64, pixel_box)
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    logger.debug(
+                        "SAM3 /segment_box failed for annotation %d (attempt %d/%d): %s — retrying",
+                        ann_idx, attempt + 1, max_retries + 1, exc,
+                    )
+                    time.sleep(retry_delay_s)
+
+        if sam3_result is None:
+            logger.debug(
+                "SAM3 /segment_box unavailable for annotation %d after %d attempt(s): %s",
+                ann_idx, max_retries + 1, last_exc,
+            )
+            sam3_failed = True
+            break
 
         # Compute box IoU
         sam3_bbox = sam3_result.get("bbox", {})
@@ -258,6 +276,17 @@ def verify_with_sam3(
 
             if not has_overlap:
                 misclassified.append(ann_idx)
+
+    # SAM3 was unreachable — return sentinel so caller can grade as "unverified"
+    if sam3_failed:
+        return SAM3Verification(
+            box_ious=None,
+            mask_ious=[],
+            mean_box_iou=0.0,
+            mean_mask_iou=0.0,
+            misclassified=[],
+            missing_detections=[],
+        )
 
     # --- (d) Missing detection ---
     missing_detections: list[dict] = []

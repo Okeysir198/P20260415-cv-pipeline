@@ -257,25 +257,26 @@ class LabelStudioAPI:
         self._client = None
         self._session: Optional[requests.Session] = None
 
-        # Try SDK first; fall back to raw HTTP if it fails (e.g. LS 1.23+
-        # disables legacy token auth that the SDK depends on).
+        # Always build a session for endpoints not exposed by the SDK
+        # (e.g. local-files storage connector). Use email/password login
+        # when provided so Django session-auth endpoints work; otherwise
+        # fall back to token-auth headers.
+        if email and password:
+            self._session = self._login_session(email, password)
+        else:
+            self._session = requests.Session()
+            self._session.headers["Authorization"] = f"Token {self.api_key}"
+
+        # Try SDK on top of the session — SDK handles project/task CRUD
+        # cleanly. If SDK init fails (e.g. legacy-token disabled), the raw
+        # session above is still used for all calls.
         try:
             client = LSClient(url=self.url, api_key=self.api_key)
             client.get_projects()  # validate connectivity
             self._client = client
             logger.info("Using label-studio-sdk client.")
         except Exception:
-            logger.info("SDK auth failed; falling back to session-cookie auth.")
-            if email and password:
-                self._session = self._login_session(email, password)
-            else:
-                # Create a reusable token-auth session for connection pooling
-                self._session = requests.Session()
-                self._session.headers["Authorization"] = f"Token {self.api_key}"
-                logger.warning(
-                    "No email/password provided for session auth. "
-                    "Using token auth via reusable session."
-                )
+            logger.info("SDK auth failed; using raw session-cookie auth for all calls.")
 
     def _login_session(self, email: str, password: str) -> requests.Session:
         """Create an authenticated requests.Session via login form."""
@@ -1233,15 +1234,17 @@ def cmd_setup(args: argparse.Namespace) -> None:
     )
     print(f"Created project '{project['title']}' (id={project['id']}).")
 
-    # Set up local storage connector
+    # Set up local storage connector.
+    # Storage path must be a sub-dir of LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT
+    # (not the top-level mount — LS rejects paths equal to DOCUMENT_ROOT).
     config_dir = Path(args.data_config).resolve().parent
     dataset_path = resolve_path(data_config["path"], config_dir)
-    local_files_root = ls_cfg.get("local_files_root", "/datasets")
+    document_root = ls_cfg.get("document_root", ls_cfg.get("local_files_root", "/datasets/training_ready"))
 
     try:
         storage = api.create_local_storage(
             project_id=project["id"],
-            local_store_path=str(Path(local_files_root) / dataset_path.name),
+            local_store_path=str(Path(document_root) / dataset_path.name),
             title=f"{dataset_name} local storage",
         )
         print(f"Created local storage connector (id={storage.get('id', '?')}).")

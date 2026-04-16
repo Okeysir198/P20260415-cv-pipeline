@@ -95,23 +95,31 @@ uv run core/p01_auto_annotate/run_auto_annotate.py \
 
 Re-run step 7. If `bad` is still > 5% after one cycle, show the user `worst_images.json` — do not loop again automatically.
 
-## Step 8b — Human review in Label Studio (optional)
+## Step 8b — Load training dataset into Label Studio (mandatory)
 
-Use when p01 can't fix issues (missing annotations, wrong class, split rebalancing needed).
+**Always run this step** — humans must be able to view and review the training dataset in Label Studio before training starts. This is not optional.
 
 ```bash
-# Setup + import
+# 1. Create LS project + local-files storage connector
 uv run core/p04_label_studio/bridge.py --email $LS_EMAIL --password $LS_PASSWORD setup \
   --data-config features/<name>/configs/05_data.yaml
+
+# 2. Import all training_ready images as tasks with pre-annotations (YOLO labels as predictions)
 uv run core/p04_label_studio/bridge.py --email $LS_EMAIL --password $LS_PASSWORD import \
   --data-config features/<name>/configs/05_data.yaml
-
-# After human review is complete
-uv run core/p04_label_studio/bridge.py --email $LS_EMAIL --password $LS_PASSWORD export \
-  --data-config features/<name>/configs/05_data.yaml --project <dataset_name>_review
 ```
 
-Then re-run step 7.
+Tell the user: **"Training dataset is now in Label Studio at http://localhost:18103 — project `<dataset_name>_review`. Review annotations before training starts."**
+
+If the human reviewer corrects annotations:
+```bash
+# Export corrected annotations back to YOLO .txt files
+uv run core/p04_label_studio/bridge.py --email $LS_EMAIL --password $LS_PASSWORD export \
+  --data-config features/<name>/configs/05_data.yaml --project <dataset_name>_review
+
+# Then re-run QA to confirm the corrections improved quality
+uv run core/p02_annotation_qa/run_qa.py --data-config features/<name>/configs/05_data.yaml
+```
 
 ## Step 9 — Hand off
 
@@ -119,6 +127,7 @@ Confirm all of the following before handing off:
 - [ ] `dataset_store/training_ready/<name>/DATASET_REPORT.md` exists and shows `✅ ACCEPT` verdict in the Label Quality section
 - [ ] `05_data.yaml` `path:` matches `training_ready/<dataset_name>/` and `num_classes:` is correct
 - [ ] `06_training.yaml` exists in `features/<name>/configs/` (if not, create it from `features/_TEMPLATE/configs/06_training.yaml`)
+- [ ] Label Studio project `<dataset_name>_review` exists and is populated — human can view dataset at `http://localhost:18103`
 
 Print the smoke-test training command:
 ```bash

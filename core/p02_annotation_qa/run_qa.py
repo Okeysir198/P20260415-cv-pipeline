@@ -193,10 +193,10 @@ def main() -> None:
     print(f"  Avg quality score: {summary.get('avg_quality_score', 0):.3f}")
     grades = summary.get("grades", {})
     total = sum(grades.values()) or 1
-    for grade in ["good", "review", "bad"]:
+    for grade in ["good", "review", "bad", "unverified"]:
         n = grades.get(grade, 0)
         pct = n / total * 100
-        print(f"  {grade:<7s}: {n:>6d} ({pct:5.1f}%)")
+        print(f"  {grade:<10s}: {n:>6d} ({pct:5.1f}%)")
     timing = summary.get("timing", {})
     if timing:
         print(f"  Avg per sample   : {timing.get('avg_total_per_sample_s', 0):.4f}s "
@@ -247,13 +247,17 @@ def _append_qa_to_dataset_report(
     good_n = grades.get("good", 0)
     review_n = grades.get("review", 0)
     bad_n = grades.get("bad", 0)
+    unverified_n = grades.get("unverified", 0)
     good_pct = (good_n / total * 100) if total else 0.0
     review_pct = (review_n / total * 100) if total else 0.0
     bad_pct = (bad_n / total * 100) if total else 0.0
+    unverified_pct = (unverified_n / total * 100) if total else 0.0
 
     # Verdict logic (mirrors skill decision table)
     if good_pct >= 80 and bad_pct <= 5:
         verdict = "✅ ACCEPT — good ≥ 80%, bad ≤ 5% → proceed to training"
+    elif unverified_pct > 30:
+        verdict = "🔄 RERUN_QA — SAM3 was unreliable (>30% unverified) → re-run QA when SAM3 is stable"
     elif bad_pct <= 20:
         verdict = "🔄 RE-LABEL — bad 5–20% → run p01 auto-relabel then re-QA"
     else:
@@ -273,9 +277,10 @@ def _append_qa_to_dataset_report(
         "",
         "| Grade | Count | % | Action |",
         "|---|---|---|---|",
-        f"| ✅ good   | {good_n} | {good_pct:.1f}% | trusted — goes straight to training |",
-        f"| 👁 review | {review_n} | {review_pct:.1f}% | import to Label Studio for human check |",
-        f"| ❌ bad    | {bad_n} | {bad_pct:.1f}% | re-label with p01 or discard |",
+        f"| ✅ good       | {good_n} | {good_pct:.1f}% | trusted — goes straight to training |",
+        f"| 👁 review     | {review_n} | {review_pct:.1f}% | import to Label Studio for human check |",
+        f"| ❌ bad        | {bad_n} | {bad_pct:.1f}% | re-label with p01 or discard |",
+        f"| ❓ unverified | {unverified_n} | {unverified_pct:.1f}% | SAM3 unavailable — re-run QA when SAM3 is stable |",
         "",
         f"**Verdict:** {verdict}",
     ]

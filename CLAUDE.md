@@ -42,9 +42,6 @@ uv run demo
 bash scripts/new_feature.sh my_new_feature
 # then edit features/my_new_feature/configs/{05_data,06_training,10_inference}.yaml
 
-# Demo UI
-uv run demo
-
 # Tests
 uv run tests/run_all.py              # Full pipeline (sequential, stops on failure)
 uv run -m pytest tests/ -v           # Via pytest
@@ -162,6 +159,8 @@ import from any `features/<name>/code/`**.
 - **Quantized ONNX export needs a separate venv**: `optimum[onnxruntime]` requires `transformers<4.58` which conflicts with the git transformers pinned in the main venv. Run `bash scripts/setup-export-venv.sh` once to create `.venv-export/`, then use it only for quantization: `.venv-export/bin/python core/p09_export/export.py --optimize O2 --quantize dynamic ...`. The main venv's default export (`--skip-optimize`) still works for unquantized ONNX.
 - **Feature folder vs `dataset_name` casing**: feature folders use `kebab-case` (e.g. `ppe-helmet_detection`); `dataset_name` in `05_data.yaml`, `training_ready/` subdirs, `releases/` subdirs, and LS project names use `snake_case` (hyphens replaced with underscores). `scripts/new_feature.sh` derives both correctly from a single `<feature_name>` arg. Every pipeline-step run_dir is derived via `utils.config.feature_name_from_config_path()` — never pass `dataset_name` where a feature folder is expected or you'll create ghost `features/<snake_name>/` folders.
 - **`text_prompts:` live per-feature, not in shared QA config**: each feature's `05_data.yaml::text_prompts:` is the authoritative SAM3 prompt source. `core/p02_annotation_qa` reads from the data config first. Never add feature-specific prompts back to `configs/_shared/02_annotation_quality.yaml` — that shared file intentionally omits them.
+- **`include_missing_detection` defaults to `false`**: the shared QA config sets `sam3.include_missing_detection: false` to prevent false-positive "unlabeled object" flags on class-restricted datasets (fire-only, helmet-only, etc.) where many non-target objects are intentionally unannotated. Enable only for COCO-style all-object datasets: `--override sam3.include_missing_detection=true`.
+- **p02 auto-appends to `DATASET_REPORT.md`**: after each QA run, `run_qa.py` writes a "Label Quality" section into the feature's existing `DATASET_REPORT.md` (grade table, verdict, top issues). Re-running replaces that section only — other sections are preserved.
 - **DVC for large files**: `.pt`, `.pth`, `.onnx` files are gitignored, tracked via DVC.
 - **`sys.path.insert`**: Many modules add project root to path. Use `uv run` to avoid issues.
 - **Overrides are nested dicts**: `DetectionTrainer(overrides={"training": {"epochs": 2}})`, not `{"training.epochs": 2}`.

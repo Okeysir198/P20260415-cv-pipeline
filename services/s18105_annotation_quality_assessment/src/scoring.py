@@ -41,7 +41,7 @@ def score_image(
     cfg: dict,
     class_rules: list[dict],
     vlm_verification: VLMVerification | None = None,
-) -> tuple[float, str]:
+) -> tuple[float | None, str]:
     """Compute quality score and grade for an image.
 
     Score formula:
@@ -64,8 +64,13 @@ def score_image(
         class_rules: Optional rules that derived the labels.
 
     Returns:
-        Tuple of (score, grade) where score is in [0, 1] and grade is 'good'|'review'|'bad'.
+        Tuple of (score, grade) where score is in [0, 1] and grade is
+        'good'|'review'|'bad'|'unverified'.  score is None for 'unverified'.
     """
+    # SAM3 was unavailable — cannot assess bbox quality
+    if sam3_verification is not None and sam3_verification.box_ious is None:
+        return None, "unverified"
+
     weights = cfg.get("scoring", {}).get("weights", DEFAULT_SCORING_WEIGHTS)
     thresholds = cfg.get("scoring", {}).get("thresholds", DEFAULT_SCORING_THRESHOLDS)
 
@@ -192,8 +197,8 @@ def generate_sam3_fixes(
         if f.type in ("remove_annotation", "remove_degenerate", "remove_duplicate")
     } | {idx for idx in sam3_verification.misclassified}
 
-    # Low box IoU — suggest tightening
-    for idx, iou_val in enumerate(sam3_verification.box_ious):
+    # Low box IoU — suggest tightening (skip when SAM3 was unavailable)
+    for idx, iou_val in enumerate(sam3_verification.box_ious or []):
         if iou_val < 0.6 and 0 <= idx < len(annotations) and idx not in removed_indices:
             ann = annotations[idx]
             fixes.append(SuggestedFix(
@@ -408,13 +413,13 @@ def aggregate_results(
     worst_n = DEFAULT_WORST_IMAGES_COUNT
 
     # Grade distribution
-    grade_counts: dict[str, int] = {"good": 0, "review": 0, "bad": 0}
+    grade_counts: dict[str, int] = {"good": 0, "review": 0, "bad": 0, "unverified": 0}
     for r in results:
         grade = r.get("grade", "review")
         grade_counts[grade] = grade_counts.get(grade, 0) + 1
 
-    # Average quality score
-    scores = [r.get("quality_score", 0.0) for r in results]
+    # Average quality score (exclude unverified — they have no score)
+    scores = [r.get("quality_score") for r in results if r.get("quality_score") is not None]
     avg_score = float(np.mean(scores)) if scores else 0.0
 
     # Issue-type breakdown

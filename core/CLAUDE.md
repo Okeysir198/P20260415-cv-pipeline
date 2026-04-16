@@ -101,6 +101,12 @@ p06_training   →  <save_dir>/best.pt        (or last.pt if best wasn't saved)
 
 ## Gotchas
 
+**p00 DATASET_REPORT `tiny` bbox tier** — DATASET_REPORT now tracks four size tiers: `tiny` (w×h < 0.000479, roughly <14² px on 640 px input), `small` (14²–32² px), `medium`, `large`. The `tiny` tier is the sentinel for annotations too small to train on reliably.
+
+**p02 auto-appends Label Quality to DATASET_REPORT** — `run_qa.py` writes a "Label Quality" section into the feature's existing `DATASET_REPORT.md` after each QA run (grade table, verdict, top issues per split). Re-running replaces only that section; other report sections are preserved. No separate report file is needed after the first p02 run.
+
+**`sam3.include_missing_detection` defaults to `false`** — wired from `configs/_shared/02_annotation_quality.yaml`. The default prevents false-positive "unlabeled object" flags on class-restricted datasets (fire-only, helmet-only, etc.) where non-target objects are intentionally unannotated. Enable with `--override sam3.include_missing_detection=true` only for COCO-style all-object datasets.
+
 **p00 YOLO source with numeric class IDs** — when a YOLO source dir has no `data.yaml` and the config has no `source_classes`, the parser emits raw class-id strings (`"0"`, `"1"`) as labels. `ClassMapper`'s `class_map` is keyed on class names, so every sample is dropped and you get `Found 0 samples`. Fix: add `source_classes: [fire, smoke, ...]` to the source entry (order matters — index → name).
 
 **ONNX Runtime on a saturated GPU** — `ort.InferenceSession(..., providers=["CUDAExecutionProvider", "CPUExecutionProvider"])` does **not** auto-fall-back when CUDA init fails mid-session (e.g. `CUBLAS_STATUS_ALLOC_FAILED` on a shared GPU). `core/p10_inference/predictor.py::_load_onnx_model` catches the failure and retries with CPU only — don't remove that try/except unless you replace it with something equivalent.

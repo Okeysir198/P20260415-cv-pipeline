@@ -23,6 +23,10 @@ sources:
     splits_to_use: ["train", "val", "test"]
     license: "CC-BY-4.0"
     notes: "Primary — paper-authored D-Fire dataset"
+    # data.yaml lives at d_fire/ (parent of data/), not at d_fire/data/ (data_root).
+    # Provide source_classes explicitly so the YOLO parser resolves numeric IDs correctly.
+    # D-Fire order: 0=smoke, 1=fire (per data.yaml names: ['smoke', 'fire'])
+    source_classes: ["smoke", "fire"]
     class_map:
       "smoke": "smoke"
       "fire": "fire"

@@ -63,7 +63,7 @@ class VerifyRequest(BaseModel):
 
 
 class SAM3Verification(BaseModel):
-    box_ious: list[float]
+    box_ious: list[float] | None  # None means SAM3 was unavailable for all annotations
     mask_ious: list[float] = Field(default_factory=list)
     mean_box_iou: float = 0.0
     mean_mask_iou: float = 0.0
@@ -76,7 +76,7 @@ class VerifyResponse(BaseModel):
     sam3_verification: SAM3Verification
     num_annotations: int
     num_issues: int
-    quality_score: float
+    quality_score: float | None  # None when grade is 'unverified' (SAM3 unavailable)
     grade: str
     suggested_fixes: list[SuggestedFix]
     label_format: str

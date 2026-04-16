@@ -199,6 +199,7 @@ No torch — all ML delegated to SAM3 and Ollama.
 
 ## Gotchas
 
+- **`include_missing_detection` is config-driven and off by default** — `configs/default.yaml` (and the pipeline's shared `02_annotation_quality.yaml`) sets `sam3.include_missing_detection: false`. The missing-detection check (step 4 in SAM3 verification) fires only when explicitly enabled. Default-off prevents false-positive "unlabeled object" flags on class-restricted datasets where non-target objects are intentionally left unannotated.
 - **SAM3 is optional** — `/validate` and `/fix` work without SAM3. Only `/verify` calls SAM3; it returns results with zero IoUs if SAM3 is down (individual call failures are caught and defaulted to 0.0).
 - **Ollama is optional** — VLM verification only runs when `enable_vlm=true` in the request. If Ollama is down, `verify_with_vlm()` returns `VLMVerification(available=False)`.
 - **VLM fail-open** — On VLM error (crop failure or LLM invocation failure), annotations are marked `is_correct=True` with `confidence=0.0`. This is intentional: transient VLM errors don't flag good annotations as bad.

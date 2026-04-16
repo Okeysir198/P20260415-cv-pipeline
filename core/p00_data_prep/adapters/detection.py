@@ -81,13 +81,16 @@ class DetectionAdapter(TaskAdapter):
                     })
 
             if objects:
-                converted.append({
+                entry = {
                     "filename": sample["filename"],
                     "image_path": sample["image_path"],
                     "labels": [obj["class_name"] for obj in objects],
                     "objects": objects,
-                    "source": sample["source"]
-                })
+                    "source": sample["source"],
+                }
+                if "original_split" in sample:
+                    entry["original_split"] = sample["original_split"]
+                converted.append(entry)
 
         return converted
 
