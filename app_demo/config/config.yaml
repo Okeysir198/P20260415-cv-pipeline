@@ -81,8 +81,8 @@ models:
         - features/safety-fall_pose_estimation/runs/best.pt
     phone:
       model_paths:
-        - features/safety-poketenashi/release/latest/best.pt
-        - features/safety-poketenashi/runs/best.pt
+        - features/safety-poketenashi-phone-usage/release/latest/best.pt
+        - features/safety-poketenashi-phone-usage/runs/best.pt
 
 # Tab order — each entry maps to a build function; remove/reorder to customize
 tabs:
@@ -136,19 +136,22 @@ use_cases:
     data_config: features/safety-fall-detection/configs/05_data.yaml
     alert_classes:
       - fallen_person
-    description: "Fall detection using classification approach"
+    description: "Fall detection using bounding-box classification"
   fall_pose:
     data_config: features/safety-fall_pose_estimation/configs/05_data.yaml
-    pose_config: features/safety-fall_pose_estimation/configs/rtmpose_s.yaml
+    pose_config: features/safety-fall_pose_estimation/configs/05_data.yaml
     torso_angle_threshold: 60
     hip_shoulder_ratio_threshold: 0.6
-    description: "Fall detection using pose estimation"
+    description: "Fall detection using RTMPose keypoints"
   phone:
     data_config: features/safety-poketenashi/configs/05_data.yaml
     alert_classes:
-      - phone
-    pose_config: features/safety-fall_pose_estimation/configs/rtmpose_s.yaml
-    description: "Phone usage detection in restricted areas"
+      - phone_usage
+      - hands_in_pockets
+      - stair_diagonal
+      - no_handrail
+      - no_pointing_calling
+    description: "Poketenashi: prohibited/required action detection (phone, hands, handrail, stairs, pointing-calling)"
   zone:
     person_class_id: 0
     default_zones: []

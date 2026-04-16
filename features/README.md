@@ -39,24 +39,47 @@ CI fixtures live at `configs/_test/`. Features **never** fall back to
 | `training_ready/` subdir | equals `dataset_name` | `dataset_store/training_ready/safety_fire_detection/` |
 
 `scripts/new_feature.sh` derives `dataset_name` automatically from the
-folder name, so you never edit the mapping by hand. The one legacy
-exception is `detect_vehicle` (no platform doc yet).
+folder name, so you never edit the mapping by hand.
 
-## Current Features
+## Phase 1 Features
 
-| Folder | Task | Notes |
+### Safety detection
+
+| Folder | Task | Detects |
 |---|---|---|
-| `safety-fire_detection` | Detection | Fire + smoke bounding boxes |
-| `safety-fall-detection` | Detection | Fallen-person bounding boxes |
-| `safety-fall_pose_estimation` | Keypoint | Fall detection via pose keypoints |
-| `safety-poketenashi-phone-usage` | Detection | Phone-use violation detection |
-| `safety-poketenashi` | Detection | Poketenashi (umbrella container) |
+| `safety-fire_detection` | Detection | Fire + smoke (ML model) |
+| `safety-fall-detection` | Detection | Fallen person (bounding-box model) |
+| `safety-fall_pose_estimation` | Pose keypoints | Fall via torso angle; also backs poketenashi pose rules |
+
+### Poketenashi — Prohibited / Required Actions
+
+| Folder | Task | Behaviors |
+|---|---|---|
+| `safety-poketenashi` | Orchestrator | Umbrella: runs sub-models + pose rules + zone logic |
+| `safety-poketenashi-phone-usage` | Detection (sub-model) | ❌ Using mobile phone while walking |
+
+Remaining behaviors are **pose-rule based** (implemented in `safety-poketenashi/code/`, no separate training):
+
+| Behavior | Type | Signal |
+|---|---|---|
+| ❌ Hands in pockets | Pose rule | Wrists inside torso band |
+| ❌ Crossing stairs diagonally / shortcut | Pose + tracking | Trajectory angle vs stair axis |
+| ❌ No handrail on stairs | Pose + zone rule | Hand keypoint outside railing zone |
+| ❌ No pointing-and-calling at checkpoint | Pose rule | Arm extension + pointing gesture missing |
+
+### PPE compliance
+
+| Folder | Task | Detects |
+|---|---|---|
 | `ppe-helmet_detection` | Detection | Hard-hat PPE compliance |
-| `ppe-shoes_detection` | Detection | Safety-shoes PPE detection |
-| `ppe-gloves_detection` | Detection | Glove PPE compliance |
-| `access-face_recognition` | Face | Enrollment + verification |
-| `access-zone_intrusion` | Detection + logic | Person/vehicle intrusion into restricted zones |
-| `detect_vehicle` | Detection | Generic vehicle detection (legacy name) |
+| `ppe-shoes_detection` | Detection | Safety-shoes compliance |
+
+### Access control
+
+| Folder | Task | Detects |
+|---|---|---|
+| `access-face_recognition` | Face | Enrollment + identity verification |
+| `access-zone_intrusion` | Detection + zone logic | Person / vehicle in restricted zones |
 
 ## Add a New Feature
 

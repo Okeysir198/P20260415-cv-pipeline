@@ -1,20 +1,72 @@
-# Inference + alert config (consumed by video_inference.VideoProcessor).
+# Inference + alert config — Poketenashi (prohibited / required action suite)
+# Loaded by core.p10_inference.video_inference.load_alert_config
+#
+# Detection backend: safety-poketenashi-phone-usage model (phone_usage class)
+# Pose backend:      RTMPose-S via safety-fall_pose_estimation
+# Zone backend:      polygon zones loaded from zone config at runtime
 
-model:
-  weights: ../runs/best.pt
-  conf: 0.25
-  iou: 0.45
+# ── Sub-model weights ─────────────────────────────────────────────────────────
+models:
+  phone_detection:
+    weights: ../../safety-poketenashi-phone-usage/runs/best.pt
+    conf: 0.35
+    iou: 0.45
+  pose_estimation:
+    weights: ../../safety-fall_pose_estimation/runs/best.pt
+    conf: 0.5
 
+# ── Per-behavior alert config ─────────────────────────────────────────────────
 alerts:
-  confidence_thresholds: {}   # {class_name: float}
-  frame_windows: {}           # {class_name: int}
-  window_ratio: 0.8
-  cooldown_frames: 90
+  confidence_thresholds:
+    phone_usage: 0.50          # ML detection — higher threshold reduces false positives
+    hands_in_pockets: 0.0      # Rule-based (no confidence score; threshold unused)
+    stair_diagonal: 0.0        # Rule-based (trajectory angle check)
+    no_handrail: 0.0           # Rule-based (hand keypoint vs railing zone)
+    no_pointing_calling: 0.0   # Rule-based (arm/finger pointing gesture missing)
 
+  # Frames the violation must persist before alert fires
+  frame_windows:
+    phone_usage: 10            # ~0.3 s at 30 fps — sustained use, not incidental
+    hands_in_pockets: 20       # ~0.7 s — walking posture must be sustained
+    stair_diagonal: 15         # ~0.5 s — confirmed diagonal trajectory
+    no_handrail: 12            # ~0.4 s — stair traversal without handrail contact
+    no_pointing_calling: 30    # ~1.0 s — should have pointed-and-called at checkpoint
+
+  window_ratio: 0.7            # fraction of window frames where violation must hold
+  cooldown_frames: 90          # ~3 s at 30 fps between repeated alerts per person
+
+# ── Pose-rule parameters ──────────────────────────────────────────────────────
+pose_rules:
+  hands_in_pockets:
+    # Wrists must be below hip and within torso horizontal band
+    wrist_below_hip_ratio: 0.05      # wrist y > hip y + 5% frame height
+    wrist_inside_torso_margin: 0.08  # wrist x within 8% of torso centerline
+
+  stair_diagonal:
+    # Tracking trajectory angle vs expected stair axis
+    max_diagonal_angle_deg: 20       # crossing angle > 20° from stair axis = diagonal
+
+  no_handrail:
+    # Hand keypoint (wrist) must be within this distance of the railing zone polygon
+    hand_to_railing_px: 60           # pixels at 640px width
+
+  no_pointing_calling:
+    # Arm must be extended forward with finger pointing direction
+    elbow_wrist_angle_min_deg: 150   # nearly straight arm
+    pointing_duration_frames: 20     # must hold for at least 20 frames at checkpoint
+
+# ── Tracking ──────────────────────────────────────────────────────────────────
 tracker:
   type: bytetrack
   track_activation_threshold: 0.25
+  lost_track_buffer: 30
+  minimum_iou_threshold: 0.1
+  frame_rate: 30
 
+# ── Sample media for smoke tests ──────────────────────────────────────────────
 samples:
-  images: []
+  images:
+    - ../samples/01_factory_worker_a.jpg
+    - ../samples/02_factory_worker_b.jpg
+    - ../samples/07_pexels_a.jpg
   videos: []
