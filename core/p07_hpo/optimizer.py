@@ -166,10 +166,12 @@ class HPOOptimizer:
         # Trial-specific save dir
         from utils.config import generate_run_dir
 
-        dataset_config_path = self.base_config.get("data", {}).get("dataset_config", "unknown")
-        use_case = Path(dataset_config_path).stem.replace("05_data", "").strip("_") or "default"
+        from utils.config import feature_name_from_config_path
         trial_overrides["logging"]["save_dir"] = str(
-            generate_run_dir(use_case, f"08_hyperparameter_tuning_trial_{trial.number}")
+            generate_run_dir(
+                feature_name_from_config_path(self.training_config_path),
+                f"08_hyperparameter_tuning_trial_{trial.number}",
+            )
         )
 
         # Merge: base → trial overrides → sampled params → user overrides (CLI wins)

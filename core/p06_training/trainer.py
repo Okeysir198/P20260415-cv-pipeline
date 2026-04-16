@@ -379,14 +379,10 @@ class DetectionTrainer:
             if not Path(save_dir).is_absolute():
                 save_dir = str((self.config_path.parent / save_dir).resolve())
         else:
-            # Resolve run_name explicitly: config > feature-folder heuristic.
-            # features/<name>/configs/06_training.yaml → config_path.parent.parent.name = <name>
-            run_name = (
-                self._log_cfg.get("run_name")
-                or self._log_cfg.get("project")
-                or self.config_path.parent.parent.name
-            )
-            save_dir = str(generate_run_dir(run_name, "06_training"))
+            from utils.config import feature_name_from_config_path
+            save_dir = str(generate_run_dir(
+                feature_name_from_config_path(self.config_path), "06_training"
+            ))
 
         callbacks.append(
             CheckpointSaver(

@@ -147,7 +147,8 @@ import from any `features/<name>/code/`**.
 ## Gotchas
 
 - **`uv` not `pip`**: Project uses uv with custom PyTorch CUDA 13.0 index. Always `uv run` or `uv sync`.
-- **Export dep conflict**: `optimum[onnxruntime]` conflicts with `transformers@git`. Install `export` group separately from `sam3`/`qa`.
+- **Bare `uv sync` installs everything** for the full pipeline (p00→p10, QA, Label Studio, HPO, Gradio, Jupyter, MediaPipe, pytest, ruff, dvc, Playwright). Only `--extra analysis` is opt-in (FiftyOne ~1 GB).
+- **Quantized ONNX export needs a separate venv**: `optimum[onnxruntime]` requires `transformers<4.58` which conflicts with the git transformers pinned in the main venv. Run `bash scripts/setup-export-venv.sh` once to create `.venv-export/`, then use it only for quantization: `.venv-export/bin/python core/p09_export/export.py --optimize O2 --quantize dynamic ...`. The main venv's default export (`--skip-optimize`) still works for unquantized ONNX.
 - **DVC for large files**: `.pt`, `.pth`, `.onnx` files are gitignored, tracked via DVC.
 - **`sys.path.insert`**: Many modules add project root to path. Use `uv run` to avoid issues.
 - **Overrides are nested dicts**: `DetectionTrainer(overrides={"training": {"epochs": 2}})`, not `{"training.epochs": 2}`.

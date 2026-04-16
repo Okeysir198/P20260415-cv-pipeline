@@ -175,9 +175,10 @@ def main() -> None:
     # Determine save dir — auto-generate timestamped path
     from utils.config import generate_run_dir
 
-    dataset_config_path = optimizer.base_config.get("data", {}).get("dataset_config", "unknown")
-    dataset_name = Path(dataset_config_path).stem.replace("05_data", "").strip("_") or "default"
-    save_dir = str(generate_run_dir(dataset_name, "08_hyperparameter_tuning"))
+    from utils.config import feature_name_from_config_path
+    save_dir = str(generate_run_dir(
+        feature_name_from_config_path(args.config), "08_hyperparameter_tuning"
+    ))
 
     results = ResultsManager(
         study=study,

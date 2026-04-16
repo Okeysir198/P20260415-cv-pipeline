@@ -215,7 +215,8 @@ def main() -> None:
     if args.output_dir:
         output_dir = args.output_dir
     else:
-        output_dir = str(generate_run_dir(data_config["dataset_name"], "03_generative_aug"))
+        from utils.config import feature_name_from_config_path
+        output_dir = str(generate_run_dir(feature_name_from_config_path(args.data_config), "03_generative_aug"))
 
     # Build initial state
     source_name = class_names.get(source_class_id, str(source_class_id))

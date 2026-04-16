@@ -22,7 +22,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.config import generate_run_dir, load_config, merge_configs, parse_overrides
+from utils.config import (
+    feature_name_from_config_path,
+    generate_run_dir,
+    load_config,
+    merge_configs,
+    parse_overrides,
+)
 from utils.service_health import require_services
 
 
@@ -145,7 +151,7 @@ def main() -> None:
         from core.p02_annotation_qa.reporter import QAReporter
 
         reporter = QAReporter(
-            str(generate_run_dir(data_config["dataset_name"], "02_annotation_quality")),
+            str(generate_run_dir(feature_name_from_config_path(data_config_path), "02_annotation_quality")),
             data_config["dataset_name"],
             qa_config.get("reporting", {}),
         )
@@ -299,7 +305,13 @@ def apply_fixes(report_dir: str) -> None:
             if fix_type == "clip_bbox":
                 suggested = fix.get("suggested", "")
                 if suggested:
-                    lines[idx] = suggested.strip()
+                    # suggested may be a dict {class_id, bbox_norm} or a plain YOLO string
+                    if isinstance(suggested, dict):
+                        cid = suggested["class_id"]
+                        bx = suggested["bbox_norm"]
+                        lines[idx] = f"{cid} {bx[0]:.6f} {bx[1]:.6f} {bx[2]:.6f} {bx[3]:.6f}"
+                    else:
+                        lines[idx] = str(suggested).strip()
                     total_applied += 1
             elif fix_type in ("remove_duplicate", "remove_degenerate"):
                 lines.pop(idx)

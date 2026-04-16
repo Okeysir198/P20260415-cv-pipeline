@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '4' and platform_machine != 's390x' and sys_platform == 'win32'",
@@ -1252,22 +1252,9 @@ name = "cv-pipeline"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "langchain-core" },
-    { name = "numpy" },
-    { name = "pillow" },
-    { name = "pyyaml" },
-    { name = "roboflow" },
-    { name = "tqdm" },
-    { name = "ultralytics" },
-]
-
-[package.optional-dependencies]
-all = [
     { name = "accelerate" },
     { name = "av" },
-    { name = "cleanlab" },
     { name = "dvc" },
-    { name = "fiftyone" },
     { name = "gradio" },
     { name = "huggingface-hub" },
     { name = "ipywidgets" },
@@ -1280,129 +1267,42 @@ all = [
     { name = "matplotlib" },
     { name = "mediapipe", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
     { name = "numpy" },
-    { name = "onnxruntime", marker = "platform_machine != 'x86_64'" },
-    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64'" },
-    { name = "opencv-python" },
-    { name = "optuna" },
-    { name = "playwright" },
-    { name = "plotly" },
-    { name = "pytest" },
-    { name = "pytest-playwright" },
-    { name = "requests" },
-    { name = "ruff" },
-    { name = "scipy" },
-    { name = "supervision" },
-    { name = "timm" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "trackers" },
-    { name = "transformers" },
-    { name = "wandb" },
-]
-analysis = [
-    { name = "cleanlab" },
-    { name = "fiftyone" },
-]
-demo = [
-    { name = "gradio" },
-    { name = "onnxruntime", marker = "platform_machine != 'x86_64'" },
-    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64'" },
-    { name = "opencv-python" },
-    { name = "supervision" },
-    { name = "timm" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "trackers" },
-    { name = "transformers" },
-]
-dev = [
-    { name = "dvc" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-eval = [
-    { name = "matplotlib" },
-    { name = "opencv-python" },
-    { name = "supervision" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "trackers" },
-]
-export = [
     { name = "onnx" },
     { name = "onnxruntime", marker = "platform_machine != 'x86_64'" },
     { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64'" },
     { name = "onnxsim" },
-    { name = "thop" },
-    { name = "torch" },
-]
-face = [
-    { name = "numpy" },
-    { name = "onnxruntime", marker = "platform_machine != 'x86_64'" },
-    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64'" },
     { name = "opencv-python" },
-]
-hpo = [
-    { name = "kaleido" },
     { name = "optuna" },
-    { name = "plotly" },
-]
-inference = [
-    { name = "numpy" },
-    { name = "opencv-python" },
-]
-label-studio = [
-    { name = "label-studio-sdk" },
-    { name = "requests" },
-]
-notebook = [
-    { name = "ipywidgets" },
-    { name = "jupyterlab" },
-]
-playwright = [
+    { name = "pillow" },
     { name = "playwright" },
+    { name = "plotly" },
+    { name = "pytest" },
     { name = "pytest-playwright" },
-]
-pose = [
-    { name = "mediapipe", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
-    { name = "numpy" },
-    { name = "onnxruntime", marker = "platform_machine != 'x86_64'" },
-    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64'" },
-    { name = "opencv-python" },
-]
-qa = [
-    { name = "accelerate" },
-    { name = "huggingface-hub" },
-    { name = "langchain-core" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "matplotlib" },
-    { name = "opencv-python" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "transformers" },
-]
-sam3 = [
-    { name = "accelerate" },
-    { name = "av" },
-    { name = "huggingface-hub" },
-    { name = "matplotlib" },
+    { name = "pyyaml" },
     { name = "requests" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "transformers" },
-]
-train = [
-    { name = "matplotlib" },
-    { name = "opencv-python" },
+    { name = "roboflow" },
+    { name = "ruff" },
     { name = "scipy" },
     { name = "supervision" },
+    { name = "thop" },
     { name = "timm" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "tqdm" },
     { name = "trackers" },
     { name = "transformers" },
+    { name = "ultralytics" },
     { name = "wandb" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "cleanlab" },
+    { name = "fiftyone" },
+]
+analysis = [
+    { name = "cleanlab" },
+    { name = "fiftyone" },
 ]
 
 [package.dev-dependencies]
@@ -1413,91 +1313,52 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "accelerate", marker = "extra == 'qa'", specifier = ">=1.13" },
-    { name = "accelerate", marker = "extra == 'sam3'", specifier = ">=1.13" },
-    { name = "av", marker = "extra == 'sam3'", specifier = ">=17.0" },
+    { name = "accelerate", specifier = ">=1.13" },
+    { name = "av", specifier = ">=17.0" },
     { name = "cleanlab", marker = "extra == 'analysis'", specifier = ">=2.9" },
-    { name = "cv-pipeline", extras = ["train", "eval", "inference", "pose", "face", "sam3", "qa", "analysis", "hpo", "notebook", "dev", "demo", "label-studio", "playwright"], marker = "extra == 'all'" },
-    { name = "dvc", marker = "extra == 'dev'", specifier = ">=3.67" },
+    { name = "cv-pipeline", extras = ["analysis"], marker = "extra == 'all'" },
+    { name = "dvc", specifier = ">=3.67" },
     { name = "fiftyone", marker = "extra == 'analysis'", specifier = ">=1.13" },
-    { name = "gradio", marker = "extra == 'demo'", specifier = ">=6.10" },
-    { name = "huggingface-hub", marker = "extra == 'qa'", specifier = ">=1.8" },
-    { name = "huggingface-hub", marker = "extra == 'sam3'", specifier = ">=1.8" },
-    { name = "ipywidgets", marker = "extra == 'notebook'", specifier = ">=8.1" },
-    { name = "jupyterlab", marker = "extra == 'notebook'", specifier = ">=4.5" },
-    { name = "kaleido", marker = "extra == 'hpo'", specifier = ">=1.2" },
-    { name = "label-studio-sdk", marker = "extra == 'label-studio'", specifier = ">=2.0" },
+    { name = "gradio", specifier = ">=6.10" },
+    { name = "huggingface-hub", specifier = ">=1.8" },
+    { name = "ipywidgets", specifier = ">=8.1" },
+    { name = "jupyterlab", specifier = ">=4.5" },
+    { name = "kaleido", specifier = ">=1.2" },
+    { name = "label-studio-sdk", specifier = ">=2.0" },
     { name = "langchain-core", specifier = ">=1.2.23" },
-    { name = "langchain-core", marker = "extra == 'qa'", specifier = ">=0.3" },
-    { name = "langchain-openai", marker = "extra == 'qa'", specifier = ">=0.3" },
-    { name = "langgraph", marker = "extra == 'qa'", specifier = ">=1.1" },
-    { name = "matplotlib", marker = "extra == 'eval'", specifier = ">=3.10" },
-    { name = "matplotlib", marker = "extra == 'qa'", specifier = ">=3.10" },
-    { name = "matplotlib", marker = "extra == 'sam3'", specifier = ">=3.10" },
-    { name = "matplotlib", marker = "extra == 'train'", specifier = ">=3.10" },
-    { name = "mediapipe", marker = "(platform_machine != 'aarch64' and extra == 'pose') or (sys_platform != 'linux' and extra == 'pose')", specifier = ">=0.10.33" },
+    { name = "langchain-openai", specifier = ">=0.3" },
+    { name = "langgraph", specifier = ">=1.1" },
+    { name = "matplotlib", specifier = ">=3.10" },
+    { name = "mediapipe", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'", specifier = ">=0.10.33" },
     { name = "numpy", specifier = ">=2.4" },
-    { name = "numpy", marker = "extra == 'face'", specifier = ">=2.4" },
-    { name = "numpy", marker = "extra == 'inference'", specifier = ">=2.4" },
-    { name = "numpy", marker = "extra == 'pose'", specifier = ">=2.4" },
-    { name = "onnx", marker = "extra == 'export'", specifier = ">=1.20" },
-    { name = "onnxruntime", marker = "platform_machine != 'x86_64' and extra == 'demo'", specifier = ">=1.24" },
-    { name = "onnxruntime", marker = "platform_machine != 'x86_64' and extra == 'export'", specifier = ">=1.24" },
-    { name = "onnxruntime", marker = "platform_machine != 'x86_64' and extra == 'face'", specifier = ">=1.24" },
-    { name = "onnxruntime", marker = "platform_machine != 'x86_64' and extra == 'pose'", specifier = ">=1.24" },
-    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64' and extra == 'demo'", specifier = ">=1.24" },
-    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64' and extra == 'export'", specifier = ">=1.24" },
-    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64' and extra == 'face'", specifier = ">=1.24" },
-    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64' and extra == 'pose'", specifier = ">=1.24" },
-    { name = "onnxsim", marker = "extra == 'export'", specifier = ">=0.6" },
-    { name = "opencv-python", marker = "extra == 'demo'", specifier = ">=4.13" },
-    { name = "opencv-python", marker = "extra == 'eval'", specifier = ">=4.13" },
-    { name = "opencv-python", marker = "extra == 'face'", specifier = ">=4.13" },
-    { name = "opencv-python", marker = "extra == 'inference'", specifier = ">=4.13" },
-    { name = "opencv-python", marker = "extra == 'pose'", specifier = ">=4.13" },
-    { name = "opencv-python", marker = "extra == 'qa'", specifier = ">=4.13" },
-    { name = "opencv-python", marker = "extra == 'train'", specifier = ">=4.13" },
-    { name = "optuna", marker = "extra == 'hpo'", specifier = ">=4.8" },
+    { name = "onnx", specifier = ">=1.20" },
+    { name = "onnxruntime", marker = "platform_machine != 'x86_64'", specifier = ">=1.24" },
+    { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64'", specifier = ">=1.24" },
+    { name = "onnxsim", specifier = ">=0.6" },
+    { name = "opencv-python", specifier = ">=4.13" },
+    { name = "optuna", specifier = ">=4.8" },
     { name = "pillow", specifier = ">=12.1" },
-    { name = "playwright", marker = "extra == 'playwright'", specifier = ">=1.58" },
-    { name = "plotly", marker = "extra == 'hpo'", specifier = ">=6.6" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0" },
-    { name = "pytest-playwright", marker = "extra == 'playwright'", specifier = ">=0.7" },
+    { name = "playwright", specifier = ">=1.58" },
+    { name = "plotly", specifier = ">=6.6" },
+    { name = "pytest", specifier = ">=9.0" },
+    { name = "pytest-playwright", specifier = ">=0.7" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "requests", marker = "extra == 'label-studio'", specifier = ">=2.33" },
-    { name = "requests", marker = "extra == 'sam3'", specifier = ">=2.33" },
+    { name = "requests", specifier = ">=2.33" },
     { name = "roboflow", specifier = ">=1.3.1" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15" },
-    { name = "scipy", marker = "extra == 'train'", specifier = ">=1.17" },
-    { name = "supervision", marker = "extra == 'demo'", specifier = ">=0.27.0" },
-    { name = "supervision", marker = "extra == 'eval'", specifier = ">=0.27.0" },
-    { name = "supervision", marker = "extra == 'train'", specifier = ">=0.27.0" },
-    { name = "thop", marker = "extra == 'export'", specifier = ">=0.1" },
-    { name = "timm", marker = "extra == 'demo'", specifier = ">=1.0.26" },
-    { name = "timm", marker = "extra == 'train'", specifier = ">=1.0.26" },
-    { name = "torch", marker = "extra == 'demo'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torch", marker = "extra == 'eval'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torch", marker = "extra == 'export'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torch", marker = "extra == 'qa'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torch", marker = "extra == 'sam3'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torch", marker = "extra == 'train'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torchvision", marker = "extra == 'demo'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torchvision", marker = "extra == 'eval'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torchvision", marker = "extra == 'qa'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torchvision", marker = "extra == 'sam3'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torchvision", marker = "extra == 'train'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130" },
+    { name = "ruff", specifier = ">=0.15" },
+    { name = "scipy", specifier = ">=1.17" },
+    { name = "supervision", specifier = ">=0.27.0" },
+    { name = "thop", specifier = ">=0.1" },
+    { name = "timm", specifier = ">=1.0.26" },
+    { name = "torch", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
+    { name = "torchvision", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "tqdm", specifier = ">=4.67" },
-    { name = "trackers", marker = "extra == 'demo'", specifier = ">=2.3" },
-    { name = "trackers", marker = "extra == 'eval'", specifier = ">=2.3" },
-    { name = "trackers", marker = "extra == 'train'", specifier = ">=2.3" },
-    { name = "transformers", marker = "extra == 'demo'", specifier = ">=4.51" },
-    { name = "transformers", marker = "extra == 'qa'", git = "https://github.com/huggingface/transformers.git?rev=8213e0d920d52cb00dcade16b6d1f6e952ac0a8c" },
-    { name = "transformers", marker = "extra == 'sam3'", git = "https://github.com/huggingface/transformers.git?rev=8213e0d920d52cb00dcade16b6d1f6e952ac0a8c" },
-    { name = "transformers", marker = "extra == 'train'", specifier = ">=4.51" },
+    { name = "trackers", specifier = ">=2.3" },
+    { name = "transformers", git = "https://github.com/huggingface/transformers.git?rev=8213e0d920d52cb00dcade16b6d1f6e952ac0a8c" },
     { name = "ultralytics", specifier = ">=8.4.36" },
-    { name = "wandb", marker = "extra == 'train'", specifier = ">=0.25" },
+    { name = "wandb", specifier = ">=0.25" },
 ]
-provides-extras = ["train", "eval", "export", "inference", "sam3", "qa", "analysis", "hpo", "notebook", "dev", "demo", "label-studio", "pose", "face", "playwright", "all"]
+provides-extras = ["analysis", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -7074,19 +6935,19 @@ dependencies = [
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:e2b39db78be674ee4ce7e921f54b70e5c281594c9267d981c061684ed38df936" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:0f030a9bd8ada1a31b7111ea1589c1ecb5fa0884fee700a203e731b4cf378a98" },
-    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp312-cp312-win_amd64.whl" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp312-cp312-win_amd64.whl", hash = "sha256:a3578f7c8e8a2724306c68c56873a1675fa7ce45471e18235c720a2ed242fe44" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:3af2c699719cc0e2518bf317664200e5a987fb75a25b9b3bf3817a4796ddd64f" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:441a98bed4fff1d54b8450499e377e1a605bec31f2ecb1a38a340f95dcc83897" },
-    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp313-cp313-win_amd64.whl" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp313-cp313-win_amd64.whl", hash = "sha256:64de855465d6de60583e776889fad9412480f9f9e04fdd8d17ae96fa93864e9a" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:c3ac485da79552b4f579c525c826f7a63288b0d1cafc1201b16e1148bfdea69a" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:110659ff38cd1d2ca0ac6e6a0f2c842fcb5fe739dfe65ff7456a12b2c4dce775" },
-    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp313-cp313t-win_amd64.whl" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp313-cp313t-win_amd64.whl", hash = "sha256:a7e19c3ab5c6d8e3c9f8c6d427f6b8862dfb8227ea4a758ea7a709951daf2f0d" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:13fe3dee74a9ee31b551b10a8b4113d9bc5212bb0572a07af88b34a5d25d9701" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:8d6a83a639d14f7e84f6b838a17e26f9ce41cdbe3dfe0c29ef74b32eb398ba28" },
-    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp314-cp314-win_amd64.whl" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp314-cp314-win_amd64.whl", hash = "sha256:ab671ffe837aff470baad6af97133ea5a49f8ea2383832550e510a63caf711e4" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:cd89effa98de436ec22ccbbd278cdadc0fdec8eb81a396150f50b321c2230866" },
     { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:aacac4d990ac794f3abeca66cc26affb42fbeba9789e5c351183665bab4902d2" },
-    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp314-cp314t-win_amd64.whl" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp314-cp314t-win_amd64.whl", hash = "sha256:23b9666084c72d07fc715001880b648e6a410796d1925c10f054f1ee034f5cc7" },
 ]
 
 [[package]]

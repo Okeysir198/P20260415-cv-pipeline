@@ -19,3 +19,7 @@ std: [0.229, 0.224, 0.225]
 text_prompts:
   person: "a person standing, walking, or sitting"
   phone_usage: "a person holding a mobile phone to their ear or in front of their face, texting or calling on a smartphone"
+
+# Required by p02 annotation QA (empty is fine)
+auto_label:
+  class_rules: []

@@ -344,6 +344,7 @@ def aggregate_results_task(
     dataset_name: str,
     qa_config: Dict[str, Any],
     class_names: Dict[int, str],
+    config_dir: str = ".",
 ) -> Dict[str, Any]:
     """Aggregate per-image results into a dataset-level summary and report.
 
@@ -439,7 +440,9 @@ def aggregate_results_task(
     }
 
     # Generate report
-    output_dir = str(generate_run_dir(dataset_name, "02_annotation_quality"))
+    from utils.config import feature_name_from_config_path
+    feature_name = feature_name_from_config_path(config_dir) if config_dir != "." else dataset_name
+    output_dir = str(generate_run_dir(feature_name, "02_annotation_quality"))
     reporter = QAReporter(
         output_dir=output_dir,
         dataset_name=dataset_name,
@@ -536,7 +539,7 @@ def qa_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # --- Aggregate ---
     result = aggregate_results_task(
-        all_results, dataset_name, qa_config, class_names,
+        all_results, dataset_name, qa_config, class_names, config_dir,
     ).result()
 
     return result

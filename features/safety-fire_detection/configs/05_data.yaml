@@ -1,6 +1,6 @@
 # Dataset config — Fire Detection
 dataset_name: "fire_detection"
-path: "../../dataset_store/training_ready/fire_detection"
+path: "../../../dataset_store/training_ready/fire_detection"
 train: "train/images"
 val: "val/images"
 test: "test/images"
@@ -19,3 +19,7 @@ std: [0.229, 0.224, 0.225]
 text_prompts:
   fire: "flames, burning fire, visible fire"
   smoke: "smoke, gray or white smoke plume, haze from fire"
+
+# Required by p02 annotation QA (empty is fine)
+auto_label:
+  class_rules: []

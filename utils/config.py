@@ -107,6 +107,18 @@ def resolve_path(path_str: str, base_dir: Union[str, Path]) -> Path:
     return (Path(base_dir) / path).resolve()
 
 
+def feature_name_from_config_path(config_path: Union[str, Path]) -> str:
+    """Derive the feature folder name from a config file path.
+
+    Assumes the repo convention ``features/<feature>/configs/<step>.yaml``:
+    grandparent of the config file is the feature folder.
+    """
+    p = Path(config_path)
+    if str(p) in (".", ""):
+        return "unknown"
+    return p.resolve().parent.parent.name
+
+
 def generate_run_dir(
     use_case: str,
     step: str,

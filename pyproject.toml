@@ -4,134 +4,89 @@ version = "0.1.0"
 description = "Object detection training pipeline for factory smart camera safety detection"
 requires-python = ">=3.12"
 dependencies = [
-    # Core (always needed)
+    # --- Core utilities ---
     "pyyaml>=6.0.3",
     "numpy>=2.4",
     "tqdm>=4.67",
     "Pillow>=12.1",
-    "langchain-core>=1.2.23",
+    "requests>=2.33",
+    "scipy>=1.17",
+    # --- Deep learning stack ---
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+    "transformers @ git+https://github.com/huggingface/transformers.git@8213e0d920d52cb00dcade16b6d1f6e952ac0a8c",
+    "accelerate>=1.13",
+    "huggingface-hub>=1.8",
+    "timm>=1.0.26",
+    # --- CV utilities ---
+    "opencv-python>=4.13",
+    "matplotlib>=3.10",
+    "supervision>=0.27.0",
+    "trackers>=2.3",
+    "av>=17.0",
+    "Pillow>=12.1",
+    # --- ONNX export + inference ---
+    "onnx>=1.20",
+    "onnxsim>=0.6",
+    "thop>=0.1",
+    "onnxruntime-gpu>=1.24; platform_machine == 'x86_64'",
+    "onnxruntime>=1.24; platform_machine != 'x86_64'",
+    # --- Data download + annotation ---
     "roboflow>=1.3.1",
     "ultralytics>=8.4.36",
+    "label-studio-sdk>=2.0",
+    # --- QA pipeline (LangGraph-based) ---
+    "langgraph>=1.1",
+    "langchain-core>=1.2.23",
+    "langchain-openai>=0.3",
+    # --- Hyperparameter optimization ---
+    "optuna>=4.8",
+    "plotly>=6.6",
+    "kaleido>=1.2",
+    # --- Logging ---
+    "wandb>=0.25",
+    # --- Demo UI ---
+    "gradio>=6.10",
+    # --- Notebooks ---
+    "jupyterlab>=4.5",
+    "ipywidgets>=8.1",
+    # --- Pose (MediaPipe; skipped on aarch64 Linux where wheels are unavailable) ---
+    "mediapipe>=0.10.33; sys_platform != 'linux' or platform_machine != 'aarch64'",
+    # --- Testing / linting / versioning ---
+    "pytest>=9.0",
+    "ruff>=0.15",
+    "dvc>=3.67",
+    "playwright>=1.58",
+    "pytest-playwright>=0.7",
 ]
 
 [project.scripts]
 demo = "app_demo.run:main"
 
 [project.optional-dependencies]
-train = [
-    "torch>=2.10.0",
-    "torchvision>=0.25.0",
-    "opencv-python>=4.13",
-    "matplotlib>=3.10",
-    "supervision>=0.27.0",
-    "trackers>=2.3",
-    "wandb>=0.25",
-    "transformers>=4.51",
-    "scipy>=1.17",
-    "timm>=1.0.26",
-]
-eval = [
-    "torch>=2.10.0",
-    "torchvision>=0.25.0",
-    "opencv-python>=4.13",
-    "matplotlib>=3.10",
-    "supervision>=0.27.0",
-    "trackers>=2.3",
-]
-export = [
-    "torch>=2.10.0",
-    "onnx>=1.20",
-    "onnxruntime-gpu>=1.24; platform_machine == 'x86_64'",
-    "onnxruntime>=1.24; platform_machine != 'x86_64'",
-    "onnxsim>=0.6",
-    "thop>=0.1",
-    # optimum[onnxruntime] requires transformers<4.58, conflicts with sam3/qa (transformers 5.x).
-    # Install optimum separately when needed:
-    #   uv pip install "optimum[onnxruntime]>=2.1"
-]
-inference = [
-    "opencv-python>=4.13",
-    "numpy>=2.4",
-    # Plus one of: torch>=2.10.0 OR onnxruntime-gpu>=1.24
-]
-sam3 = [
-    "torch>=2.10.0",
-    "torchvision>=0.25.0",
-    "transformers @ git+https://github.com/huggingface/transformers.git@8213e0d920d52cb00dcade16b6d1f6e952ac0a8c",
-    "accelerate>=1.13",
-    "huggingface-hub>=1.8",
-    "matplotlib>=3.10",
-    "av>=17.0",
-    "requests>=2.33",
-]
-qa = [
-    "langgraph>=1.1",
-    "langchain-openai>=0.3",
-    "langchain-core>=0.3",
-    "torch>=2.10.0",
-    "torchvision>=0.25.0",
-    "transformers @ git+https://github.com/huggingface/transformers.git@8213e0d920d52cb00dcade16b6d1f6e952ac0a8c",
-    "accelerate>=1.13",
-    "huggingface-hub>=1.8",
-    "opencv-python>=4.13",
-    "matplotlib>=3.10",
-]
+# Bare `uv sync` installs everything for:
+#   - p00 → p10 pipeline (data prep, QA, training, eval, export, inference)
+#   - Label Studio review workflow
+#   - HPO (Optuna)
+#   - Gradio demo UI, Jupyter notebooks, MediaPipe pose
+#   - pytest / ruff / dvc / Playwright testing
+#
+# The only extras are genuinely-optional heavyweight analytics:
+
+# Interactive exploration / dataset analytics (fiftyone ~1 GB, cleanlab)
 analysis = [
     "fiftyone>=1.13",
     "cleanlab>=2.9",
 ]
-hpo = [
-    "optuna>=4.8",
-    "plotly>=6.6",
-    "kaleido>=1.2",
-]
-notebook = [
-    "jupyterlab>=4.5",
-    "ipywidgets>=8.1",
-]
-dev = [
-    "pytest>=9.0",
-    "ruff>=0.15",
-    "dvc>=3.67",
-]
-demo = [
-    "torch>=2.10.0",
-    "torchvision>=0.25.0",
-    "transformers>=4.51",
-    "timm>=1.0.26",
-    "supervision>=0.27.0",
-    "trackers>=2.3",
-    "gradio>=6.10",
-    "opencv-python>=4.13",
-    "onnxruntime-gpu>=1.24; platform_machine == 'x86_64'",
-    "onnxruntime>=1.24; platform_machine != 'x86_64'",
-]
-label-studio = [
-    "label-studio-sdk>=2.0",
-    "requests>=2.33",
-]
-pose = [
-    "onnxruntime-gpu>=1.24; platform_machine == 'x86_64'",
-    "onnxruntime>=1.24; platform_machine != 'x86_64'",
-    "opencv-python>=4.13",
-    "numpy>=2.4",
-    "mediapipe>=0.10.33; sys_platform != 'linux' or platform_machine != 'aarch64'",
-]
-face = [
-    "onnxruntime-gpu>=1.24; platform_machine == 'x86_64'",
-    "onnxruntime>=1.24; platform_machine != 'x86_64'",
-    "opencv-python>=4.13",
-    "numpy>=2.4",
-]
-playwright = [
-    "playwright>=1.58",
-    "pytest-playwright>=0.7",
-]
-# NOTE: export is excluded from all — optimum[onnxruntime] requires transformers<4.58
-# which conflicts with sam3/qa (transformers@git 5.x). Install export separately:
-#   uv sync --extra export
+
+# NOTE: `optimum[onnxruntime]` (needed for INT8 quantization in core/p09_export)
+# requires transformers<4.58, which conflicts with the git transformers pinned in
+# base dependencies. Run `core/p09_export/export.py --skip-optimize` to bypass
+# the optimization pass, or install optimum in a separate virtualenv when
+# quantization is required.
+
 all = [
-    "cv-pipeline[train,eval,inference,pose,face,sam3,qa,analysis,hpo,notebook,dev,demo,label-studio,playwright]",
+    "cv-pipeline[analysis]",
 ]
 
 [tool.setuptools.packages.find]

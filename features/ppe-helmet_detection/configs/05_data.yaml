@@ -1,6 +1,6 @@
 # Dataset config — PPE: Helmet Compliance
 dataset_name: "helmet_detection"
-path: "../../dataset_store/training_ready/helmet_detection"
+path: "../../../dataset_store/training_ready/helmet_detection"
 train: "train/images"
 val: "val/images"
 test: "test/images"
@@ -21,3 +21,7 @@ text_prompts:
   person: "a person standing, walking, or working at a construction site"
   head_with_helmet: "a person's head wearing a hard hat or safety helmet"
   head_without_helmet: "a person's bare head, uncovered head, head with hair visible, no helmet"
+
+# Required by p02 annotation QA (empty is fine)
+auto_label:
+  class_rules: []

@@ -83,13 +83,27 @@ def _next_version(releases_dir: Path, use_case: str) -> int:
 
 
 def _load_metrics(run_dir: Path) -> dict:
-    """Load metrics from a training run."""
-    for name in ["metrics.json", "best_metrics.json", "eval_results.json"]:
-        metrics_path = run_dir / name
-        if metrics_path.exists():
-            import json
+    """Load metrics from a training run.
 
-            return json.loads(metrics_path.read_text())
+    Looks in the run_dir itself first, then in the feature's canonical eval dir
+    (``features/<feature>/eval/metrics.json``) — where
+    ``core/p08_evaluation/evaluate.py`` writes them.
+    """
+    import json
+
+    feat_eval = run_dir.parent.parent / "eval"
+    candidates = [
+        run_dir / "metrics.json",
+        run_dir / "best_metrics.json",
+        run_dir / "eval_results.json",
+        feat_eval / "metrics.json",
+        feat_eval / "eval_results.json",
+    ]
+    for p in candidates:
+        try:
+            return json.loads(p.read_text())
+        except FileNotFoundError:
+            continue
     return {}
 
 

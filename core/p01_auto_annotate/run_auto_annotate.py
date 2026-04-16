@@ -82,6 +82,13 @@ def main() -> None:
         default=None,
         help='Class mapping for flat dir mode (e.g., "0:person,1:car")',
     )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override report output dir. Default: features/<feature>/runs/<ts>_01_auto_annotate "
+             "(YOLO mode) or <image_dir>/auto_annotate_report (flat-dir mode).",
+    )
 
     # Annotation config
     parser.add_argument(
@@ -166,6 +173,10 @@ def main() -> None:
     else:
         dataset_name = Path(args.image_dir).name
         class_names = parse_classes(args.classes)
+        # In flat-dir mode, co-locate the report with the image dir to avoid
+        # creating a ghost folder under features/<image_dir_basename>/.
+        if args.output_dir is None:
+            args.output_dir = str(Path(args.image_dir).resolve().parent / "auto_annotate_report")
 
     # Load annotation config
     annotate_config_path = args.annotate_config
@@ -230,6 +241,7 @@ def main() -> None:
         "class_names": class_names,
         "text_prompts": text_prompts,
         "config_dir": config_dir,
+        "output_dir_override": args.output_dir,
         "image_paths": {},
         "total_images": 0,
         "current_batch_idx": 0,

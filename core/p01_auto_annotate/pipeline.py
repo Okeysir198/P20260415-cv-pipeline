@@ -182,6 +182,8 @@ def aggregate_task(
     mode: str,
     output_format: str,
     dry_run: bool,
+    config_dir: str = ".",
+    output_dir_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Generate summary report."""
     from core.p01_auto_annotate.reporter import AutoAnnotateReporter
@@ -222,7 +224,13 @@ def aggregate_task(
         "timing": timing_stats,
     }
 
-    output_dir = str(generate_run_dir(dataset_name, "01_auto_annotate"))
+    # Explicit override takes precedence (e.g. --image-dir mode co-locates with data).
+    if output_dir_override:
+        output_dir = str(output_dir_override)
+    else:
+        from utils.config import feature_name_from_config_path
+        feature_name = feature_name_from_config_path(config_dir) if config_dir != "." else dataset_name
+        output_dir = str(generate_run_dir(feature_name, "01_auto_annotate"))
     reporting_config = annotate_config.get("reporting", {})
     reporter = AutoAnnotateReporter(output_dir=output_dir, dataset_name=dataset_name, config=reporting_config)
     report_path = reporter.generate_report(image_results=all_results, summary=summary)
@@ -335,6 +343,8 @@ def auto_annotate_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
         all_results, dataset_name, annotate_config,
         {int(k): v for k, v in final_class_names.items()},
         mode, output_format, dry_run,
+        state.get("config_dir", "."),
+        state.get("output_dir_override"),
     ).result()
 
     return result

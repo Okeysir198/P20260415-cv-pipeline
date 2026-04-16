@@ -19,3 +19,7 @@ std: [0.229, 0.224, 0.225]
 text_prompts:
   person: "a person standing, walking, or sitting upright"
   fallen_person: "a person lying on the ground, fallen down, collapsed on the floor"
+
+# Required by p02 annotation QA (empty is fine)
+auto_label:
+  class_rules: []

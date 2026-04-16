@@ -60,6 +60,7 @@ class AutoAnnotateState(TypedDict, total=False):
     # Output
     summary: Annotated[Dict[str, Any], replace_reducer]
     report_path: Annotated[str, replace_reducer]
+    output_dir_override: Annotated[str, replace_reducer]
     # Backup
     backup_dir: Annotated[str, replace_reducer]
 
@@ -472,7 +473,14 @@ def aggregate_node(state: AutoAnnotateState) -> dict:
     from utils.config import generate_run_dir
 
     dataset_name = state.get("dataset_name", "unknown")
-    output_dir = str(generate_run_dir(dataset_name, "01_auto_annotate"))
+    override = state.get("output_dir_override")
+    if override:
+        output_dir = str(override)
+    else:
+        from utils.config import feature_name_from_config_path
+        config_dir = state.get("config_dir", ".")
+        feature_name = feature_name_from_config_path(config_dir) if config_dir != "." else dataset_name
+        output_dir = str(generate_run_dir(feature_name, "01_auto_annotate"))
     reporting_config = annotate_config.get("reporting", {})
 
     reporter = AutoAnnotateReporter(

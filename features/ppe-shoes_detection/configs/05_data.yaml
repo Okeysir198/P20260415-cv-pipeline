@@ -1,6 +1,6 @@
 # Dataset config — PPE: Safety Shoes Compliance
 dataset_name: "shoes_detection"
-path: "../../dataset_store/training_ready/shoes_detection"
+path: "../../../dataset_store/training_ready/shoes_detection"
 train: "train/images"
 val: "val/images"
 test: "test/images"
@@ -21,3 +21,7 @@ text_prompts:
   person: "a person standing or walking, full body visible"
   foot_with_safety_shoes: "a person's feet wearing safety boots or steel-toe shoes"
   foot_without_safety_shoes: "a person's feet wearing regular shoes, sneakers, sandals, or barefoot"
+
+# Required by p02 annotation QA (empty is fine)
+auto_label:
+  class_rules: []
