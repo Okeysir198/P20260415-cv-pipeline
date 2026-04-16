@@ -35,7 +35,7 @@ Pretrained model weights for all use cases. Models are organized by project (Nit
 | ViT fire detection | `vit_fire_detection/pytorch_model.bin` | 328 MB | fire, no-fire (cls) | Apache-2.0 | [EdBianchi/vit-fire-detection](https://huggingface.co/EdBianchi/vit-fire-detection) | Classification |
 | ViT fire-smoke v2 | `vit_fire_smoke_v2/model.safetensors` | 328 MB | fire, smoke, neither (cls) | Apache-2.0 | [shawnmichael/vit-fire-smoke-detection-v2](https://huggingface.co/shawnmichael/vit-fire-smoke-detection-v2) | Classification |
 
-**Recommendation**: Use `yolov8s_fire.pt` as pretrained base, fine-tune on your fire dataset with YOLOX pipeline.
+**Recommendation**: Benchmark `yolox_m.pth` and `dfine_m_coco.pt` (both COCO pretrained, architecture-compatible) on the fire dataset. The `nitto_denko/fire_detection/` YOLOv8/v10 models are useful for visual QA only — YOLOv8 weights cannot be loaded into a YOLOX or D-FINE architecture.
 
 ### Helmet/PPE Detection (`pretrained/nitto_denko/helmet_detection/`)
 
@@ -169,9 +169,9 @@ No open-source pretrained model exists for safety shoes detection/classification
 |----------|---------------------|---------------------|------|
 | Fire Detection | `yolox_m.pth` (COCO) or `pretrained/nitto_denko/fire_detection/yolov10_fire_smoke/best.pt` | `yolox-m` | 194 MB / 62 MB |
 | Helmet/PPE | `yolox_m.pth` (COCO) or `pretrained/nitto_denko/helmet_detection/yolov8_ppe_detection/best.pt` | `yolox-m` | 194 MB / 6 MB |
-| Safety Shoes | `yolox_nano.pth` (COCO, train from scratch) | `yolox-nano` | 7.4 MB |
-| Fall Detection | `pretrained/nitto_denko/fall_detection/best.pt` (already trained) | — | 6 MB |
-| Phone Detection | `pretrained/nitto_denko/phone_detection/yolov8n-mobile-phone.pt` | — | 6 MB |
+| Safety Shoes | `yolox_nano.pth` (COCO pretrained — no domain-specific base exists; fine-tune required) | `yolox-nano` | 7.4 MB |
+| Fall Detection | `yolox_s.pth` or `dfine_s_coco.pt` — fine-tune required; `nitto_denko/fall_detection/best.pt` is a benchmark reference only | `yolox-s` | 69 MB |
+| Phone Detection | `yolox_s.pth` or `dfine_s_coco.pt` — fine-tune required; `nitto_denko/phone_detection/` models are benchmark references only | `yolox-s` | 69 MB |
 | Pose Estimation | `yolox_nano.pth` + RTMPose (Apache-2.0 pipeline) | `yolox-nano` + pose | 7.4 MB |
 | Face Detection | `pretrained/nitto_denko/face_recognition/yolov11n_face/model.pt` | — | 5.3 MB |
 | Vehicle Detection | `yolox_s.pth` (COCO) or `../smart_parking/pretrained/highway_vehicle_detection/weights/best.pt` | `yolox-s` | 69 MB / 50 MB |

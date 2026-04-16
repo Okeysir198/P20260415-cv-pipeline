@@ -145,6 +145,8 @@ training:
   epochs: 200
   optimizer: sgd                          # sgd, adam, adamw
   lr: 0.01
+  lr_backbone: 0.001                      # backbone LR after unfreeze (set ~10x lower than lr; only used when freeze_backbone_epochs > 0)
+  freeze_backbone_epochs: 5               # train head/neck only for N epochs, then unfreeze all layers (transfer learning warm-up)
   weight_decay: 0.0005
   warmup_epochs: 5
   scheduler: cosine                       # cosine, plateau, step, onecycle

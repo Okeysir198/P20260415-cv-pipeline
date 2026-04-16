@@ -157,12 +157,15 @@ uv run core/p10_inference/face_enroll.py \
 
 ## Per-Feature Pipeline Checklists
 
+⚠️ **`06_training.yaml` does not exist yet in any feature folder** — must be created before training can start. This is the immediate next blocker after data prep.
+
 ### safety-fire_detection
 
 - [ ] `00_data_preparation.yaml` — sources locked, class map verified
 - [ ] `p00_data_prep` — run, check `DATASET_REPORT.md`, fix class imbalance
 - [ ] `p02_annotation_qa` — SAM3 QA pass, re-label `bad` tier
-- [ ] `06_training.yaml` — arch/epochs/LR set
+- [ ] **Benchmark pretrained candidates** — 5–10 epoch head-only run (YOLOX-M, D-FINE-M, RT-DETRv2-R18), pick best backbone (see Training Strategy above)
+- [ ] `06_training.yaml` — set winning arch, `pretrained`, `freeze_backbone_epochs`, `lr_backbone`
 - [ ] `p06_training` — train, monitor mAP
 - [ ] `p08_evaluation` — evaluate on held-out test split
 - [ ] `p09_export` — ONNX export
@@ -173,6 +176,7 @@ uv run core/p10_inference/face_enroll.py \
 - [ ] `00_data_preparation.yaml` — sources locked
 - [ ] `p00_data_prep`
 - [ ] `p02_annotation_qa`
+- [ ] **Benchmark pretrained candidates** — YOLOX-S, YOLOX-M, D-FINE-S
 - [ ] `06_training.yaml`
 - [ ] `p06_training`
 - [ ] `p08_evaluation`
@@ -185,7 +189,8 @@ uv run core/p10_inference/face_enroll.py \
 - [ ] `00_data_preparation.yaml` — COCO keypoint sources
 - [ ] `p00_data_prep`
 - [ ] `p02_annotation_qa`
-- [ ] `06_training.yaml` — keypoint task
+- [ ] **Benchmark pretrained candidates** — RTMPose-S vs RTMPose-M (head-only runs)
+- [ ] `06_training.yaml` — keypoint task, winning RTMPose arch
 - [ ] `p06_training`
 - [ ] `p08_evaluation`
 - [ ] `p09_export`
@@ -206,6 +211,7 @@ uv run core/p10_inference/face_enroll.py \
 - [ ] `00_data_preparation.yaml` — sources locked
 - [ ] `p00_data_prep`
 - [ ] `p02_annotation_qa`
+- [ ] **Benchmark pretrained candidates** — YOLOX-S, YOLOX-M, D-FINE-S
 - [ ] `06_training.yaml`
 - [ ] `p06_training`
 - [ ] `p08_evaluation`
@@ -217,6 +223,7 @@ uv run core/p10_inference/face_enroll.py \
 - [ ] `00_data_preparation.yaml` — sources locked
 - [ ] `p00_data_prep`
 - [ ] `p02_annotation_qa`
+- [ ] **Benchmark pretrained candidates** — YOLOX-M, D-FINE-M, RT-DETRv2-R18
 - [ ] `06_training.yaml`
 - [ ] `p06_training`
 - [ ] `p08_evaluation`
@@ -228,6 +235,7 @@ uv run core/p10_inference/face_enroll.py \
 - [ ] `00_data_preparation.yaml` — sources locked
 - [ ] `p00_data_prep`
 - [ ] `p02_annotation_qa`
+- [ ] **Benchmark pretrained candidates** — YOLOX-S, YOLOX-M (no domain-specific base exists)
 - [ ] `06_training.yaml`
 - [ ] `p06_training`
 - [ ] `p08_evaluation`
