@@ -62,15 +62,27 @@ Fill `templates/05_data.yaml.template` → `features/<name>/configs/05_data.yaml
 ```bash
 uv run core/p02_annotation_qa/run_qa.py --data-config features/<name>/configs/05_data.yaml
 # SAM3 down → add --no-sam3 (structural checks only)
+# Large dataset → --override sampling.sample_size=500 (default 2000/split is ~15 min with SAM3)
 ```
 
-Read grade distribution from `runs/.../summary.txt`. Decide:
+**For class-restricted datasets** (fire-only, helmet-only, etc. — anything where the scene contains objects that should NOT be labeled), auto-mask missing-detection produces many false positives. Shared config `configs/_shared/02_annotation_quality.yaml` sets `sam3.include_missing_detection: false` by default. Enable only for COCO-style datasets where every visible object should be labeled:
+```bash
+--override sam3.include_missing_detection=true
+```
+
+After the run, **two outputs are updated automatically:**
+1. `features/<name>/runs/<ts>_02_annotation_quality/summary.txt` — full per-image breakdown
+2. `dataset_store/training_ready/<dataset_name>/DATASET_REPORT.md` — a `## Label Quality` section is appended with grade distribution, verdict, and top issues
+
+Read the verdict from DATASET_REPORT.md (or `summary.txt`) and decide:
 
 | Result | Action |
 |--------|--------|
-| `good ≥ 80%` and `bad ≤ 5%` | Accept → skip to step 9 |
-| `bad 5–20%` | Re-label with p01 → step 8 |
-| `bad > 20%` | Stop — almost always a class_map bug, not bad labels |
+| `good ≥ 80%` and `bad ≤ 5%` | ✅ Accept → skip to step 9 |
+| `bad 5–20%` | 🔄 Re-label with p01 → step 8 |
+| `bad > 20%` | 🛑 Stop — almost certainly a class_map bug, not bad labels. Fix `00_data_preparation.yaml` and re-run step 5. |
+
+**Do not proceed to step 9 until DATASET_REPORT.md shows ✅ ACCEPT verdict.**
 
 See `references/label-quality-grades.md` for threshold tuning and worst_images interpretation.
 
@@ -103,7 +115,10 @@ Then re-run step 7.
 
 ## Step 9 — Hand off
 
-Confirm `05_data.yaml` `path:` matches `training_ready/<name>/` and `num_classes:` is correct.
+Confirm all of the following before handing off:
+- [ ] `dataset_store/training_ready/<name>/DATASET_REPORT.md` exists and shows `✅ ACCEPT` verdict in the Label Quality section
+- [ ] `05_data.yaml` `path:` matches `training_ready/<dataset_name>/` and `num_classes:` is correct
+- [ ] `06_training.yaml` exists in `features/<name>/configs/` (if not, create it from `features/_TEMPLATE/configs/06_training.yaml`)
 
 Print the smoke-test training command:
 ```bash
@@ -111,4 +126,4 @@ uv run core/p06_training/train.py \
   --config features/<name>/configs/06_training.yaml --override training.epochs=5
 ```
 
-Do not start training — hand off here.
+**Do not start training — hand off here.** Training is a separate step after backbone benchmarking.

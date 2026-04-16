@@ -17,6 +17,11 @@ sam3:
   timeout: 120
   box_prompt_threshold: 0.5
   text_verify_threshold: 0.6
+  # Auto-mask "missing detection" finds EVERY object in the scene, not just target
+  # classes. Enable only for datasets where every visible object should be labeled
+  # (e.g. COCO-style). For class-restricted datasets (fire/smoke only, helmet-only),
+  # set to false to avoid false-positive "missing annotation" flags on unrelated scene objects.
+  include_missing_detection: false
   auto_mask_sample_rate: 0.1
   auto_mask_min_area: 0.001
   auto_mask_max_area: 0.8

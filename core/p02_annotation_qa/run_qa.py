@@ -206,6 +206,14 @@ def main() -> None:
     print(f"  Report saved to  : {result.get('report_path', 'N/A')}")
     print("=" * 70)
 
+    # Append QA results to DATASET_REPORT.md in training_ready/
+    _append_qa_to_dataset_report(
+        data_config=data_config,
+        data_config_path=data_config_path,
+        summary=summary,
+        report_dir=result.get("report_path", ""),
+    )
+
     # Apply fixes if requested
     if args.apply_fixes:
         report_dir = result.get("report_path", "")
@@ -213,6 +221,81 @@ def main() -> None:
             apply_fixes(report_dir)
         else:
             print("Warning: No report_path in result state, cannot apply fixes.")
+
+
+def _append_qa_to_dataset_report(
+    data_config: dict,
+    data_config_path: Path,
+    summary: dict,
+    report_dir: str,
+) -> None:
+    """Append a Label Quality section to the DATASET_REPORT.md in training_ready/.
+
+    Finds DATASET_REPORT.md via data_config["path"] resolved relative to the
+    config file's directory. Skips silently if the report doesn't exist yet.
+    """
+    dataset_path = (data_config_path.parent / data_config.get("path", "")).resolve()
+    report_md = dataset_path / "DATASET_REPORT.md"
+
+    if not report_md.is_file():
+        return
+
+    total = summary.get("total_checked", 0)
+    avg_score = summary.get("avg_quality_score", 0.0)
+    grades = summary.get("grades", {})
+    issues = summary.get("issue_breakdown", {})
+    good_n = grades.get("good", 0)
+    review_n = grades.get("review", 0)
+    bad_n = grades.get("bad", 0)
+    good_pct = (good_n / total * 100) if total else 0.0
+    review_pct = (review_n / total * 100) if total else 0.0
+    bad_pct = (bad_n / total * 100) if total else 0.0
+
+    # Verdict logic (mirrors skill decision table)
+    if good_pct >= 80 and bad_pct <= 5:
+        verdict = "✅ ACCEPT — good ≥ 80%, bad ≤ 5% → proceed to training"
+    elif bad_pct <= 20:
+        verdict = "🔄 RE-LABEL — bad 5–20% → run p01 auto-relabel then re-QA"
+    else:
+        verdict = "🛑 STOP — bad > 20% → almost certainly a class_map bug, not bad labels"
+
+    run_ref = str(Path(report_dir).relative_to(Path(report_dir).parents[2])) if report_dir else "N/A"
+
+    lines = [
+        "",
+        "---",
+        "",
+        "## Label Quality (Annotation QA)",
+        "",
+        f"**Sampled:** {total} images &nbsp;|&nbsp; "
+        f"**Avg quality score:** {avg_score:.3f} &nbsp;|&nbsp; "
+        f"**Run:** `{run_ref}`",
+        "",
+        "| Grade | Count | % | Action |",
+        "|---|---|---|---|",
+        f"| ✅ good   | {good_n} | {good_pct:.1f}% | trusted — goes straight to training |",
+        f"| 👁 review | {review_n} | {review_pct:.1f}% | import to Label Studio for human check |",
+        f"| ❌ bad    | {bad_n} | {bad_pct:.1f}% | re-label with p01 or discard |",
+        "",
+        f"**Verdict:** {verdict}",
+    ]
+
+    if issues:
+        top_issues = sorted(issues.items(), key=lambda x: -x[1])[:5]
+        lines += ["", "**Top issues:**"]
+        for issue_type, count in top_issues:
+            lines.append(f"- `{issue_type}`: {count}")
+
+    lines.append("")
+
+    existing = report_md.read_text(encoding="utf-8")
+    # Remove any previous QA section before appending fresh results
+    qa_marker = "\n---\n\n## Label Quality (Annotation QA)"
+    if qa_marker in existing:
+        existing = existing[: existing.index(qa_marker)]
+
+    report_md.write_text(existing.rstrip() + "\n" + "\n".join(lines), encoding="utf-8")
+    print(f"  ↳ Updated DATASET_REPORT.md with label quality section")
 
 
 def apply_fixes(report_dir: str) -> None:

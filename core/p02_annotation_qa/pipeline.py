@@ -243,13 +243,20 @@ def verify_image_task(
 
     t0 = time.perf_counter()
 
+    # Auto-mask "missing detection" finds every object in the scene (not just
+    # target classes). For class-restricted datasets (fire/smoke only, helmet-only,
+    # etc.) this flags unrelated objects as "missing annotation" and produces
+    # catastrophic false-positive rates. Disable via sam3.include_missing_detection=false.
+    sam3_cfg = qa_config.get("sam3", {})
+    include_missing = bool(sam3_cfg.get("include_missing_detection", True))
+
     payload: Dict[str, Any] = {
         "image": image_b64,
         "labels": label_lines,
         "label_format": "yolo",
         "classes": {str(k): v for k, v in class_names.items()},
         "text_prompts": text_prompts,
-        "include_missing_detection": True,
+        "include_missing_detection": include_missing,
         "config": validation_config,
     }
 

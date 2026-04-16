@@ -307,16 +307,17 @@ def _scan_label_files(output_dir: Path, classes: list) -> Tuple[dict, dict]:
 
     Returns:
         per_split: {split: {class_name: annotation_count}}
-        size_tiers: {"small": n, "medium": n, "large": n}
+        size_tiers: {"tiny": n, "small": n, "medium": n, "large": n}
 
     Size tiers use relative bbox area (w×h), calibrated for ~640 px images:
-        small  < 0.0025   (≈ < 32² px)
+        tiny   < 0.000479  (≈ < 14² px)
+        small  0.000479–0.0025   (≈ 14²–32² px)
         medium  0.0025–0.0225   (≈ 32²–96² px)
         large  ≥ 0.0225   (≈ > 96² px)
     """
     class_id_to_name = {i: name for i, name in enumerate(classes)}
     per_split = {s: {c: 0 for c in classes} for s in ("train", "val", "test")}
-    size_tiers = {"small": 0, "medium": 0, "large": 0}
+    size_tiers = {"tiny": 0, "small": 0, "medium": 0, "large": 0}
 
     for split in ("train", "val", "test"):
         label_dir = output_dir / split / "labels"
@@ -340,7 +341,9 @@ def _scan_label_files(output_dir: Path, classes: list) -> Tuple[dict, dict]:
                 name = class_id_to_name.get(class_id)
                 if name:
                     per_split[split][name] += 1
-                if area < 0.0025:
+                if area < 0.000479:
+                    size_tiers["tiny"] += 1
+                elif area < 0.0025:
                     size_tiers["small"] += 1
                 elif area < 0.0225:
                     size_tiers["medium"] += 1
@@ -517,13 +520,14 @@ def _write_dataset_report(
         "## Annotation Size Distribution",
         "",
         "> Relative bbox area (w×h). Calibrated for ~640 px images: "
-        "small ≈ <32² px, medium ≈ 32²–96² px, large ≈ >96² px.",
+        "tiny ≈ <14² px, small ≈ 14²–32² px, medium ≈ 32²–96² px, large ≈ >96² px.",
         "",
         "| Tier | Annotations | % | Criterion |",
         "|------|------------:|--:|-----------|",
     ]
     for tier, label, criterion in [
-        ("small",  "Small",  "w×h < 0.0025"),
+        ("tiny",   "Tiny",   "w×h < 0.000479"),
+        ("small",  "Small",  "0.000479 ≤ w×h < 0.0025"),
         ("medium", "Medium", "0.0025 ≤ w×h < 0.0225"),
         ("large",  "Large",  "w×h ≥ 0.0225"),
     ]:
