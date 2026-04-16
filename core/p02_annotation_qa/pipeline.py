@@ -203,6 +203,7 @@ def verify_image_task(
     class_names: Dict[int, str],
     qa_config: Dict[str, Any],
     auto_label_config: Dict[str, Any],
+    data_config: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """SAM3 verification of a single image via POST /verify.
 
@@ -221,7 +222,7 @@ def verify_image_task(
     timeout = float(service_cfg.get("timeout", 120))
     validation_config = qa_config.get("validation", {})
     # Prefer feature-local prompts in 05_data.yaml; fall back to shared qa_config (legacy).
-    data_config = state.get("data_config", {}) or {}
+    data_config = data_config or {}
     text_prompts: Dict[str, str] = (
         data_config.get("text_prompts")
         or qa_config.get("text_prompts", {})
@@ -532,7 +533,9 @@ def qa_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
         # SAM3 verify -- parallel per image (if enabled)
         if use_sam3:
             verify_futures = [
-                verify_image_task(r, class_names, qa_config, auto_label_config)
+                verify_image_task(
+                    r, class_names, qa_config, auto_label_config, data_config,
+                )
                 for r in batch_results
             ]
             batch_results = [f.result() for f in verify_futures]

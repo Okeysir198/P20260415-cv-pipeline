@@ -2,10 +2,86 @@
 
 import os
 import random
-from typing import Any, Dict, Optional
+import subprocess
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
+
+
+def auto_select_gpu(verbose: bool = True) -> Optional[str]:
+    """Pick the NVIDIA GPU with the most free memory and set CUDA_VISIBLE_DEVICES.
+
+    Respects an existing user-supplied ``CUDA_VISIBLE_DEVICES`` (never
+    overrides). No-ops and returns None if ``nvidia-smi`` is missing or
+    reports no GPUs.
+
+    MUST be called before any CUDA-using library performs its first CUDA
+    op. ``import torch`` itself is fine — torch doesn't touch CUDA until
+    the first ``torch.cuda.*`` call or tensor-to-cuda move — but anything
+    that queries/initialises CUDA (e.g. ``torch.cuda.is_available()``,
+    ``ort.InferenceSession(providers=["CUDAExecutionProvider"])``) will
+    freeze the visible-device set to whatever it sees at that moment.
+
+    Returns:
+        The chosen device index as a string (e.g. ``"1"``), or the
+        pre-existing ``CUDA_VISIBLE_DEVICES`` value if already set, or
+        ``None`` if no GPU could be chosen.
+
+    Examples:
+        >>> # At the top of a test or training entrypoint, before
+        >>> # torch does anything cuda-ish:
+        >>> from utils.device import auto_select_gpu
+        >>> auto_select_gpu()
+    """
+    existing = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if existing:
+        return existing
+
+    free_mb = _query_free_memory_mib()
+    if not free_mb:
+        return None
+
+    best = max(range(len(free_mb)), key=lambda i: free_mb[i])
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(best)
+    if verbose:
+        summary = ", ".join(
+            f"gpu{i}={mb}MiB" + (" [picked]" if i == best else "")
+            for i, mb in enumerate(free_mb)
+        )
+        print(f"[utils.device.auto_select_gpu] {summary}")
+    return str(best)
+
+
+def _query_free_memory_mib() -> List[int]:
+    """Return a list of free VRAM (MiB) per GPU, or [] if nvidia-smi missing."""
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return []
+
+    if out.returncode != 0:
+        return []
+
+    free: List[int] = []
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            free.append(int(line))
+        except ValueError:
+            continue
+    return free
 
 
 def get_device(device: Optional[str] = None) -> torch.device:

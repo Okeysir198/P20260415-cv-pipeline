@@ -65,7 +65,7 @@ uv run -m pytest tests/test_p06_training.py -v
 | `test_p10_video_inference.py` | `VideoProcessor`, frame counter, alert config | — | — |
 | `test_p10_face_recognition.py` | Face registry, gallery, predictor (optional ONNX weights) | — | — |
 | `test_p11_e2e_pipeline.py` | Full chain: train → eval → export → infer | — | `outputs/15_e2e_pipeline/` |
-| `test_p12_raw_pipeline.py` | **Raw dataset → annotate → QA → train → eval → export → infer** | :18104, :18105, :18100 | `outputs/16_raw_pipeline/` |
+| `test_p12_raw_pipeline.py` | **Raw dataset → annotate → QA → LS roundtrip → p00 merge+split → train → HPO → eval → export → infer** | :18104, :18105, :18100, :18103 | `outputs/16_raw_pipeline/` |
 
 ### Checkpoint dependency chain
 

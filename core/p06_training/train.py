@@ -23,7 +23,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.config import load_config, parse_overrides
+# Pick the idle GPU before any torch cuda init. Respects an explicit
+# CUDA_VISIBLE_DEVICES if the user set one. Safe to call before `import
+# torch` (auto_select_gpu uses only subprocess + env vars).
+from utils.device import auto_select_gpu  # noqa: E402
+auto_select_gpu()
+
+from utils.config import load_config, parse_overrides  # noqa: E402
 
 
 def main() -> None:

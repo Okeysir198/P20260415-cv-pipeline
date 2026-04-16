@@ -111,21 +111,33 @@ def feature_name_from_config_path(config_path: Union[str, Path]) -> str:
     """Derive the feature folder name from a config file or config-dir path.
 
     Assumes the repo convention ``features/<feature>/configs/<step>.yaml``:
-    - Given a config **file** path → grandparent is the feature folder.
-    - Given the ``configs/`` **directory** → parent is the feature folder.
+    - Any path containing a ``features/<name>/`` segment → ``<name>``.
+    - A bare ``configs/`` directory under a feature → parent name.
+    - Anything else (e.g. ``configs/_test/…``) → ``"unknown"``.
 
-    Both cases resolve to the same ``<feature>`` so callers don't have to
-    care which shape they hand in.
+    The explicit ``"unknown"`` fallback prevents the silent-ghost-folder
+    bug where a config outside ``features/`` (like ``configs/_test/…``)
+    used to resolve via ``parent.parent.name`` to the project root's dir
+    name and then materialise as ``features/<project-root>/runs/…``.
+    Callers that land here should pass an explicit ``output_dir_override``
+    or set the ``CV_RUNS_BASE`` env var.
     """
     p = Path(config_path)
     if str(p) in (".", ""):
         return "unknown"
     resolved = p.resolve()
-    # If caller passed a directory named "configs", the feature folder is its parent.
-    # Otherwise treat it as a file and go up two levels.
+    # Preferred path: look for a `features/<name>/` segment anywhere.
+    parts = resolved.parts
+    for i in range(len(parts) - 1):
+        if parts[i] == "features":
+            return parts[i + 1]
+    # Legacy compat: bare `configs/` dir whose parent IS a feature folder.
     if resolved.name == "configs" and resolved.is_dir():
-        return resolved.parent.name
-    return resolved.parent.parent.name
+        parent = resolved.parent
+        if parent.parent.name == "features":
+            return parent.name
+    # No `features/<name>/` in the path — fall back to a safe sentinel.
+    return "unknown"
 
 
 def generate_run_dir(

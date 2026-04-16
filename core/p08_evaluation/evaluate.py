@@ -19,15 +19,20 @@ import sys
 from pathlib import Path
 from typing import Dict
 
-import matplotlib.pyplot as plt
-import torch
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from core.p08_evaluation.evaluator import ModelEvaluator
-from core.p08_evaluation.error_analysis import ErrorAnalyzer
-from core.p06_training.trainer import DetectionTrainer
-from utils.config import load_config
+# Auto-pick the idle GPU BEFORE torch gets imported so the env var
+# reaches torch's first cuda init.
+from utils.device import auto_select_gpu  # noqa: E402
+auto_select_gpu()
+
+import matplotlib.pyplot as plt  # noqa: E402
+import torch  # noqa: E402
+
+from core.p08_evaluation.evaluator import ModelEvaluator  # noqa: E402
+from core.p08_evaluation.error_analysis import ErrorAnalyzer  # noqa: E402
+from core.p06_training.trainer import DetectionTrainer  # noqa: E402
+from utils.config import load_config  # noqa: E402
 from utils.device import get_device
 from core.p08_evaluation.visualization import (
     plot_confusion_matrix,

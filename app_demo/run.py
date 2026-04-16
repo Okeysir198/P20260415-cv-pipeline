@@ -19,9 +19,13 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-import gradio as gr
+# Pick the idle GPU before ModelManager.warmup() loads everything onto CUDA.
+from utils.device import auto_select_gpu  # noqa: E402
+auto_select_gpu()
 
-from utils.config import load_config
+import gradio as gr  # noqa: E402
+
+from utils.config import load_config  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

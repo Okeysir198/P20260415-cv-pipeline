@@ -1,30 +1,43 @@
-"""Test p12: Raw Pipeline — raw images → annotate → QA (SAM3) → explore → train → eval
-→ error analysis → export → inference → video inference.
+"""Test p12: Raw Pipeline — raw images → annotate → QA (SAM3) → LS roundtrip →
+data-prep merge+split → explore → train → HPO → eval → error analysis → export
+→ inference → video inference.
 
 Simulates a real-world scenario: a dataset of unlabeled images arrives, the full
-pipeline runs from auto-annotation to a deployable ONNX model.
+pipeline runs from auto-annotation through LS human-review (simulated via API)
+and a p00 merge/split, all the way to a deployable ONNX model.
 
-Service requirements (graceful skip if unavailable):
+Service requirements (graceful skip if unavailable — the skill layer at
+.claude/plugins/cv-data-prep/skills/cv-pipeline-e2e-test/ enforces services
+up-front so every stage runs in practice):
   - Auto-label service @ :18104  (required for auto_annotate stage)
   - QA service @ :18105          (required for annotation_qa stage)
   - SAM3 @ :18100                (used by QA for geometric verification)
+  - Label Studio @ :18103        (required for label_studio_roundtrip stage)
 """
 
-import json
-import shutil
+import os
 import sys
 from pathlib import Path
-
-import cv2
-import numpy as np
-import onnx
-import torch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from _runner import run_all
-from utils.config import load_config
+# Pick the idle GPU before torch/onnxruntime touch CUDA. Safe to run
+# after `import torch` because torch defers CUDA init, but we do it
+# at the very top for clarity and to support shared-box environments.
+from utils.device import auto_select_gpu  # noqa: E402
+auto_select_gpu()
+
+import json  # noqa: E402
+import shutil  # noqa: E402
+
+import cv2  # noqa: E402
+import numpy as np  # noqa: E402
+import onnx  # noqa: E402
+import torch  # noqa: E402
+
+from _runner import run_all  # noqa: E402
+from utils.config import load_config  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -41,8 +54,15 @@ EXPORT_CONFIG_PATH = ROOT / "configs" / "_shared" / "09_export.yaml"
 AUTO_LABEL_URL = "http://localhost:18104"
 QA_SERVICE_URL = "http://localhost:18105"
 SAM3_URL       = "http://localhost:18100"
+LS_URL         = "http://localhost:18103"
 
 OUTPUTS.mkdir(parents=True, exist_ok=True)
+
+# Redirect any pipeline stage that calls utils.config.generate_run_dir()
+# into this test's OUTPUTS tree, so stages whose configs live in
+# configs/_test/ (outside features/<name>/configs/) don't create a
+# ghost `features/<something>/runs/…` folder at the project root.
+os.environ.setdefault("CV_RUNS_BASE", str(OUTPUTS / "run_dirs"))
 
 # ---------------------------------------------------------------------------
 # Cross-test shared state (replaces pytest fixtures for sequential runner)
@@ -61,6 +81,7 @@ _state: dict = {
 
 _auto_label_cache: bool | None = None
 _qa_service_cache: bool | None = None
+_ls_service_cache: bool | None = None
 
 
 def _check_service(url: str) -> bool:
@@ -84,6 +105,13 @@ def has_qa_service() -> bool:
     if _qa_service_cache is None:
         _qa_service_cache = _check_service(QA_SERVICE_URL)
     return _qa_service_cache
+
+
+def has_label_studio() -> bool:
+    global _ls_service_cache
+    if _ls_service_cache is None:
+        _ls_service_cache = _check_service(LS_URL)
+    return _ls_service_cache
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +228,9 @@ def test_auto_annotate_generates_labels():
         "class_names": config["names"],
         "text_prompts": config.get("text_prompts", {}),
         "config_dir": str(DATA_CONFIG_PATH.parent),
+        # Avoid p01's feature-name-from-config-dir derivation — our config
+        # lives in configs/_test/, not under features/<name>/configs/.
+        "output_dir_override": str(OUTPUTS / "p01_runs"),
         "image_paths": {"train": [str(p) for p in train_imgs]},
         "total_images": len(train_imgs),
         "current_batch_idx": 0,
@@ -294,6 +325,294 @@ def test_annotation_qa_passes():
     with open(report_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)
     print(f"    Report saved : {report_path}")
+
+
+# ---------------------------------------------------------------------------
+# Stage 3b — Label Studio roundtrip: P04 (API-driven human-review simulation)
+# ---------------------------------------------------------------------------
+#
+# Imports the pre-annotations into LS, bulk-"accepts" every prediction by
+# POSTing it as a new annotation, then exports the reviewed tasks back to
+# YOLO, overwriting train/labels/ in-place. Since we accept predictions
+# verbatim, this is an identity round-trip (values preserved within 1e-3)
+# — its job is to exercise the p04 bridge + LS API surface, not to change
+# the labels. Skips gracefully if :18103 is down; in the skill layer,
+# services are required up-front so this stage actually runs.
+
+def test_label_studio_roundtrip():
+    """Import YOLO pre-annotations → accept via API → export back to YOLO."""
+    if not has_label_studio():
+        print(f"    SKIP: Label Studio service not available at {LS_URL}")
+        return
+
+    label_files = _get_label_files("train")
+    if not label_files:
+        print("    SKIP: no labels to import (auto-annotate was skipped)")
+        return
+
+    import requests
+
+    from core.p04_label_studio.bridge import (
+        LabelStudioAPI,
+        _ls_url_to_label_path,
+        build_task,
+        gather_dataset_pairs,
+        generate_label_config,
+        ls_to_yolo,
+        write_yolo_labels,
+    )
+
+    data_config = _state["data_config"] or load_config(str(DATA_CONFIG_PATH))
+    class_names = {int(k): v for k, v in data_config["names"].items()}
+    class_name_to_id = {v: k for k, v in class_names.items()}
+    project_name = f"{data_config['dataset_name']}_review"
+
+    email = "admin@admin.com"
+    password = "admin123"
+
+    # Authenticate — signup-on-miss so the test works on a freshly-bootstrapped
+    # LS instance as well. Mirrors the helper in test_p04_label_studio.py.
+    def _session() -> requests.Session:
+        s = requests.Session()
+        s.get(f"{LS_URL}/user/login/", timeout=10)
+        csrf = s.cookies.get("csrftoken", "")
+        r = s.post(
+            f"{LS_URL}/user/login/",
+            data={"email": email, "password": password, "csrfmiddlewaretoken": csrf},
+            headers={"Referer": f"{LS_URL}/user/login/"},
+            timeout=10,
+        )
+        if "/user/login" in r.url:
+            s = requests.Session()
+            s.get(f"{LS_URL}/user/signup/", timeout=10)
+            csrf = s.cookies.get("csrftoken", "")
+            s.post(
+                f"{LS_URL}/user/signup/",
+                data={"email": email, "password": password, "csrfmiddlewaretoken": csrf},
+                headers={"Referer": f"{LS_URL}/user/signup/"},
+                timeout=10,
+            )
+            s = requests.Session()
+            s.get(f"{LS_URL}/user/login/", timeout=10)
+            csrf = s.cookies.get("csrftoken", "")
+            s.post(
+                f"{LS_URL}/user/login/",
+                data={"email": email, "password": password, "csrfmiddlewaretoken": csrf},
+                headers={"Referer": f"{LS_URL}/user/login/"},
+                timeout=10,
+            )
+        return s
+
+    session = _session()
+    api = LabelStudioAPI(url=LS_URL, api_key="unused", email=email, password=password)
+
+    # Upsert: delete stale project of the same name, then create fresh.
+    existing = api.find_project(project_name)
+    if existing:
+        session.delete(f"{LS_URL}/api/projects/{existing['id']}", timeout=10)
+    project = api.create_project(
+        title=project_name,
+        label_config=generate_label_config(class_names),
+    )
+    project_id = project["id"]
+
+    # Build tasks from the raw-pipeline train split (val has no labels yet —
+    # auto-annotate only ran for train in Stage 2).
+    ds_config = {
+        "path": str(RAW_DATASET_DIR),
+        "train": "train/images",
+    }
+    # gather_dataset_pairs returns (image, label, split) triples.
+    pairs = gather_dataset_pairs(ds_config, ["train"])
+    assert len(pairs) > 0, "No image/label pairs gathered for LS import"
+
+    tasks = [
+        build_task(
+            image_path=img,
+            label_path=lbl,
+            class_names=class_names,
+            local_files_root="/datasets",
+            dataset_base=RAW_DATASET_DIR,
+            model_version="raw_pipeline_v1",
+        )
+        for img, lbl, _split in pairs
+    ]
+    imported = api.import_tasks(project_id, tasks)
+    assert imported > 0, f"import_tasks returned {imported}"
+
+    # Bulk "human review" — copy each task's prediction into a new annotation.
+    fetched = api.get_tasks(project_id)
+    annotated = 0
+    for t in fetched:
+        preds = t.get("predictions", [])
+        if not preds:
+            continue
+        result = preds[0].get("result", [])
+        if not result:
+            continue
+        resp = session.post(
+            f"{LS_URL}/api/tasks/{t['id']}/annotations/",
+            json={"result": result},
+            timeout=10,
+        )
+        assert resp.status_code in (200, 201), (
+            f"POST annotation failed (task {t['id']}): {resp.status_code}"
+        )
+        annotated += 1
+    assert annotated > 0, "No predictions were converted to annotations — p01 output empty?"
+
+    # Export reviewed tasks back into the raw-pipeline train/labels/ dir.
+    reviewed = api.get_tasks(project_id, only_reviewed=True)
+    exported = 0
+    for t in reviewed:
+        anns = t.get("annotations", [])
+        if not anns:
+            continue
+        results = anns[-1].get("result", [])
+        yolo_anns = []
+        for r in results:
+            converted = ls_to_yolo(r, class_name_to_id)
+            if converted is not None:
+                yolo_anns.append(converted)
+        url = t.get("data", {}).get("image", "")
+        if "/train/" in url:
+            out_dir = RAW_DATASET_DIR / "train" / "labels"
+        elif "/val/" in url:
+            out_dir = RAW_DATASET_DIR / "val" / "labels"
+        else:
+            continue
+        out_dir.mkdir(parents=True, exist_ok=True)
+        label_path = _ls_url_to_label_path(url, out_dir)
+        write_yolo_labels(label_path, yolo_anns)
+        exported += 1
+
+    # Sanity: train labels still exist and match in count (identity round-trip).
+    post_labels = _get_label_files("train")
+    assert len(post_labels) > 0, "Train labels were wiped by the LS roundtrip"
+
+    # Cleanup the test project so repeat runs stay idempotent.
+    try:
+        session.delete(f"{LS_URL}/api/projects/{project_id}", timeout=10)
+    except Exception:
+        pass
+
+    print(f"    project      : {project_name} (id={project_id})")
+    print(f"    imported     : {imported}")
+    print(f"    annotated    : {annotated}")
+    print(f"    exported     : {exported}")
+
+
+# ---------------------------------------------------------------------------
+# Stage 3c — Data prep merge+split: P00 (CLI subprocess)
+# ---------------------------------------------------------------------------
+#
+# After LS export, run the canonical p00 CLI to merge the now-reviewed
+# raw-pipeline train split into a fresh training_ready/ output with a
+# stratified 70/20/10 split. This writes to a separate location and does
+# NOT disturb _state["data_config"] — downstream stages keep using the
+# original 00_raw_pipeline.yaml so the checkpoint dependency chain (p06 →
+# p08/p09/p10) stays intact. What's being exercised here is the p00 code
+# path (parsers, class mapper, splitter, file ops) end-to-end via the CLI
+# that users actually invoke.
+
+def test_data_prep_merges_and_splits():
+    """Run core/p00_data_prep/run.py as a subprocess on the auto-annotated train split."""
+    import subprocess
+    import tempfile
+
+    import yaml
+
+    label_files = _get_label_files("train")
+    if not label_files:
+        print("    SKIP: no labels — p01 was skipped")
+        return
+
+    merged_output = OUTPUTS / "p00_merged"
+    if merged_output.exists():
+        shutil.rmtree(merged_output)
+
+    # p00's run.py resolves config-relative paths (not project-root-relative),
+    # so when the temp YAML lives in /tmp/, relative paths resolve to /tmp/...
+    # Use absolute paths to side-step the convention.
+    abs_source = str(RAW_DATASET_DIR / "train")
+    abs_output = str(merged_output)
+    data_config = _state["data_config"] or load_config(str(DATA_CONFIG_PATH))
+    canonical = [data_config["names"][k] for k in sorted(data_config["names"])]
+
+    prep_config = {
+        "task": "detection",
+        "dataset_name": "test_raw_pipeline_merged",
+        "output_dir": abs_output,
+        "output_format": "yolo",
+        "classes": canonical,
+        "sources": [
+            {
+                "name": "raw_pipeline_train",
+                "path": abs_source,
+                "format": "yolo",
+                "has_splits": False,
+                # YOLO labels hold raw class IDs ("0","1",…); without a
+                # data.yaml next to the images the parser can't resolve
+                # them to names, and ClassMapper (keyed on class names)
+                # would drop every sample. Feed the canonical list in
+                # via source_classes so index→name happens at parse time.
+                "source_classes": canonical,
+                "class_map": {c: c for c in canonical},
+            }
+        ],
+        "splits": {"train": 0.7, "val": 0.2, "test": 0.1, "seed": 42},
+        "options": {
+            "copy_images": True,
+            "handle_duplicates": "rename",
+            "validate_labels": True,
+        },
+    }
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(prep_config, f)
+        cfg_path = f.name
+
+    run_py = ROOT / "core" / "p00_data_prep" / "run.py"
+
+    # Dry-run — schema + path check first (fast).
+    dry = subprocess.run(
+        [sys.executable, str(run_py), "--config", cfg_path, "--dry-run"],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=120,
+    )
+    assert dry.returncode == 0, (
+        f"p00 dry-run failed (rc={dry.returncode}):\nSTDOUT:\n{dry.stdout}\nSTDERR:\n{dry.stderr}"
+    )
+
+    # Real run.
+    real = subprocess.run(
+        [sys.executable, str(run_py), "--config", cfg_path],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=300,
+    )
+    assert real.returncode == 0, (
+        f"p00 run failed (rc={real.returncode}):\nSTDOUT:\n{real.stdout}\nSTDERR:\n{real.stderr}"
+    )
+
+    for split in ("train", "val", "test"):
+        assert (merged_output / split / "images").exists(), (
+            f"p00 did not create {split}/images"
+        )
+        assert (merged_output / split / "labels").exists(), (
+            f"p00 did not create {split}/labels"
+        )
+
+    splits_file = merged_output / "splits.json"
+    assert splits_file.exists(), f"p00 did not write splits.json at {splits_file}"
+
+    split_counts = {
+        s: len(list((merged_output / s / "images").iterdir()))
+        for s in ("train", "val", "test")
+    }
+    total = sum(split_counts.values())
+    assert total > 0, f"p00 output has 0 images across splits: {split_counts}"
+
+    print(f"    output       : {merged_output}")
+    print(f"    split counts : {split_counts}")
+    print(f"    splits.json  : {splits_file}")
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +754,64 @@ def test_training_runs_and_loss_decreases():
         print(f"    Metrics keys : {list(metrics.keys())}")
 
     print(f"    Checkpoint   : {_state['ckpt_path']}")
+
+
+# ---------------------------------------------------------------------------
+# Stage 6b — HPO: P07 (2 trials × 1 epoch, same dataset as Stage 6)
+# ---------------------------------------------------------------------------
+#
+# Tiny HPO smoke — proves the Optuna wiring and search-space machinery works
+# against the raw-pipeline dataset. 2 trials × 1 epoch keeps total runtime
+# close to one normal training run. Uses HPOOptimizer directly (same pattern
+# as test_p07_hpo.py) rather than the CLI so we don't pay the interpreter
+# startup cost twice.
+
+def test_hpo_runs():
+    """Run 2 Optuna trials at 1 epoch each on the raw-pipeline dataset."""
+    if _state["ckpt_path"] is None:
+        print("    SKIP: no checkpoint — training was skipped")
+        return
+
+    hpo_config_path = ROOT / "configs" / "_shared" / "08_hyperparameter_tuning.yaml"
+    if not hpo_config_path.exists():
+        print(f"    SKIP: HPO config missing at {hpo_config_path}")
+        return
+
+    from core.p07_hpo.optimizer import HPOOptimizer
+
+    optimizer = HPOOptimizer(
+        training_config_path=str(TRAIN_CONFIG_PATH),
+        hpo_config_path=str(hpo_config_path),
+        training_overrides={
+            # Point HPO trials at the raw-pipeline dataset.
+            "data": {"dataset_config": str(DATA_CONFIG_PATH)},
+            "training": {"epochs": 1, "patience": 10},
+            "logging": {
+                "save_dir": str(OUTPUTS / "hpo_trials"),
+                "wandb_project": None,
+            },
+        },
+    )
+
+    study = optimizer.optimize(n_trials=2)
+    assert study is not None, "optimize() returned None"
+    assert len(study.trials) == 2, f"Expected 2 trials, got {len(study.trials)}"
+
+    best = study.best_trial
+    summary = {
+        "n_trials": len(study.trials),
+        "best_trial": best.number,
+        "best_value": best.value,
+        "best_params": best.params,
+    }
+    summary_path = OUTPUTS / "hpo_summary.json"
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2, default=str)
+
+    print(f"    Trials       : {len(study.trials)}")
+    print(f"    Best trial   : #{best.number}, value={best.value:.4f}")
+    print(f"    Best params  : {best.params}")
+    print(f"    Summary      : {summary_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -698,9 +1075,12 @@ if __name__ == "__main__":
         ("setup_raw_dataset",              test_setup_raw_dataset),
         ("auto_annotate_generates_labels", test_auto_annotate_generates_labels),
         ("annotation_qa_passes",           test_annotation_qa_passes),
+        ("label_studio_roundtrip",         test_label_studio_roundtrip),
+        ("data_prep_merges_and_splits",    test_data_prep_merges_and_splits),
         ("data_exploration",               test_data_exploration),
         ("detection_dataset_loads",        test_detection_dataset_loads),
         ("training_runs",                  test_training_runs_and_loss_decreases),
+        ("hpo_runs",                       test_hpo_runs),
         ("evaluation_runs",                test_evaluation_runs),
         ("error_analysis",                 test_error_analysis),
         ("export_to_onnx",                 test_export_to_onnx),

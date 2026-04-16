@@ -13,7 +13,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.config import parse_overrides
+from utils.device import auto_select_gpu  # noqa: E402
+auto_select_gpu()
+
+from utils.config import parse_overrides  # noqa: E402
 
 
 def main() -> None:

@@ -558,6 +558,20 @@ class DetectionPredictor:
             providers.append("CUDAExecutionProvider")
         providers.append("CPUExecutionProvider")
 
-        session = ort.InferenceSession(path, providers=providers)
+        try:
+            session = ort.InferenceSession(path, providers=providers)
+        except Exception as e:
+            # CUDA init can fail mid-session (e.g. CUBLAS_ALLOC_FAILED on a
+            # saturated shared GPU) even when the provider is reported as
+            # "available". ORT's provider list does NOT auto-fallback in
+            # that case — the constructor raises. Retry explicitly with
+            # CPU only so the caller still gets a working session.
+            if "CUDAExecutionProvider" not in providers:
+                raise
+            logger.warning(
+                "CUDA init failed (%s); retrying ONNX session with CPU only.",
+                str(e).splitlines()[0] if str(e) else type(e).__name__,
+            )
+            session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
         logger.info("ONNX Runtime providers: %s", session.get_providers())
         return session
