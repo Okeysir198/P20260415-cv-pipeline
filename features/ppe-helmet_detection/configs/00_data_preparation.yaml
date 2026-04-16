@@ -32,11 +32,13 @@ sources:
     voc_annotations_dir: "voc_labels"
     voc_images_dir: "images"
     has_splits: false
+    license: "CC-BY-NC-SA-4.0"
+    notes: "Primary backbone — Pexels-sourced, paper-authored (arXiv 2407.04590), 8,099 imgs"
+    dropped_classes: ["face", "foot", "gloves", "goggles", "mask", "vest", "ear", "hand", "shoe", "tool"]
     class_map:
       "helmet": "head_with_helmet"
       "head": "head_without_helmet"
       "person": "person"
-      # other sh17 classes (face, foot, gloves, etc.) are dropped for this model
 
   # Large negatives source — 44,002 imgs, 14-class incl. NO-Hardhat
   - name: "shlokraval_ppe_yolov8"
@@ -44,11 +46,13 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "Apache-2.0"
+    notes: "Only large source with NO-Hardhat negatives, 44,002 imgs"
+    dropped_classes: ["Gloves", "Goggles", "Mask", "Vest", "Fall-Detected", "Ladder", "Safety Cone", "Machinery", "Vehicle", "NO-Safety Vest", "NO-Mask", "NO-Gloves"]
     class_map:
       "Hardhat": "head_with_helmet"
       "NO-Hardhat": "head_without_helmet"
       "Person": "person"
-      # drop: Gloves/Goggles/Mask/Vest/Fall-Detected/Ladder/Safety Cone etc.
 
   # Bump cap (Nitto soft hat) — 664 imgs, 2-class Bump-cap / No BumpCap
   # Fills previously-empty head_with_nitto_hat class
@@ -57,6 +61,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Nitto soft-hat proxy — bump cap fills head_with_nitto_hat class (664 imgs)"
     class_map:
       "Bump-cap": "head_with_nitto_hat"
       "No BumpCap": "head_without_helmet"
@@ -67,10 +73,12 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "MIT"
+    notes: "Cross-PPE context, MIT license, 3,481 imgs"
+    dropped_classes: ["Boots", "Gloves", "Goggles", "Vest"]
     class_map:
       "Helmet": "head_with_helmet"
       "Person": "person"
-      # drop: Boots/Gloves/Goggles/Vest
 
   # Site-collected overlay — Nitto soft-hat samples populate here
   - name: "site_collected"
@@ -78,6 +86,8 @@ sources:
     format: "yolo"
     has_splits: false
     optional: true
+    license: "internal"
+    notes: "Nitto site footage — primary source for head_with_nitto_hat class"
     class_map:
       "head_with_helmet": "head_with_helmet"
       "head_without_helmet": "head_without_helmet"
@@ -94,3 +104,27 @@ options:
   copy_images: true
   handle_duplicates: "rename"
   validate_labels: true
+
+# Datasets intentionally excluded from v1 — add in v2 when needed
+held_back:
+  - name: "hardhat_vest_v3"
+    reason: "Community-scraped near-duplicates with sh17 (22K imgs)"
+    when: "If recall < target on construction scenes"
+  - name: "roboflow_hardhat"
+    reason: "Single-source, 18K imgs — head/helmet/person only"
+    when: "If person class mAP is too low"
+  - name: "hard_hat_workers"
+    reason: "VOC XML, Western-sites, already covered by sh17"
+    when: "Diversity boost if non-Asian construction context needed"
+  - name: "rf_chemical_ppe_11class"
+    reason: "Small (1,180 imgs), chemical-area context not yet deployed"
+    when: "Once chemical-area deployment starts"
+  - name: "rf_siabar_ppe"
+    reason: "Small (1,613 imgs), boots + ear-protection context"
+    when: "Once chemical-area deployment starts"
+  - name: "sfchd"
+    reason: "Baidu-only (12K chemical-plant helmet imgs), download blocked"
+    when: "If someone with Baidu access downloads it"
+  - name: "shwd"
+    reason: "Baidu-only full set (7,581 imgs); only 21 sample imgs ship via git"
+    when: "If someone with Baidu access downloads it"

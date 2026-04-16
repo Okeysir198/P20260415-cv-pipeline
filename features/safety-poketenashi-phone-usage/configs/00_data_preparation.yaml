@@ -24,6 +24,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Explicit phone-usage action labels (Using Phone + mobile), 3,748 imgs"
     class_map:
       "Using Phone": "phone_usage"
       "mobile": "phone_usage"
@@ -34,6 +36,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Phone object in person-using-phone context, 4,216 imgs"
     class_map:
       "Phone": "phone_usage"
 
@@ -43,9 +47,11 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Texting + calling action labels, 3,193 imgs"
+    dropped_classes: ["mobile_dataset - v9 2025-04-05 7-31pm"]
     class_map:
       "using phone": "phone_usage"
-      # drop: "mobile_dataset - v9 2025-04-05 7-31pm" (opaque label)
 
   # Action-level Texting + Calling → phone_usage; Drinking dropped
   - name: "rf_texting_calling_drinking"
@@ -53,10 +59,12 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid"]
+    license: "CC-BY-4.0"
+    notes: "Texting/Calling action classes only; Drinking excluded"
+    dropped_classes: ["c2-Drinking"]
     class_map:
       "c0-Texting": "phone_usage"
       "c1-Calling": "phone_usage"
-      # drop: c2-Drinking
 
   # FPI-Det — 22,879 imgs, face+phone paired labels. License: AGPL-3.0.
   # Every frame has a person-using-phone by design, so `phone` bbox → phone_usage.
@@ -66,9 +74,11 @@ sources:
     has_splits: true
     splits_to_use: ["train", "val", "test"]
     source_classes: ["phone", "face"]
+    license: "AGPL-3.0"
+    notes: "Face+phone paired labels — every frame is person-using-phone (22,879 imgs). AGPL license."
+    dropped_classes: ["face"]
     class_map:
       "phone": "phone_usage"
-      # drop: face (not needed for phone_usage taxonomy)
 
   # 997 imgs, explicit "phone usage" class
   - name: "roboflow_phone_usage_dms"
@@ -76,6 +86,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "DMS-context phone usage detection, 997 imgs"
     class_map:
       "phone usage": "phone_usage"
 
@@ -85,9 +97,23 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "Apache-2.0"
+    notes: "Person class source only — 44K Person labels from PPE dataset (all other PPE classes dropped)"
+    dropped_classes: ["Hardhat", "NO-Hardhat", "Gloves", "Goggles", "Mask", "Vest", "Fall-Detected", "Ladder", "Safety Cone", "Machinery", "Vehicle", "NO-Safety Vest", "NO-Mask", "NO-Gloves"]
     class_map:
       "Person": "person"
-      # drop all other PPE classes — only person contributes here
+
+  # Site-collected overlay (optional)
+  - name: "site_collected"
+    path: "../../../dataset_store/site_collected/phone_detection"
+    format: "yolo"
+    has_splits: false
+    optional: true
+    license: "internal"
+    notes: "Nitto site footage — workers using phones in factory corridors"
+    class_map:
+      "person": "person"
+      "phone_usage": "phone_usage"
 
 splits:
   train: 0.8
@@ -99,3 +125,15 @@ options:
   copy_images: true
   handle_duplicates: "rename"
   validate_labels: true
+
+# Datasets intentionally excluded from v1 — add in v2 when needed
+held_back:
+  - name: "roboflow_mobile_phone_ineuron"
+    reason: "Cell phone object only (not usage action) — wrong taxonomy for this model"
+    when: "If a separate cell-phone-object detection model is needed"
+  - name: "phone_call_usage"
+    reason: "Opaque class name 'phone-person - v1...' — class semantics unclear"
+    when: "If class mapping is clarified by dataset owner"
+  - name: "state_farm_distracted"
+    reason: "Kaggle competition — requires rules acceptance before download"
+    when: "After accepting Kaggle competition terms"

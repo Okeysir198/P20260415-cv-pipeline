@@ -21,6 +21,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "val", "test"]
+    license: "CC-BY-4.0"
+    notes: "Primary — paper-authored D-Fire dataset"
     class_map:
       "smoke": "smoke"
       "fire": "fire"
@@ -32,6 +34,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Indoor fire/smoke diversity"
     class_map:
       "0": "fire"
       "1": "smoke"
@@ -43,6 +47,9 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid"]
+    license: "CC-BY-4.0"
+    notes: "Factory context — critical for Nitto deployment domain"
+    dropped_classes: ["chemical", "no-helmet", "water-leak"]
     class_map:
       "fire": "fire"
       "smoke": "smoke"
@@ -53,6 +60,8 @@ sources:
     format: "yolo"
     has_splits: false
     optional: true
+    license: "internal"
+    notes: "Nitto on-site footage — populate for domain adaptation"
     class_map:
       "fire": "fire"
       "smoke": "smoke"
@@ -67,3 +76,12 @@ options:
   copy_images: true
   handle_duplicates: "rename"
   validate_labels: true
+
+# Datasets intentionally excluded from v1 — add in v2 when needed
+held_back:
+  - name: "fasdd_cv"
+    reason: "COCO→YOLO conversion overhead + near-duplicates (95K imgs)"
+    when: "If domain-gap at test time; run fasdd_cv COCO→YOLO converter first"
+  - name: "roboflow_fire_seg"
+    reason: "Segmentation masks reserved for p03 generative augmentation"
+    when: "When p03 gen-aug pipeline is active"

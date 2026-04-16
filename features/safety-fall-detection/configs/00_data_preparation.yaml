@@ -20,6 +20,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Primary — clean 2-class fall/nofall taxonomy, 7,947 imgs"
     class_map:
       "person-fall": "fallen_person"
       "person-nofall": "person"
@@ -30,6 +32,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Angle and scene diversity, fall positives only"
     class_map:
       "Fall-Detected": "fallen_person"
 
@@ -39,6 +43,8 @@ sources:
     path: "../../../dataset_store/raw/fall_detection/cctv_fall/laying_dataset"
     format: "yolo"
     has_splits: false
+    license: "CC-BY-4.0"
+    notes: "CCTV top-down angle — matches deployment camera perspective (112 imgs)"
     class_map:
       "laying": "fallen_person"
       "standing": "person"
@@ -49,6 +55,8 @@ sources:
     format: "yolo"
     has_splits: false
     optional: true
+    license: "internal"
+    notes: "Nitto on-site CCTV footage — populate for deployment domain adaptation"
     class_map:
       "person": "person"
       "fallen_person": "fallen_person"
@@ -63,3 +71,12 @@ options:
   copy_images: true
   handle_duplicates: "rename"
   validate_labels: true
+
+# Datasets intentionally excluded from v1 — add in v2 when needed
+held_back:
+  - name: "coco_keypoints"
+    reason: "Keypoints-only JSON (58K imgs), no bounding box — reserve for pose model"
+    when: "When RTMPose fall-pose model (Model G-pose) training starts"
+  - name: "ur_fall"
+    reason: "Old academic mirror, URL dead — new mirror unknown"
+    when: "If a working mirror is found"

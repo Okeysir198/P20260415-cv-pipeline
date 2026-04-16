@@ -1,14 +1,19 @@
 # Safety Shoes Detection — Data Preparation Config (v1, 2026-04-15)
 #
-# Quality-first selection: 3 sources totaling ~15K imgs.
-#   1. keremberke_ppe — only source with shoes/no_shoes + person in same frames (COCO JSON)
-#   2. rf_barefoot — dedicated barefoot negative (class-imbalance fix)
-#   3. rf_footwear_sandal_shoe — Sandal = non-compliant footwear
+# Quality-first selection: sources totaling ~37K imgs.
+#   1. roboflow_ppe_6class — safety Boots + Person in same frames (MIT)
+#   2. rf_chemical_ppe_11class — Shoes/NO-Shoes + Person all together
+#   3. keremberke_ppe — COCO JSON with shoe/no_shoe annotations
+#   4. rf_barefoot — dedicated barefoot negatives
+#   5. rf_footwear_sandal_shoe — Sandal = non-compliant footwear
+#   6. rf_safety_shoes_11k — big safety-shoes backbone (all positive)
+#   7. rf_footwear_3class_mohamed — perfect taxonomy match incl. slippers
+#   8. rf_footwear_9class — 9-class footwear, Boots→safety rest→non-safety
+#   9. rf_safety_shoes_flipflop — safety_shoes vs FlipFlops
+#  10. rf_sneakers — pure sneaker negatives
 #
 # Excluded (v2 candidates): rf_feet_segmentation (reserve for two-stage shoe_region
-# pipeline), multi-class PPE sets with Boots labels (sh17, roboflow_ppe_6class,
-# rf_siabar_ppe, rf_chemical_ppe_11class — add in v2 for Boots diversity),
-# shoe_ppe (opaque class "14" — unusable).
+# pipeline), shoe_ppe (opaque class "14" — unusable).
 
 task: detection
 dataset_name: "shoes_detection"
@@ -28,10 +33,12 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "MIT"
+    notes: "Safety Boots + Person context, MIT license, 3,481 imgs"
+    dropped_classes: ["Gloves", "Goggles", "Helmet", "Vest"]
     class_map:
       "Boots": "foot_with_safety_shoes"
       "Person": "person"
-      # drop: Gloves/Goggles/Helmet/Vest
 
   # Chemical-context PPE — 1,180 imgs, has Shoes/NO-Shoes + Person all together
   - name: "rf_chemical_ppe_11class"
@@ -39,6 +46,9 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Shoes/NO-Shoes + Person in chemical context, 1,180 imgs"
+    dropped_classes: ["Hardhat", "Gloves", "Goggles", "NO-Hardhat", "NO-Gloves", "NO-Goggles", "Vest", "NO-Vest"]
     class_map:
       "Shoes": "foot_with_safety_shoes"
       "No-Shoes": "foot_without_safety_shoes"
@@ -51,6 +61,9 @@ sources:
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
     annotations_file: "_annotations.coco.json"
+    license: "AGPL-3.0"
+    notes: "COCO JSON multi-PPE — ~1,361 shoe/no_shoe annotations, AGPL license"
+    dropped_classes: ["gloves", "goggles", "helmet", "vest"]
     class_map:
       "shoes": "foot_with_safety_shoes"
       "no_shoes": "foot_without_safety_shoes"
@@ -61,6 +74,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Dedicated barefoot negatives for class balance, 1,258 imgs"
     class_map:
       "no_shoes": "foot_without_safety_shoes"
 
@@ -70,9 +85,11 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Sandal → non-compliant footwear. Shoe and Unidentified dropped (ambiguous)"
+    dropped_classes: ["Shoe", "Unidentified"]
     class_map:
       "Sandal": "foot_without_safety_shoes"
-      # drop: Shoe (ambiguous safety vs. casual), Unidentified
 
   # Big safety-shoes source — 19,976 imgs, 1-class (all positive)
   - name: "rf_safety_shoes_11k"
@@ -81,6 +98,8 @@ sources:
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
     source_classes: ["safety_shoes"]
+    license: "CC-BY-4.0"
+    notes: "Largest safety-shoes source, all-positive (19,976 imgs)"
     class_map:
       "safety_shoes": "foot_with_safety_shoes"
 
@@ -90,6 +109,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Perfect 3-class taxonomy: shoes/no_shoes/slippers, 7,982 imgs"
     class_map:
       "shoes": "foot_with_safety_shoes"
       "no_shoes": "foot_without_safety_shoes"
@@ -101,6 +122,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "9-class footwear: Boots→safety, all others→non-safety (4,695 imgs)"
     class_map:
       "Boots": "foot_with_safety_shoes"
       "Sandals": "foot_without_safety_shoes"
@@ -118,11 +141,13 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Safety shoes vs FlipFlops binary (3,405 imgs)"
+    dropped_classes: ["0"]
     class_map:
       "safety_shoes_Detection  v3 20231011 213pm": "foot_with_safety_shoes"
       "FlipFlops": "foot_without_safety_shoes"
       "shoe": "foot_without_safety_shoes"
-      # drop: opaque class "0"
 
   # Pure sneaker negatives — 1,630 imgs
   - name: "rf_sneakers"
@@ -130,6 +155,8 @@ sources:
     format: "yolo"
     has_splits: true
     splits_to_use: ["train", "valid", "test"]
+    license: "CC-BY-4.0"
+    notes: "Pure sneaker negatives for diversity (1,630 imgs)"
     class_map:
       "sneaker": "foot_without_safety_shoes"
 
@@ -139,6 +166,8 @@ sources:
     format: "yolo"
     has_splits: false
     optional: true
+    license: "internal"
+    notes: "Nitto factory footwear footage — populate for deployment domain adaptation"
     class_map:
       "person": "person"
       "foot_with_safety_shoes": "foot_with_safety_shoes"
@@ -154,3 +183,15 @@ options:
   copy_images: true
   handle_duplicates: "rename"
   validate_labels: true
+
+# Datasets intentionally excluded from v1 — add in v2 when needed
+held_back:
+  - name: "rf_feet_segmentation"
+    reason: "Segmentation masks for foot region — reserve for two-stage shoe_region pipeline (17K imgs)"
+    when: "When two-stage foot→shoe detection is enabled"
+  - name: "shoe_ppe"
+    reason: "Opaque class label '14' — unusable without class mapping"
+    when: "If original dataset authors publish class definitions"
+  - name: "sh17_ppe_boots"
+    reason: "Boots labels in sh17 and rf_siabar_ppe — cross-use from helmet datasets for Boots diversity"
+    when: "If foot_with_safety_shoes mAP needs a boost on boot-type footwear"

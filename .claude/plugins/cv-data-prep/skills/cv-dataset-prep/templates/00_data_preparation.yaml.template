@@ -1,7 +1,6 @@
 # {{FEATURE_NAME}} — Data Preparation Config ({{VERSION}}, {{DATE}})
 #
 # Quality-first selection: {{N_SOURCES}} sources.
-# Dropped (v2 candidates): {{DROPPED_SOURCES}}
 
 task: detection
 dataset_name: "{{DATASET_NAME}}"
@@ -25,19 +24,26 @@ sources:
     # For COCO only:
     # annotations_file: "_annotations.coco.json"
     # For YOLO with non-standard class names (e.g. numeric), set:
-    # source_classes: ["safety_shoes"]
+    # source_classes: ["class_a", "class_b"]
+    license: "CC-BY-4.0"   # license of the source dataset
+    notes: "One-line description of this source and why it was selected"
+    dropped_classes: []     # raw class names present in this source but not mapped
+                            # (listed here for audit; they are implicitly dropped by p00)
     class_map:
       "{{SOURCE_CLASS_NAME}}": "{{CANONICAL_CLASS}}"
       # add one line per source class you want to keep;
-      # classes not listed here are silently dropped.
+      # classes not listed here are silently dropped — list them in dropped_classes above.
 
   # Site-collected overlay — optional, ignore if folder is empty
-  # - name: "site_collected"
-  #   path: "../../../dataset_store/site_collected/{{CATEGORY}}"
-  #   format: "yolo"
-  #   has_splits: false
-  #   class_map:
-  #     "{{CANONICAL_CLASS}}": "{{CANONICAL_CLASS}}"
+  - name: "site_collected"
+    path: "../../../dataset_store/site_collected/{{CATEGORY}}"
+    format: "yolo"
+    has_splits: false
+    optional: true
+    license: "internal"
+    notes: "On-site footage — populate for deployment domain adaptation"
+    class_map:
+      "{{CANONICAL_CLASS}}": "{{CANONICAL_CLASS}}"
 
 splits:
   train: 0.8
@@ -49,3 +55,9 @@ options:
   copy_images: true
   handle_duplicates: "rename"
   validate_labels: true
+
+# Datasets intentionally excluded from v1 — add in v2 when conditions below are met
+held_back:
+  - name: "{{HELD_BACK_SOURCE}}"
+    reason: "Why it was excluded (e.g. near-duplicate, conversion overhead, opaque labels)"
+    when: "Trigger condition for adding it (e.g. 'if recall < target on X scenes')"

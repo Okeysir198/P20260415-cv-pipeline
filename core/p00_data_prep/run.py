@@ -11,7 +11,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Tuple
 
 from tqdm import tqdm
 
@@ -81,8 +81,9 @@ def load_prep_config(config_path: str) -> dict:
         if "path" in source:
             source["resolved_path"] = resolve_path(source["path"], base_dir)
 
-    # Store config dir so run_data_prep can pass the right base_dir to parsers
+    # Store config dir and path so run_data_prep can pass the right base_dir to parsers
     config["_config_dir"] = str(base_dir.resolve())
+    config["_config_path"] = str(path.resolve())
 
     return config
 
@@ -199,9 +200,19 @@ def run_data_prep(config: dict, args) -> None:
         total=sum(counts.values()),
     )
 
+    # Count images actually written per source
+    source_counts: Dict[str, int] = {}
+    for sample in samples:
+        if "_split" in sample:
+            src = sample.get("source", "unknown")
+            source_counts[src] = source_counts.get(src, 0) + 1
+
     # Generate dataset report
     report_path = output_dir / "DATASET_REPORT.md"
-    _write_dataset_report(report_path, config, stats, splits_file, ratios)
+    _write_dataset_report(
+        report_path, config, stats, splits_file, ratios, source_counts,
+        config_path=config.get("_config_path", ""),
+    )
 
     print(f"\n✅ Done! Dataset created at: {output_dir}")
     for split, d in split_dirs.items():
@@ -285,68 +296,284 @@ def resplit_only(output_dir: Path, ratios: tuple, seed: int, task_type: str) -> 
     print(f"✅ Resplit done: {n_moved} samples moved. Snapshot: {output_dir / 'splits.json'}")
 
 
+def _ascii_bar(count: int, max_count: int, width: int = 12) -> str:
+    """Fixed-width ASCII progress bar scaled to count/max_count."""
+    filled = round(width * count / max_count) if max_count > 0 else 0
+    return "█" * filled + "░" * (width - filled)
+
+
+def _scan_label_files(output_dir: Path, classes: list) -> Tuple[dict, dict]:
+    """One-pass scan of all label files in output_dir/{train,val,test}/labels/.
+
+    Returns:
+        per_split: {split: {class_name: annotation_count}}
+        size_tiers: {"small": n, "medium": n, "large": n}
+
+    Size tiers use relative bbox area (w×h), calibrated for ~640 px images:
+        small  < 0.0025   (≈ < 32² px)
+        medium  0.0025–0.0225   (≈ 32²–96² px)
+        large  ≥ 0.0225   (≈ > 96² px)
+    """
+    class_id_to_name = {i: name for i, name in enumerate(classes)}
+    per_split = {s: {c: 0 for c in classes} for s in ("train", "val", "test")}
+    size_tiers = {"small": 0, "medium": 0, "large": 0}
+
+    for split in ("train", "val", "test"):
+        label_dir = output_dir / split / "labels"
+        if not label_dir.exists():
+            continue
+        for label_file in label_dir.glob("*.txt"):
+            try:
+                text = label_file.read_text()
+            except OSError:
+                continue
+            for line in text.splitlines():
+                parts = line.strip().split()
+                if len(parts) < 5:
+                    continue
+                try:
+                    class_id = int(parts[0])
+                    w, h = float(parts[3]), float(parts[4])
+                except ValueError:
+                    continue
+                area = w * h
+                name = class_id_to_name.get(class_id)
+                if name:
+                    per_split[split][name] += 1
+                if area < 0.0025:
+                    size_tiers["small"] += 1
+                elif area < 0.0225:
+                    size_tiers["medium"] += 1
+                else:
+                    size_tiers["large"] += 1
+
+    return per_split, size_tiers
+
+
 def _write_dataset_report(
     report_path: Path,
     config: dict,
     stats: dict,
     splits_file: Path,
     ratios: tuple,
+    source_counts: Dict[str, int],
+    config_path: str = "",
 ) -> None:
     """Generate DATASET_REPORT.md summarizing the prepared dataset."""
     dataset_name = config["dataset_name"]
     classes = config.get("classes", [])
     sources = config.get("sources", [])
+    output_dir = Path(config["output_dir"])
 
-    # Read split counts from splits.json
+    # ── Split counts from audit snapshot ────────────────────────────────────
     split_counts = {"train": 0, "val": 0, "test": 0}
     if splits_file.exists():
         with open(splits_file) as f:
             splits_data = json.load(f)
         for split_name in split_counts:
-            split_counts[split_name] = len(splits_data.get("splits", {}).get(split_name, []))
+            split_counts[split_name] = splits_data.get("counts", {}).get(split_name, 0)
 
     total_images = sum(split_counts.values())
-    total_objects = sum(stats.values())
+    total_annotations = sum(stats.values())
+    avg_ann = total_annotations / total_images if total_images > 0 else 0.0
 
+    # ── Per-split per-class counts + bbox size tiers ─────────────────────────
+    per_split, size_tiers = _scan_label_files(output_dir, classes)
+    per_split_ann = {s: sum(per_split[s].values()) for s in per_split}
+    total_size_anns = sum(size_tiers.values())
+
+    # ── Class imbalance ──────────────────────────────────────────────────────
+    counts_list = [stats.get(c, 0) for c in classes]
+    max_count = max(counts_list) if counts_list else 0
+    nonzero = [c for c in counts_list if c > 0]
+    min_count = min(nonzero) if nonzero else 1
+    imbalance_ratio = max_count / min_count if min_count > 0 else float("inf")
+
+    # ── Config path relative to project root ────────────────────────────────
+    if config_path:
+        try:
+            rel_config = str(Path(config_path).relative_to(output_dir.parent.parent.parent))
+        except ValueError:
+            rel_config = config_path
+    else:
+        rel_config = f"features/.../configs/00_data_preparation.yaml"
+
+    # ════════════════════════════════════════════════════════════════════════
+    title = dataset_name.replace("_", " ").title()
     lines = [
-        f"# Dataset Report — {dataset_name.replace('_', ' ').title()}",
+        f"# Dataset Report — {title}",
         "",
         f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        f"**Config:** `configs/{dataset_name}/00_data_preparation.yaml`",
+        f"**Config:** `{rel_config}`",
         "",
-        "## Classes",
+        "---",
         "",
-        "| ID | Name | Count | % |",
-        "|----|------|------:|--:|",
+        "## Summary",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
+        f"| Total images | {total_images:,} |",
+        f"| Total annotations | {total_annotations:,} |",
+        f"| Avg annotations/image | {avg_ann:.2f} |",
+        f"| Classes | {len(classes)} ({', '.join(classes)}) |",
+        f"| Sources used | {len(sources)} |",
+        f"| Split ratio | {ratios[0]:.0%} / {ratios[1]:.0%} / {ratios[2]:.0%} |",
+        "",
+        "---",
+        "",
+        "## Class Distribution",
+        "",
+        "| ID | Class | Annotations | % | Avg/img | Bar |",
+        "|----|-------|------------:|--:|--------:|-----|",
     ]
 
     for i, name in enumerate(classes):
         count = stats.get(name, 0)
-        pct = 100 * count / total_objects if total_objects > 0 else 0
-        lines.append(f"| {i} | {name} | {count:,} | {pct:.1f}% |")
+        pct = 100 * count / total_annotations if total_annotations > 0 else 0.0
+        avg = count / total_images if total_images > 0 else 0.0
+        bar = _ascii_bar(count, max_count)
+        lines.append(f"| {i} | {name} | {count:,} | {pct:.1f}% | {avg:.2f} | {bar} |")
+
+    imbalance_flag = "✅" if imbalance_ratio <= 3.0 else "⚠️"
+    lines += [
+        "",
+        f"**Imbalance ratio:** {imbalance_ratio:.2f}× {imbalance_flag} (threshold 3×)",
+        "",
+        "---",
+        "",
+        "## Split Distribution",
+        "",
+    ]
+
+    class_cols = " | ".join(classes)
+    sep_cols = " | ".join("------:" for _ in classes)
+    lines += [
+        f"| Split | Images | Annotations | Ann/img | {class_cols} |",
+        f"|-------|-------:|------------:|--------:|{sep_cols}|",
+    ]
+    for split in ("train", "val", "test"):
+        n_img = split_counts[split]
+        n_ann = per_split_ann[split]
+        a_img = n_ann / n_img if n_img > 0 else 0.0
+        cls_vals = " | ".join(f"{per_split[split].get(c, 0):,}" for c in classes)
+        lines.append(f"| {split.title()} | {n_img:,} | {n_ann:,} | {a_img:.2f} | {cls_vals} |")
+    cls_totals = " | ".join(f"{stats.get(c, 0):,}" for c in classes)
+    lines += [
+        f"| **Total** | **{total_images:,}** | **{total_annotations:,}** | **{avg_ann:.2f}** | {cls_totals} |",
+        "",
+        "---",
+        "",
+        "## Class Mapping — Raw → Training Ready",
+        "",
+    ]
+
+    for src in sources:
+        src_name = src.get("name", "?")
+        class_map = src.get("class_map", {})
+        dropped = src.get("dropped_classes", [])
+        lines += [
+            f"### {src_name}",
+            "",
+            "| Source class | → | Target class | Action |",
+            "|-------------|---|-------------|--------|",
+        ]
+        for raw_cls, target_cls in class_map.items():
+            stripped = raw_cls.strip().lstrip("-")
+            if stripped.isdigit():
+                action = "numeric ID → name"
+            elif raw_cls == target_cls:
+                action = "identity"
+            else:
+                action = "renamed"
+            lines.append(f"| `{raw_cls}` | → | `{target_cls}` | {action} |")
+        for dc in dropped:
+            lines.append(f"| `{dc}` | — | *(dropped)* | excluded |")
+        lines.append("")
+
+    lines += [
+        "---",
+        "",
+        "## Source Contributions",
+        "",
+        "| # | Source | Images | Format | License | Notes |",
+        "|---|--------|-------:|--------|---------|-------|",
+    ]
+    for i, src in enumerate(sources, 1):
+        src_name = src.get("name", "?")
+        n_imgs = source_counts.get(src_name, 0)
+        fmt = src.get("format", "?")
+        license_ = src.get("license", "—")
+        notes = src.get("notes", "")
+        if n_imgs == 0 and src.get("optional"):
+            notes = f"⚠️ empty — {notes}" if notes else "⚠️ empty"
+        elif n_imgs == 0:
+            notes = f"⚠️ 0 images contributed — {notes}" if notes else "⚠️ 0 images contributed"
+        lines.append(f"| {i} | {src_name} | {n_imgs:,} | {fmt} | {license_} | {notes} |")
 
     lines += [
         "",
-        "## Dataset Splits",
+        "---",
         "",
-        f"Ratios: {ratios[0]:.0%} / {ratios[1]:.0%} / {ratios[2]:.0%}",
+        "## Annotation Size Distribution",
         "",
-        "| Split | Images |",
-        "|-------|-------:|",
-        f"| Train | {split_counts['train']:,} |",
-        f"| Val | {split_counts['val']:,} |",
-        f"| Test | {split_counts['test']:,} |",
-        f"| **Total** | **{total_images:,}** |",
+        "> Relative bbox area (w×h). Calibrated for ~640 px images: "
+        "small ≈ <32² px, medium ≈ 32²–96² px, large ≈ >96² px.",
         "",
-        "## Raw Sources",
-        "",
-        "| # | Source | Format |",
-        "|---|--------|--------|",
+        "| Tier | Annotations | % | Criterion |",
+        "|------|------------:|--:|-----------|",
     ]
+    for tier, label, criterion in [
+        ("small",  "Small",  "w×h < 0.0025"),
+        ("medium", "Medium", "0.0025 ≤ w×h < 0.0225"),
+        ("large",  "Large",  "w×h ≥ 0.0225"),
+    ]:
+        n = size_tiers[tier]
+        pct = 100 * n / total_size_anns if total_size_anns > 0 else 0.0
+        lines.append(f"| {label} | {n:,} | {pct:.1f}% | {criterion} |")
 
-    for i, src in enumerate(sources, 1):
-        lines.append(f"| {i} | {src.get('name', '?')} | {src.get('format', '?')} |")
+    # ── Caveats ──────────────────────────────────────────────────────────────
+    held_back = config.get("held_back", [])
+    caveats = []
 
+    for src in sources:
+        n_imgs = source_counts.get(src.get("name", ""), 0)
+        if n_imgs == 0:
+            name = src.get("name", "?")
+            note = src.get("notes", "")
+            suffix = f" ({note})" if note else ""
+            optional_tag = "optional; " if src.get("optional") else ""
+            caveats.append(f"⚠️ `{name}` → 0 images ({optional_tag}populate to reduce domain gap{suffix})")
+
+    if imbalance_ratio > 3.0:
+        min_cls = min(classes, key=lambda c: stats.get(c, 0))
+        max_cls = max(classes, key=lambda c: stats.get(c, 0))
+        caveats.append(
+            f"⚠️ Class imbalance {imbalance_ratio:.1f}× "
+            f"(`{max_cls}` vs `{min_cls}`) — consider rebalancing or weighted loss"
+        )
+    else:
+        caveats.append(f"✅ Class balance healthy ({imbalance_ratio:.2f}× ratio, threshold 3×)")
+
+    for h in held_back:
+        name = h.get("name", "?")
+        reason = h.get("reason", "")
+        when = h.get("when", "")
+        entry = f"ℹ️ `{name}` held back"
+        if reason:
+            entry += f" — {reason}"
+        if when:
+            entry += f" (add when: {when})"
+        caveats.append(entry)
+
+    lines += [
+        "",
+        "---",
+        "",
+        "## Caveats",
+        "",
+    ]
+    for c in caveats:
+        lines.append(f"- {c}")
     lines.append("")
 
     report_path.write_text("\n".join(lines))
