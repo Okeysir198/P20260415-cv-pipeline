@@ -1,16 +1,15 @@
-# Dataset config — Segmentation (synthetic data created by tests)
+# Dataset config - Segmentation (100 images for pipeline testing)
 dataset_name: "test_segmentation"
 path: "../../dataset_store/test_segmentation"
-train: "train"
-val: "val"
+train: "train/images"
+val: "val/images"
+test: "val/images"
 
 names:
-  0: background
-  1: class_a
-  2: class_b
-num_classes: 3
-input_size: [128, 128]
+  0: fire
+  1: smoke
+num_classes: 2
+input_size: [640, 640]
 
-# Normalization (ImageNet defaults)
 mean: [0.485, 0.456, 0.406]
 std: [0.229, 0.224, 0.225]

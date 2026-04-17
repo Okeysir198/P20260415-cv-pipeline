@@ -29,7 +29,7 @@ from core.p00_data_prep.parsers import yolo, voc, coco
 
 # Real dataset paths (relative to project root)
 REAL_DATASETS = {
-    "yolo_flat": "dataset_store/raw/fire_detection/d_fire/data/data/train",
+    "yolo_flat": "dataset_store/raw/fire_detection/d_fire/data/train",
     "voc": "dataset_store/raw/helmet_detection/hard_hat_workers/data",
 }
 

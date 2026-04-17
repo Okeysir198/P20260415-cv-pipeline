@@ -131,7 +131,7 @@ class ZoneIntrusionDetector:
         vis = image_bgr.copy()
 
         for zone in self._zones:
-            poly_px = _poly_to_pixel(zone["polygon"], w, h)
+            poly_px = _poly_to_pixel(zone["polygon"], w, h).astype(np.int32)
             cv2.polylines(vis, [poly_px], True, (0, 255, 255), 2)
             overlay = vis.copy()
             cv2.fillPoly(overlay, [poly_px], (0, 255, 255))

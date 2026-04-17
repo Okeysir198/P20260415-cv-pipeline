@@ -173,7 +173,7 @@ def has_yolox_pretrained() -> bool:
     return YOLOX_M_PRETRAINED.exists()
 
 
-TRAINED_CHECKPOINT = ROOT / "tests" / "outputs" / "07_training" / "best.pth"
+TRAINED_CHECKPOINT = ROOT / "tests" / "outputs" / "08_training" / "best.pth"
 
 
 def has_trained_checkpoint() -> bool:
