@@ -126,13 +126,15 @@ class ModelBenchmark:
             onnx_path: Path to the .onnx model.
             batch_size: Batch size for inference.
             label: Label for this result in comparison tables.
-            providers: ORT execution providers. Default: CPUExecutionProvider.
+            providers: ORT execution providers. Default: CUDAExecutionProvider.
 
         Returns:
             Dictionary with benchmark results.
         """
         if providers is None:
-            providers = ["CPUExecutionProvider"]
+            if "CUDAExecutionProvider" not in ort.get_available_providers():
+                raise RuntimeError("GPU required: onnxruntime-gpu not available for ONNX benchmarking.")
+            providers = ["CUDAExecutionProvider"]
 
         session = ort.InferenceSession(onnx_path, providers=providers)
         input_name = session.get_inputs()[0].name

@@ -164,8 +164,7 @@ class Inpainter:
         """Free GPU memory by unloading the inpainting pipeline."""
         self._pipeline = None
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
 
         logger.info("Unloaded inpainting pipeline")
 

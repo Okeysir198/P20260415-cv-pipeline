@@ -60,8 +60,12 @@ class MobileFaceNetModel(FaceEmbedder):
         self._model_path = model_path
 
         # Configure ONNX Runtime session
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        self._session = ort.InferenceSession(model_path, providers=providers)
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            raise RuntimeError(
+                "GPU required: onnxruntime-gpu not available. "
+                "Install onnxruntime-gpu to use MobileFaceNet."
+            )
+        self._session = ort.InferenceSession(model_path, providers=["CUDAExecutionProvider"])
 
         # Cache input/output names
         self._input_name = self._session.get_inputs()[0].name

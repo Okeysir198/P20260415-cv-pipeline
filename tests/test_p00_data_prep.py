@@ -122,7 +122,7 @@ def test_coco_parser_real():
     # Roboflow COCO exports put the annotation file inside each split folder
     source_config = {
         "name": "keremberke_ppe",
-        "path": dataset_path + "/train_extracted",
+        "path": dataset_path + "/train",
         "format": "coco",
         "has_splits": False
     }
@@ -174,7 +174,8 @@ def test_split_generator_real():
 
         assert data["metadata"]["stratified"] == True
         assert data["metadata"]["total_samples"] == 100
-        assert "splits" in data
+        assert "counts" in data
+        assert sum(data["counts"].values()) == 100
 
     print("✅ SplitGenerator tests passed")
 

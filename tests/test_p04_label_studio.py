@@ -446,9 +446,10 @@ def test_gather_dataset_pairs():
     assert len(pairs) >= 10 + 5, (
         f"Expected at least 15 pairs (10 train + 5 val), got {len(pairs)}"
     )
-    for img, lbl in pairs:
+    for img, lbl, split in pairs:
         assert isinstance(img, Path), f"Image should be Path, got {type(img)}"
         assert isinstance(lbl, Path), f"Label should be Path, got {type(lbl)}"
+        assert split in ("train", "val"), f"Unexpected split tag: {split}"
     print(f"    gathered {len(pairs)} pairs from train+val")
 
 
@@ -773,7 +774,7 @@ def test_full_pipeline_roundtrip():
     }
     pairs = gather_dataset_pairs(val_data_config, ["val"])
     tasks = []
-    for img_path, lbl_path in pairs:
+    for img_path, lbl_path, _split in pairs:
         task = build_task(
             image_path=img_path,
             label_path=lbl_path,
@@ -838,7 +839,7 @@ def test_full_pipeline_roundtrip():
         for exported_file in exported_files:
             exported_anns = read_yolo_labels(exported_file)
             original_label = None
-            for orig_img, orig_lbl in pairs:
+            for orig_img, orig_lbl, _split in pairs:
                 if orig_img.stem == exported_file.stem:
                     original_label = orig_lbl
                     break

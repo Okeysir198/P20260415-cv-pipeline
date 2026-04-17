@@ -109,7 +109,7 @@ p06_training   →  <save_dir>/best.pt        (or last.pt if best wasn't saved)
 
 **p00 YOLO source with numeric class IDs** — when a YOLO source dir has no `data.yaml` and the config has no `source_classes`, the parser emits raw class-id strings (`"0"`, `"1"`) as labels. `ClassMapper`'s `class_map` is keyed on class names, so every sample is dropped and you get `Found 0 samples`. Fix: add `source_classes: [fire, smoke, ...]` to the source entry (order matters — index → name).
 
-**ONNX Runtime on a saturated GPU** — `ort.InferenceSession(..., providers=["CUDAExecutionProvider", "CPUExecutionProvider"])` does **not** auto-fall-back when CUDA init fails mid-session (e.g. `CUBLAS_STATUS_ALLOC_FAILED` on a shared GPU). `core/p10_inference/predictor.py::_load_onnx_model` catches the failure and retries with CPU only — don't remove that try/except unless you replace it with something equivalent.
+**ONNX Runtime is CUDA-only** — `core/p10_inference/predictor.py::_load_onnx_model` builds sessions with `providers=["CUDAExecutionProvider"]` and raises if the GPU EP is unavailable. There is no silent CPU fallback. If you hit `CUBLAS_STATUS_ALLOC_FAILED` on a saturated shared GPU, free VRAM (kill another process, restart Python) — don't add a CPU fallback.
 
 **Auto-GPU-selection** — every CLI under `core/p06_training`, `core/p07_hpo`, `core/p08_evaluation` (and `app_demo/run.py`, `tests/test_p12_raw_pipeline.py`) calls `utils.device.auto_select_gpu()` near the top, before `import torch`. This picks the idle GPU on shared boxes. Respects user-set `CUDA_VISIBLE_DEVICES`. If you add a new CLI, add the call or document why not.
 

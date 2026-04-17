@@ -24,6 +24,7 @@ from typing import Dict, List, Tuple
 import cv2
 import numpy as np
 import onnxruntime as ort
+import torch
 
 from core.p06_models.pose_base import COCO_KEYPOINT_NAMES, COCO_SKELETON, PoseModel
 from core.p06_models.pose_registry import _POSE_VARIANT_MAP, register_pose_model
@@ -95,19 +96,27 @@ def _decode_simcc(
               space (at original input resolution, i.e. divided by 2).
             - ``scores``: ``(N, K)`` float32 per-keypoint confidence scores.
     """
-    x_locs = np.argmax(simcc_x, axis=-1)  # (N, K)
-    y_locs = np.argmax(simcc_y, axis=-1)  # (N, K)
+    # Move to GPU once, do argmax/max/sigmoid in fused kernels, then bring back.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    tx = torch.from_numpy(simcc_x).to(device)
+    ty = torch.from_numpy(simcc_y).to(device)
 
-    # Confidence from sigmoid of max logit value
-    max_x = np.max(simcc_x, axis=-1)
-    max_y = np.max(simcc_y, axis=-1)
-    scores = np.minimum(
-        1.0 / (1.0 + np.exp(-max_x)),
-        1.0 / (1.0 + np.exp(-max_y)),
-    )
+    max_x_out = torch.max(tx, dim=-1)
+    max_y_out = torch.max(ty, dim=-1)
+    x_locs_t = max_x_out.indices
+    y_locs_t = max_y_out.indices
+    max_x = max_x_out.values
+    max_y = max_y_out.values
+
+    scores_t = torch.minimum(torch.sigmoid(max_x), torch.sigmoid(max_y))
 
     # SimCC coords are at 2x resolution
-    coords = np.stack([x_locs / 2.0, y_locs / 2.0], axis=-1)  # (N, K, 2)
+    coords_t = torch.stack(
+        [x_locs_t.to(torch.float32) / 2.0, y_locs_t.to(torch.float32) / 2.0], dim=-1
+    )  # (N, K, 2)
+
+    coords = coords_t.cpu().numpy().astype(np.float32)
+    scores = scores_t.cpu().numpy().astype(np.float32)
     return coords, scores
 
 
@@ -132,8 +141,12 @@ class RTMPoseModel(PoseModel):
         self._model_path = model_path
 
         # Configure ONNX Runtime session
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        self._session = ort.InferenceSession(model_path, providers=providers)
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            raise RuntimeError(
+                "GPU required: onnxruntime-gpu not available. "
+                "Install onnxruntime-gpu to use RTMPose."
+            )
+        self._session = ort.InferenceSession(model_path, providers=["CUDAExecutionProvider"])
 
         # Cache input/output names
         self._input_name = self._session.get_inputs()[0].name

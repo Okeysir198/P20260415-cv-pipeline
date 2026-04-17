@@ -75,16 +75,30 @@ class SCRFDModel(FaceDetector):
         self._model_path = model_path
 
         # Configure ONNX Runtime session
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        self._session = ort.InferenceSession(model_path, providers=providers)
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            raise RuntimeError(
+                "GPU required: onnxruntime-gpu not available. "
+                "Install onnxruntime-gpu to use SCRFD."
+            )
+        self._session = ort.InferenceSession(model_path, providers=["CUDAExecutionProvider"])
 
         # Cache input/output names
         self._input_name = self._session.get_inputs()[0].name
         self._output_names = [o.name for o in self._session.get_outputs()]
 
-        # Determine if model outputs landmarks (9 outputs = with landmarks,
-        # 6 outputs = boxes + scores only, 3 outputs per stride level)
-        self._has_landmarks = len(self._output_names) == 9
+        # Output layout varies by SCRFD export:
+        #   6  outputs = score + bbox per stride (2 anchors/position)
+        #   9  outputs = score + bbox + kps per stride (2 anchors/position)
+        #   12 outputs = cls + obj + bbox + kps per stride (1 anchor/position)
+        n_outputs = len(self._output_names)
+        assert n_outputs in (6, 9, 12), (
+            f"Unsupported SCRFD output count: {n_outputs} "
+            f"(expected 6, 9, or 12). Outputs: {self._output_names}"
+        )
+        self._outputs_per_stride = n_outputs // len(_STRIDES)
+        self._has_landmarks = self._outputs_per_stride >= 3
+        self._has_obj = self._outputs_per_stride == 4
+        self._num_anchors = 1 if self._outputs_per_stride == 4 else 2
 
         # Cache for anchor grids keyed by (stride, height, width)
         self._center_cache: Dict[Tuple[int, int, int], np.ndarray] = {}
@@ -121,8 +135,8 @@ class SCRFDModel(FaceDetector):
         ys = np.arange(feat_h, dtype=np.float32) * stride
         grid_x, grid_y = np.meshgrid(xs, ys)
         centers = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)
-        # Duplicate each anchor for the 2 anchors per spatial position
-        centers = np.repeat(centers, 2, axis=0)
+        if self._num_anchors > 1:
+            centers = np.repeat(centers, self._num_anchors, axis=0)
 
         self._center_cache[key] = centers
         return centers
@@ -187,24 +201,33 @@ class SCRFDModel(FaceDetector):
         all_landmarks = []
 
         # Outputs are grouped by type, not interleaved per stride:
-        #   scores: outputs[0..2], boxes: outputs[3..5], kps: outputs[6..8]
-        # (without landmarks: scores: outputs[0..2], boxes: outputs[3..5])
+        #   6 outputs: scores[0..2], bbox[3..5]
+        #   9 outputs: scores[0..2], bbox[3..5], kps[6..8]
+        #   12 outputs: cls[0..2], obj[3..5], bbox[6..8], kps[9..11]
         num_strides = len(_STRIDES)
 
+        if self._has_obj:
+            cls_off, obj_off, bbox_off, kps_off = 0, num_strides, 2 * num_strides, 3 * num_strides
+        else:
+            cls_off, obj_off, bbox_off, kps_off = 0, None, num_strides, 2 * num_strides
+
         for idx, stride in enumerate(_STRIDES):
-            # Extract outputs — shape is (N, C), no batch dim
-            score_blob = outputs[idx]                    # (N, 1)
-            bbox_blob = outputs[num_strides + idx]       # (N, 4)
+            # ONNX outputs may be (N, C) or (1, N, C) depending on export.
+            # Reshape everything to 2D so downstream indexing is uniform.
+            cls_blob = outputs[cls_off + idx].reshape(-1, 1)         # (N, 1)
+            bbox_blob = outputs[bbox_off + idx].reshape(-1, 4)       # (N, 4)
 
             if self._has_landmarks:
-                kps_blob = outputs[2 * num_strides + idx]  # (N, 10)
+                kps_blob = outputs[kps_off + idx].reshape(-1, 10)    # (N, 10)
 
-            # Flatten scores to 1D and apply sigmoid
-            scores_raw = score_blob.reshape(-1)  # (N,)
-            bbox_raw = bbox_blob                  # (N, 4)
+            cls_raw = cls_blob.reshape(-1)
+            if self._has_obj:
+                obj_raw = outputs[obj_off + idx].reshape(-1)
+                scores_flat = (1.0 / (1.0 + np.exp(-cls_raw))) * (1.0 / (1.0 + np.exp(-obj_raw)))
+            else:
+                scores_flat = 1.0 / (1.0 + np.exp(-cls_raw))
 
-            # Apply sigmoid to scores
-            scores_flat = 1.0 / (1.0 + np.exp(-scores_raw))
+            bbox_raw = bbox_blob
 
             # Filter by confidence threshold
             mask = scores_flat >= self._conf_threshold

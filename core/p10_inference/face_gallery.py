@@ -1,14 +1,16 @@
 """Face gallery for enrollment and identity matching.
 
 Stores face embeddings as a ``.npz`` file with numpy arrays. Matching uses
-cosine similarity (equivalent to L2 distance on L2-normalized vectors).
+cosine similarity (equivalent to L2 distance on L2-normalized vectors) and
+runs on CUDA via a persistent ``torch.Tensor`` gallery matrix.
 """
 
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,12 @@ class FaceGallery:
 
     Gallery stored as ``.npz``: embeddings ``(N, D)`` float32 +
     identities ``(N,)`` str array.
+
+    Matching executes on CUDA: the gallery matrix is uploaded once and
+    cached as a ``torch.Tensor``; each query is uploaded and the cosine
+    similarity is computed with ``torch.matmul`` + ``torch.argmax``. The
+    cache is invalidated when ``enroll()``/``remove()``/``load()`` mutates
+    the gallery.
 
     Args:
         gallery_path: Path to ``.npz`` gallery file.
@@ -36,9 +44,23 @@ class FaceGallery:
         self.embedding_dim = embedding_dim
         self._embeddings: np.ndarray = np.empty((0, embedding_dim), dtype=np.float32)
         self._identities: List[str] = []
+        self._embeddings_gpu: Optional[torch.Tensor] = None
+        self._device = torch.device("cuda")
 
         if self.gallery_path.exists():
             self.load()
+
+    def _invalidate_gpu_cache(self) -> None:
+        """Drop the cached CUDA tensor; rebuilt lazily on next match call."""
+        self._embeddings_gpu = None
+
+    def _ensure_gpu_cache(self) -> torch.Tensor:
+        """Return the gallery matrix on CUDA, building+caching it if needed."""
+        if self._embeddings_gpu is None:
+            self._embeddings_gpu = torch.from_numpy(
+                self._embeddings.astype(np.float32, copy=False)
+            ).to(self._device)
+        return self._embeddings_gpu
 
     def enroll(self, identity: str, embedding: np.ndarray) -> None:
         """Add a face embedding to the gallery.
@@ -54,6 +76,7 @@ class FaceGallery:
             embedding = embedding / norm
         self._embeddings = np.vstack([self._embeddings, embedding])
         self._identities.append(identity)
+        self._invalidate_gpu_cache()
         logger.info("Enrolled '%s' (gallery size: %d)", identity, self.size)
 
     def match(self, embedding: np.ndarray) -> Tuple[str, float]:
@@ -69,15 +92,19 @@ class FaceGallery:
         if self.size == 0:
             return ("unknown", 0.0)
 
-        embedding = embedding.astype(np.float32).reshape(1, -1)
-        norm = np.linalg.norm(embedding)
-        if norm > 0:
-            embedding = embedding / norm
+        gallery = self._ensure_gpu_cache()  # (N, D)
 
-        # Cosine similarity (embeddings are L2-normalized -> dot product)
-        similarities = (self._embeddings @ embedding.T).squeeze(-1)  # (N,)
-        best_idx = int(np.argmax(similarities))
-        best_sim = float(similarities[best_idx])
+        # Upload + L2-normalize the query on GPU
+        q = torch.from_numpy(embedding.astype(np.float32, copy=False)).to(self._device)
+        q = q.reshape(-1)
+        q_norm = torch.linalg.norm(q)
+        if q_norm > 0:
+            q = q / q_norm
+
+        # Cosine similarity via matmul (gallery rows are L2-normalized)
+        sims = gallery @ q  # (N,)
+        best_idx = int(torch.argmax(sims).item())
+        best_sim = float(sims[best_idx].item())
 
         if best_sim >= self.similarity_threshold:
             return (self._identities[best_idx], best_sim)
@@ -95,23 +122,26 @@ class FaceGallery:
         if self.size == 0 or len(embeddings) == 0:
             return [("unknown", 0.0)] * len(embeddings)
 
-        embeddings = embeddings.astype(np.float32)
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        norms = np.maximum(norms, 1e-8)
-        embeddings = embeddings / norms
+        gallery = self._ensure_gpu_cache()  # (N, D)
 
-        # (M, N) similarity matrix
-        sim_matrix = embeddings @ self._embeddings.T
-        best_indices = np.argmax(sim_matrix, axis=1)
-        best_sims = sim_matrix[np.arange(len(embeddings)), best_indices]
+        # Upload queries and L2-normalize row-wise (handles un-normalized input)
+        q = torch.from_numpy(embeddings.astype(np.float32, copy=False)).to(self._device)
+        q_norms = torch.linalg.norm(q, dim=1, keepdim=True).clamp_min(1e-8)
+        q = q / q_norms
 
-        results = []
-        for i in range(len(embeddings)):
-            sim = float(best_sims[i])
+        sim_matrix = q @ gallery.T  # (M, N)
+        best_sims, best_indices = sim_matrix.max(dim=1)
+
+        # One round-trip to CPU at the boundary
+        best_sims_cpu = best_sims.cpu().tolist()
+        best_indices_cpu = best_indices.cpu().tolist()
+
+        results: List[Tuple[str, float]] = []
+        for sim, idx in zip(best_sims_cpu, best_indices_cpu):
             if sim >= self.similarity_threshold:
-                results.append((self._identities[best_indices[i]], sim))
+                results.append((self._identities[idx], float(sim)))
             else:
-                results.append(("unknown", sim))
+                results.append(("unknown", float(sim)))
         return results
 
     def remove(self, identity: str) -> int:
@@ -128,6 +158,7 @@ class FaceGallery:
         self._embeddings = self._embeddings[mask]
         self._identities = [ident for ident, keep in zip(self._identities, mask) if keep]
         if removed > 0:
+            self._invalidate_gpu_cache()
             logger.info(
                 "Removed '%s' (%d embeddings, gallery size: %d)",
                 identity, removed, self.size,
@@ -149,6 +180,7 @@ class FaceGallery:
         data = np.load(str(self.gallery_path), allow_pickle=False)
         self._embeddings = data["embeddings"].astype(np.float32)
         self._identities = list(data["identities"])
+        self._invalidate_gpu_cache()
         logger.info("Loaded gallery from %s (%d identities)", self.gallery_path, self.size)
 
     @property

@@ -274,7 +274,7 @@ def _config_to_training_args(
         per_device_eval_batch_size=data_cfg.get("batch_size", 16),
         optim=optim_name,
         warmup_ratio=warmup_ratio,
-        fp16=train_cfg.get("amp", True) and torch.cuda.is_available(),
+        fp16=train_cfg.get("amp", True),
         max_grad_norm=train_cfg.get("grad_clip", 35.0),
         eval_strategy="epoch",
         save_strategy="epoch",

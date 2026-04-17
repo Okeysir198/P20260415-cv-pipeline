@@ -159,7 +159,8 @@ def _detect_persons_yolo(img_bgr: np.ndarray) -> list[np.ndarray]:
     try:
         from ultralytics import YOLO
         if not hasattr(_detect_persons_yolo, "_model"):
-            _detect_persons_yolo._model = YOLO("yolov8n.pt")
+            _pt = Path(__file__).resolve().parents[3] / "pretrained" / "access-zone_intrusion" / "yolo11n.pt"
+            _detect_persons_yolo._model = YOLO(str(_pt))
         det = _detect_persons_yolo._model.predict(img_bgr, classes=[0], conf=0.35,
                                                    verbose=False)[0]
         if det.boxes is not None and len(det.boxes) > 0:

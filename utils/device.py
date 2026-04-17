@@ -40,7 +40,7 @@ def auto_select_gpu(verbose: bool = True) -> Optional[str]:
 
     free_mb = _query_free_memory_mib()
     if not free_mb:
-        return None
+        raise RuntimeError("GPU required: nvidia-smi reports no GPUs")
 
     best = max(range(len(free_mb)), key=lambda i: free_mb[i])
     os.environ["CUDA_VISIBLE_DEVICES"] = str(best)
@@ -85,30 +85,40 @@ def _query_free_memory_mib() -> List[int]:
 
 
 def get_device(device: Optional[str] = None) -> torch.device:
-    """Auto-detect the best available compute device.
+    """Return a CUDA torch.device.
 
-    Priority: CUDA > MPS > CPU. Optionally force a specific device.
+    GPU-only: raises if CUDA is unavailable. CPU and MPS are not supported
+    by this project's policy.
 
     Args:
-        device: Force a specific device string (e.g. "cuda:0", "cpu").
-            If None, auto-detects the best available device.
+        device: Force a specific CUDA device string (e.g. "cuda:0"). If
+            None, returns ``torch.device("cuda")``. Passing "cpu" or "mps"
+            raises RuntimeError.
 
     Returns:
-        torch.device for the selected compute backend.
+        torch.device for the selected CUDA device.
+
+    Raises:
+        RuntimeError: If CUDA is unavailable or a non-CUDA device is requested.
 
     Examples:
-        >>> dev = get_device()       # auto-detect
-        >>> dev = get_device("cpu")  # force CPU
+        >>> dev = get_device()           # torch.device("cuda")
+        >>> dev = get_device("cuda:0")   # torch.device("cuda:0")
     """
+    _no_gpu_msg = (
+        "GPU required: no CUDA device available. Set CUDA_VISIBLE_DEVICES "
+        "or ensure nvidia-smi + driver are installed."
+    )
+
     if device is not None:
+        lowered = device.lower()
+        if lowered.startswith("cpu") or lowered.startswith("mps"):
+            raise RuntimeError(_no_gpu_msg)
         return torch.device(device)
 
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    else:
-        return torch.device("cpu")
+    if not torch.cuda.is_available():
+        raise RuntimeError(_no_gpu_msg)
+    return torch.device("cuda")
 
 
 def set_seed(seed: int) -> None:
@@ -124,9 +134,8 @@ def set_seed(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
     # Deterministic mode (may reduce performance slightly)
     torch.backends.cudnn.deterministic = True

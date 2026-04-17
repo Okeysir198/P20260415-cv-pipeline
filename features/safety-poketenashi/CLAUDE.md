@@ -72,3 +72,5 @@ eval/benchmark_results.json
 - Pose model is shared with `safety-fall_pose_estimation` — use same ONNX checkpoint
 - `no_handrail` rule requires site-specific zone polygon in `10_inference.yaml` (handrail zone position)
 - mmpose RTMPose models require `pip install mmpose` — currently skipped; DWPose ONNX is the production choice
+- Person detector (for top-down DWPose cropping) uses `pretrained/access-zone_intrusion/yolo11n.pt`; falls back to whole-frame if unavailable
+- Never use bare `YOLO("model.pt")` — Ultralytics auto-downloads to cwd; always use an explicit absolute path from `pretrained/`

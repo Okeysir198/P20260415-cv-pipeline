@@ -241,6 +241,82 @@ def compute_confusion_matrix(
     return cm.matrix
 
 
+def _compute_precision_recall_from_iou(
+    predictions: List[Dict],
+    ground_truths: List[Dict],
+    iou_matrices: List[np.ndarray],
+    class_id: int,
+    iou_threshold: float = 0.5,
+) -> tuple:
+    """PR curve for a single class using pre-computed per-image IoU matrices.
+
+    Each ``iou_matrices[i]`` is the full (N_pred, M_gt) IoU matrix for image i
+    across ALL classes. Rows/cols are filtered by ``class_id`` inside.
+    """
+    all_scores = []
+    all_tp = []
+    n_gt = 0
+
+    for pred, gt, iou_full in zip(predictions, ground_truths, iou_matrices):
+        pred_scores = np.asarray(pred["scores"], dtype=np.float64).ravel()
+        pred_labels = np.asarray(pred["labels"], dtype=np.int64).ravel()
+        gt_labels = np.asarray(gt["labels"], dtype=np.int64).ravel()
+
+        pred_mask = pred_labels == class_id
+        gt_mask = gt_labels == class_id
+        cls_pred_scores = pred_scores[pred_mask]
+        n_gt_cls = int(gt_mask.sum())
+        n_gt += n_gt_cls
+
+        if cls_pred_scores.size == 0:
+            continue
+
+        # Slice the full IoU matrix to this class's rows and cols
+        cls_iou = (
+            iou_full[pred_mask][:, gt_mask]
+            if iou_full.size
+            else np.zeros((cls_pred_scores.size, n_gt_cls), dtype=np.float64)
+        )
+
+        order = np.argsort(-cls_pred_scores)
+        cls_pred_scores = cls_pred_scores[order]
+        cls_iou = cls_iou[order]
+
+        gt_matched = np.zeros(n_gt_cls, dtype=bool)
+
+        for i in range(cls_pred_scores.size):
+            all_scores.append(cls_pred_scores[i])
+
+            if n_gt_cls == 0:
+                all_tp.append(0)
+                continue
+
+            row = np.where(gt_matched, -1.0, cls_iou[i])
+            best_gt = int(np.argmax(row))
+            best_iou = float(row[best_gt])
+            if best_iou >= iou_threshold:
+                gt_matched[best_gt] = True
+                all_tp.append(1)
+            else:
+                all_tp.append(0)
+
+    if n_gt == 0 or len(all_scores) == 0:
+        return np.array([]), np.array([]), np.array([])
+
+    all_scores = np.array(all_scores)
+    all_tp = np.array(all_tp)
+    order = np.argsort(-all_scores)
+    all_tp = all_tp[order]
+    all_scores = all_scores[order]
+
+    cum_tp = np.cumsum(all_tp)
+    cum_fp = np.cumsum(1 - all_tp)
+    precision = cum_tp / (cum_tp + cum_fp + 1e-16)
+    recall = cum_tp / (n_gt + 1e-16)
+
+    return precision, recall, all_scores
+
+
 def compute_precision_recall(
     predictions: List[Dict],
     ground_truths: List[Dict],
@@ -290,6 +366,13 @@ def compute_precision_recall(
 
         gt_matched = np.zeros(len(cls_gt_boxes), dtype=bool)
 
+        # Compute full IoU matrix once (vectorized via utils.metrics.compute_iou)
+        if len(cls_gt_boxes) > 0:
+            from utils.metrics import compute_iou as _compute_iou
+            iou_matrix = _compute_iou(cls_pred_boxes, cls_gt_boxes)
+        else:
+            iou_matrix = np.zeros((len(cls_pred_boxes), 0), dtype=np.float64)
+
         for i in range(len(cls_pred_boxes)):
             all_scores.append(cls_pred_scores[i])
 
@@ -297,36 +380,13 @@ def compute_precision_recall(
                 all_tp.append(0)
                 continue
 
-            # Compute IoU with all unmatched GT
-            ixmin = np.maximum(cls_pred_boxes[i, 0], cls_gt_boxes[:, 0])
-            iymin = np.maximum(cls_pred_boxes[i, 1], cls_gt_boxes[:, 1])
-            ixmax = np.minimum(cls_pred_boxes[i, 2], cls_gt_boxes[:, 2])
-            iymax = np.minimum(cls_pred_boxes[i, 3], cls_gt_boxes[:, 3])
-            iw = np.maximum(ixmax - ixmin, 0.0)
-            ih = np.maximum(iymax - iymin, 0.0)
-            intersection = iw * ih
-
-            area_pred = (
-                (cls_pred_boxes[i, 2] - cls_pred_boxes[i, 0])
-                * (cls_pred_boxes[i, 3] - cls_pred_boxes[i, 1])
-            )
-            area_gt = (
-                (cls_gt_boxes[:, 2] - cls_gt_boxes[:, 0])
-                * (cls_gt_boxes[:, 3] - cls_gt_boxes[:, 1])
-            )
-            iou = intersection / (area_pred + area_gt - intersection + 1e-16)
-
-            # Match to best unmatched GT
-            best_gt = -1
-            best_iou = iou_threshold
-            for gi in range(len(cls_gt_boxes)):
-                if gt_matched[gi]:
-                    continue
-                if iou[gi] >= best_iou:
-                    best_iou = iou[gi]
-                    best_gt = gi
-
-            if best_gt >= 0:
+            # Masked argmax: already-matched GT rows are set to -1.0 so they
+            # never win. Keep the outer for-i loop because match order depends
+            # on score descending (gt_matched mutates each iteration).
+            row = np.where(gt_matched, -1.0, iou_matrix[i])
+            best_gt = int(np.argmax(row))
+            best_iou = float(row[best_gt])
+            if best_iou >= iou_threshold:
                 gt_matched[best_gt] = True
                 all_tp.append(1)
             else:

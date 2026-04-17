@@ -153,15 +153,15 @@ def main():
     print(f"Found {len(samples)} samples")
 
     print("\n== loading two-stage YOLOX-tiny + RTMPose-S ==")
-    det = YOLOX(DET_URL, model_input_size=(416, 416), backend="onnxruntime", device="cpu")
-    pose = RTMPose(POSE_URL, model_input_size=(192, 256), backend="onnxruntime", device="cpu")
+    det = YOLOX(DET_URL, model_input_size=(416, 416), backend="onnxruntime", device="cuda")
+    pose = RTMPose(POSE_URL, model_input_size=(192, 256), backend="onnxruntime", device="cuda")
 
     def two_stage(img):
         bboxes = det(img)
         return pose(img, bboxes=bboxes)
 
     print("\n== loading one-stage RTMO-S ==")
-    rtmo = RTMO(RTMO_URL, model_input_size=(640, 640), backend="onnxruntime", device="cpu")
+    rtmo = RTMO(RTMO_URL, model_input_size=(640, 640), backend="onnxruntime", device="cuda")
 
     out = []
     print("\n--- two_stage_yoloxtiny_rtmposes ---")

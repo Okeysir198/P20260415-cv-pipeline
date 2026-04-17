@@ -61,12 +61,17 @@ def test_resolve_path():
 
 
 def test_get_device():
-    """get_device() returns torch.device; get_device('cpu') returns cpu."""
+    """get_device() returns a CUDA torch.device; CPU/MPS requests raise."""
     device = get_device()
     assert isinstance(device, torch.device), f"Expected torch.device, got {type(device)}"
+    assert device.type == "cuda", f"Expected cuda, got {device}"
 
-    cpu_device = get_device("cpu")
-    assert cpu_device.type == "cpu", f"Expected cpu, got {cpu_device}"
+    try:
+        get_device("cpu")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("get_device('cpu') should raise under GPU-only policy")
 
 
 def test_set_seed():

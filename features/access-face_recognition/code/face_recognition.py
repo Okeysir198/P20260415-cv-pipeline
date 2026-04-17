@@ -215,8 +215,11 @@ class FaceRecognitionPipeline:
 
         self._load_backend()
 
-        # Gallery: {name: mean_embedding (512,)}
+        # Gallery: {name: mean_embedding (512,)} + parallel stacked matrix
+        # for O(1)-per-query matmul instead of Python loop over entries.
         self._gallery: dict[str, np.ndarray] = {}
+        self._gallery_names: list[str] = []
+        self._gallery_matrix: np.ndarray = np.empty((0, 0), dtype=np.float32)
         if self._gallery_path.exists():
             self._load_gallery()
 
@@ -252,11 +255,27 @@ class FaceRecognitionPipeline:
     def _load_gallery(self) -> None:
         data = np.load(self._gallery_path)
         self._gallery = {k: data[k] for k in data.files}
+        self._rebuild_gallery_matrix()
         print(f"[face_recognition] Gallery loaded: {list(self._gallery.keys())} from {self._gallery_path}")
 
     def _save_gallery(self) -> None:
         self._gallery_path.parent.mkdir(parents=True, exist_ok=True)
         np.savez(str(self._gallery_path), **self._gallery)
+
+    def _rebuild_gallery_matrix(self) -> None:
+        """Stack current gallery into an (N, D) float32 matrix of unit-norm rows.
+
+        Called after any write to ``self._gallery``. Entries in the dict are
+        already L2-normalized (enforced at insert time), so we only cast dtype.
+        """
+        if not self._gallery:
+            self._gallery_names = []
+            self._gallery_matrix = np.empty((0, 0), dtype=np.float32)
+            return
+        self._gallery_names = list(self._gallery.keys())
+        self._gallery_matrix = np.stack(
+            [self._gallery[n] for n in self._gallery_names]
+        ).astype(np.float32, copy=False)
 
     # ------------------------------------------------------------------
     # Internal: detect + embed a single image
@@ -348,6 +367,7 @@ class FaceRecognitionPipeline:
         else:
             self._gallery[name] = new_mean
 
+        self._rebuild_gallery_matrix()
         self._save_gallery()
         print(f"[enroll] '{name}': {len(embeddings)} image(s) enrolled -> {self._gallery_path}")
         return len(embeddings)
@@ -402,21 +422,23 @@ class FaceRecognitionPipeline:
         return face_results
 
     def _match_gallery(self, emb: np.ndarray) -> tuple[str, float]:
-        """Return (name, similarity) for best gallery match, or (unknown, -1.0)."""
-        if not self._gallery:
+        """Return (name, similarity) for best gallery match, or (unknown, -1.0).
+
+        Uses a single ``(N, D) @ (D,)`` matmul over the stacked gallery matrix
+        instead of a per-entry Python loop. Both operands are L2-normalized,
+        so the dot product equals cosine similarity.
+        """
+        if self._gallery_matrix.shape[0] == 0:
             return self._unknown_label, -1.0
 
-        best_name = self._unknown_label
-        best_sim = -1.0
-        for name, gallery_emb in self._gallery.items():
-            sim = _cosine(emb, gallery_emb)
-            if sim > best_sim:
-                best_sim = sim
-                best_name = name
+        query = _l2_normalize(emb).astype(np.float32, copy=False)
+        sims = self._gallery_matrix @ query
+        best_idx = int(np.argmax(sims))
+        best_sim = float(sims[best_idx])
 
         if best_sim < self._threshold:
             return self._unknown_label, best_sim
-        return best_name, best_sim
+        return self._gallery_names[best_idx], best_sim
 
     def draw(self, image_bgr: np.ndarray, results: list[FaceResult]) -> np.ndarray:
         """Draw bounding boxes and labels onto a copy of image_bgr.
@@ -489,6 +511,7 @@ def _cmd_smoke_test(pipeline: FaceRecognitionPipeline, config_path: Path) -> Non
         emb_normalized = _l2_normalize(emb)
         pipeline._gallery[name] = emb_normalized
 
+    pipeline._rebuild_gallery_matrix()
     pipeline._save_gallery()
     print(f"  Enrolled: {sorted(pipeline._gallery.keys())}")
 

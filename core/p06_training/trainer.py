@@ -187,7 +187,7 @@ class DetectionTrainer:
                 pretrained_path = (self.config_path.parent / pretrained_path).resolve()
 
             if pretrained_path.exists():
-                state = torch.load(pretrained_path, map_location="cpu", weights_only=False)
+                state = torch.load(pretrained_path, map_location=self.device, weights_only=False)
                 if "model" in state:
                     state = state["model"]
                 elif "model_state_dict" in state:
@@ -1022,7 +1022,7 @@ class DetectionTrainer:
             _random.setstate(rng_states["python"])
             np.random.set_state(rng_states["numpy"])
             torch.random.set_rng_state(rng_states["torch_cpu"])
-            if torch.cuda.is_available() and "torch_cuda" in rng_states:
+            if "torch_cuda" in rng_states:
                 torch.cuda.set_rng_state_all(rng_states["torch_cuda"])
             logger.info("Restored RNG states for reproducibility.")
 

@@ -246,10 +246,11 @@ class DetectionPredictor:
         return results
 
     def predict_batch(self, images: List[np.ndarray]) -> List[Dict[str, np.ndarray]]:
-        """Run inference on a list of BGR images.
+        """Run inference on a list of BGR images with a batched forward pass.
 
-        Processes each image independently (no batched GPU forward pass)
-        to keep the implementation simple and memory-safe.
+        Preprocesses each image (letterbox/resize handles heterogeneous sizes),
+        stacks into one ``(B, C, H, W)`` tensor, runs a single model call, then
+        splits the output for per-image postprocessing.
 
         Args:
             images: List of BGR ``np.ndarray`` images.
@@ -257,7 +258,68 @@ class DetectionPredictor:
         Returns:
             List of prediction dicts (same format as :meth:`predict`).
         """
-        return [self.predict(img) for img in images]
+        if not images:
+            return []
+
+        batch, orig_shapes = self._preprocess_batch(images)
+        batch_outputs = (
+            self._infer_pytorch(batch) if self.backend == "pytorch"
+            else self._infer_onnx(batch)
+        )
+
+        if self._output_format == "classification":
+            return [self._postprocess_classification(batch_outputs[i:i + 1])
+                    for i in range(len(images))]
+
+        return [self._postprocess_single(batch_outputs[i:i + 1], orig_shapes[i])
+                for i in range(len(images))]
+
+    def _preprocess_batch(
+        self, images: List[np.ndarray]
+    ) -> tuple[np.ndarray, List[tuple[int, int]]]:
+        """Preprocess a list of images and stack into one batch tensor.
+
+        Reuses the single-image :meth:`_preprocess` (which returns
+        ``(1, C, H, W)``) and concatenates along the batch axis.
+
+        Returns:
+            ``(batch_array, orig_shapes)`` where ``batch_array`` is
+            ``(B, C, input_h, input_w)`` float32 and ``orig_shapes`` is a
+            list of per-image ``(h, w)`` tuples.
+        """
+        orig_shapes = [(img.shape[0], img.shape[1]) for img in images]
+        tensors = [self._preprocess(img) for img in images]
+        batch = np.concatenate(tensors, axis=0)
+        return batch, orig_shapes
+
+    def _postprocess_single(
+        self, outputs: np.ndarray, orig_shape: tuple[int, int]
+    ) -> Dict[str, np.ndarray]:
+        """Postprocess one image's slice of a batched output.
+
+        Mirrors the box-scaling + class-name logic from :meth:`predict` so
+        ``predict_batch`` returns dicts with identical keys and coordinate
+        frame.
+        """
+        orig_h, orig_w = orig_shape
+        results = self._postprocess(outputs)
+
+        if results["boxes"].shape[0] > 0:
+            scale_x = orig_w / self.input_w
+            scale_y = orig_h / self.input_h
+            results["boxes"][:, [0, 2]] *= scale_x
+            results["boxes"][:, [1, 3]] *= scale_y
+            results["boxes"][:, [0, 2]] = np.clip(
+                results["boxes"][:, [0, 2]], 0, orig_w
+            )
+            results["boxes"][:, [1, 3]] = np.clip(
+                results["boxes"][:, [1, 3]], 0, orig_h
+            )
+
+        results["class_names"] = [
+            self.class_names.get(int(lbl), str(int(lbl))) for lbl in results["labels"]
+        ]
+        return results
 
     def predict_file(self, image_path: Union[str, Path]) -> Dict[str, np.ndarray]:
         """Load an image from disk and run inference.
@@ -551,27 +613,13 @@ class DetectionPredictor:
         if not Path(path).exists():
             raise FileNotFoundError(f"ONNX model not found: {path}")
 
-        # Prefer GPU provider if available, fall back to CPU
-        available_providers = ort.get_available_providers()
-        providers = []
-        if "CUDAExecutionProvider" in available_providers:
-            providers.append("CUDAExecutionProvider")
-        providers.append("CPUExecutionProvider")
-
-        try:
-            session = ort.InferenceSession(path, providers=providers)
-        except Exception as e:
-            # CUDA init can fail mid-session (e.g. CUBLAS_ALLOC_FAILED on a
-            # saturated shared GPU) even when the provider is reported as
-            # "available". ORT's provider list does NOT auto-fallback in
-            # that case — the constructor raises. Retry explicitly with
-            # CPU only so the caller still gets a working session.
-            if "CUDAExecutionProvider" not in providers:
-                raise
-            logger.warning(
-                "CUDA init failed (%s); retrying ONNX session with CPU only.",
-                str(e).splitlines()[0] if str(e) else type(e).__name__,
+        # CUDA-only: fail loudly if the GPU EP isn't available. No silent
+        # CPU fallback — operators must fix the underlying GPU issue.
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            raise RuntimeError(
+                "GPU required: onnxruntime-gpu not available. "
+                "Install onnxruntime-gpu, not onnxruntime-cpu."
             )
-            session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+        session = ort.InferenceSession(path, providers=["CUDAExecutionProvider"])
         logger.info("ONNX Runtime providers: %s", session.get_providers())
         return session

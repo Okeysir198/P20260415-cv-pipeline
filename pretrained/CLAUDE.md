@@ -16,10 +16,45 @@ Pretrained model weights for all use cases. Models are organized by project (Nit
 | D-FINE-M | `dfine_m_coco.pt` | 76 MB | 80 (COCO) | Apache-2.0 | [ustc-community/dfine-medium-coco](https://huggingface.co/ustc-community/dfine-medium-coco) |
 | RT-DETR-R18 | `rtdetr_v2_r18_coco.pt` | 78 MB | 80 (COCO) | Apache-2.0 | [PekingU/rtdetr_r18vd_coco_o365](https://huggingface.co/PekingU/rtdetr_r18vd_coco_o365) |
 | RT-DETR-R50 | `rtdetr_v2_r50_coco.pt` | 165 MB | 80 (COCO) | Apache-2.0 | PekingU/rtdetr_r50vd_coco_o365 |
-| SCRFD-500M | `scrfd_500m.onnx` | 2.5 MB | face | MIT | [InsightFace](https://github.com/deepinsight/insightface) |
-| MobileFaceNet | `mobilefacenet_arcface.onnx` | 13 MB | face embedding | MIT | InsightFace |
+| SCRFD-500M | `scrfd_500m.onnx` | 2.5 MB | face | MIT | [immich-app/buffalo_s · detection/model.onnx](https://huggingface.co/immich-app/buffalo_s/resolve/main/detection/model.onnx) |
+| MobileFaceNet (ArcFace) | `mobilefacenet_arcface.onnx` | 13 MB | 512-D embed | MIT | [immich-app/buffalo_s · recognition/model.onnx](https://huggingface.co/immich-app/buffalo_s/resolve/main/recognition/model.onnx) |
 
 **COCO vehicle classes**: car (2), motorcycle (3), bus (5), truck (7) — all COCO models detect vehicles out-of-the-box.
+
+### Edge Face Recognition Stack — SCRFD-500M + MobileFaceNet
+
+Matched detector + recogniser pair from the InsightFace `buffalo_s` compact bundle (the edge/mobile variant of `buffalo_l`). Both files live at the repo root so the `core/p06_models/{scrfd,mobilefacenet}.py` default paths resolve without config changes. MIT-compatible license, production-friendly, total footprint <16 MB.
+
+**Download commands** (re-run to refresh):
+
+```bash
+# Detector (9-output SCRFD-500M, 1-anchor per position + landmarks)
+curl -L -o pretrained/scrfd_500m.onnx \
+  https://huggingface.co/immich-app/buffalo_s/resolve/main/detection/model.onnx
+
+# Recogniser (MobileFaceNet + ArcFace, WebFace600K)
+curl -L -o pretrained/mobilefacenet_arcface.onnx \
+  https://huggingface.co/immich-app/buffalo_s/resolve/main/recognition/model.onnx
+```
+
+**Specs**:
+
+| Model | Input | Output | Preprocess | Notes |
+|---|---|---|---|---|
+| SCRFD-500M | `(1, 3, H, W)` RGB | 9 tensors: score/bbox/kps × 3 strides (8/16/32) | `(pixel - 127.5) / 128.0` | Dynamic H/W; `core/p06_models/scrfd.py` resizes to 640×640 |
+| MobileFaceNet | `(1, 3, 112, 112)` RGB | `(1, 512)` embedding | `(pixel - 127.5) / 127.5` | Trained with ArcFace on WebFace600K (`w600k_mbf`) |
+
+**Benchmarks** (published InsightFace model-zoo numbers):
+- LFW: **99.7%** accuracy
+- CFP-FP: **97.0%** accuracy
+- IJB-C: **93.9%** TAR @ FAR=1e-4
+
+**Alternatives considered** (not adopted):
+- **EdgeFace-S (CVPR-W 2023)** — +1.7% IJB-C over buffalo_s, but ships PyTorch-only (no official ONNX) and is CC-BY-NC-SA-4.0 (non-commercial). Revisit only if (a) commercial use isn't required or (b) you export + re-QA the ONNX yourself.
+- **buffalo_l** — ResNet-50 recogniser, 166 MB, ~+0.5% IJB-C over buffalo_s. Fine if accuracy > size, but 13× larger footprint.
+- **YuNet + SFace** (`pretrained/access-face_recognition/`) — alternate pipeline already in use by the face-recognition benchmark; stays in place unchanged. SCRFD + MobileFaceNet is the `core/p06_models/` default that the p10 face tests exercise.
+
+**Output-format note**: The prior repo `scrfd_500m.onnx` was a non-standard 12-output export (cls + obj + bbox + kps × 3 strides, 1 anchor). `core/p06_models/scrfd.py` supports both 9- and 12-output formats (+6-output legacy), but the 9-output buffalo_s weight is the one matched to the recogniser and has the cleanest decode path.
 
 ---
 

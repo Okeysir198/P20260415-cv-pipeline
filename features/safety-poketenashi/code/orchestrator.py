@@ -22,6 +22,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+import torch
 
 REPO = Path(__file__).resolve().parents[3]
 _CODE_DIR = Path(__file__).parent
@@ -94,14 +95,27 @@ class _DWPose:
         x = (crop.astype(np.float32) - mean) / std
         x = x.transpose(2, 0, 1)[None]
         simcc_x, simcc_y = self._sess.run(None, {self._in_name: x})
-        sx = simcc_x[0].argmax(axis=-1).astype(np.float32) / 2.0
-        sy = simcc_y[0].argmax(axis=-1).astype(np.float32) / 2.0
-        scores = np.minimum(simcc_x[0].max(axis=-1), simcc_y[0].max(axis=-1))
         Minv = cv2.invertAffineTransform(M)
-        ones = np.ones((sx.shape[0], 1), dtype=np.float32)
-        pts_in = np.concatenate([sx[:, None], sy[:, None], ones], axis=1)
-        pts_orig = pts_in @ Minv.T
-        return pts_orig.astype(np.float32), scores.astype(np.float32)
+
+        # SimCC decode + affine un-warp on GPU (falls back to CPU cleanly).
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        tx = torch.from_numpy(simcc_x[0]).to(device)
+        ty = torch.from_numpy(simcc_y[0]).to(device)
+
+        max_x = torch.max(tx, dim=-1)
+        max_y = torch.max(ty, dim=-1)
+        sx = max_x.indices.to(torch.float32) / 2.0
+        sy = max_y.indices.to(torch.float32) / 2.0
+        scores_t = torch.minimum(max_x.values, max_y.values)
+
+        ones = torch.ones_like(sx)
+        pts_in = torch.stack([sx, sy, ones], dim=1)  # (K, 3)
+        Minv_t = torch.from_numpy(Minv).to(device=device, dtype=torch.float32)
+        pts_orig_t = pts_in @ Minv_t.T  # (K, 2)
+
+        pts_orig = pts_orig_t.cpu().numpy().astype(np.float32)
+        scores = scores_t.cpu().numpy().astype(np.float32)
+        return pts_orig, scores
 
 
 # ---------------------------------------------------------------------------
@@ -146,13 +160,9 @@ class PoketanashiOrchestrator:
                 print(f"[poketenashi] DWPose ONNX loaded: {_DWPOSE_ONNX.name}")
                 return model, "dwpose"
             except Exception as exc:
-                print(f"[poketenashi] DWPose load failed ({exc}), falling back to YOLOv8n-pose")
+                print(f"[poketenashi] DWPose load failed ({exc}), falling back to whole-frame mode")
 
-        from ultralytics import YOLO
-
-        model = YOLO("yolov8n-pose.pt")
-        print("[poketenashi] YOLOv8n-pose loaded (fallback)")
-        return model, "yolo"
+        return None, "none"
 
     # ------------------------------------------------------------------
     # Rule construction from config
@@ -222,7 +232,8 @@ class PoketanashiOrchestrator:
         if not hasattr(self, "_person_detector"):
             try:
                 from ultralytics import YOLO
-                self._person_detector = YOLO("yolov8n.pt")
+                _pt = Path(__file__).resolve().parents[3] / "pretrained" / "access-zone_intrusion" / "yolo11n.pt"
+                self._person_detector = YOLO(str(_pt))
             except Exception:
                 self._person_detector = None
 

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from matplotlib.path import Path as _MplPath
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
@@ -96,16 +97,27 @@ class ZoneIntrusionDetector:
             xyxy = boxes.xyxy.cpu().numpy()
             scores = boxes.conf.cpu().numpy()
 
-            for box, score in zip(xyxy, scores):
-                in_zone, zone_id = self._check_zones(box, w, h)
+            # Vectorized point-in-polygon: (N, Z) inclusion matrix.
+            centroids = np.stack(
+                [(xyxy[:, 0] + xyxy[:, 2]) * 0.5, (xyxy[:, 1] + xyxy[:, 3]) * 0.5],
+                axis=1,
+            )
+            inclusion = self._zones_contain(centroids, w, h)  # (N, Z) bool
+
+            for i, (box, score) in enumerate(zip(xyxy, scores)):
+                hits = inclusion[i]
+                if hits.any():
+                    zone_idx = int(np.argmax(hits))  # first matching zone
+                    in_zone, zone_id = True, self._zones[zone_idx]["id"]
+                    alert_zones.add(zone_id)
+                else:
+                    in_zone, zone_id = False, ""
                 detections.append(PersonDetection(
                     box_xyxy=box.astype(np.float32),
                     score=float(score),
                     in_zone=in_zone,
                     zone_id=zone_id,
                 ))
-                if in_zone:
-                    alert_zones.add(zone_id)
 
         return ZoneResult(
             intruding=bool(alert_zones),
@@ -149,20 +161,26 @@ class ZoneIntrusionDetector:
     # Internal helpers
     # ---------------------------------------------------------------------- #
 
-    def _check_zones(
-        self, box_xyxy: np.ndarray, w: int, h: int
-    ) -> tuple[bool, str]:
-        """Return (in_zone, zone_id) for the first zone that contains centroid."""
-        cx = float((box_xyxy[0] + box_xyxy[2]) / 2)
-        cy = float((box_xyxy[1] + box_xyxy[3]) / 2)
+    def _zones_contain(
+        self, points: np.ndarray, w: int, h: int
+    ) -> np.ndarray:
+        """Vectorized point-in-polygon over all zones.
 
-        for zone in self._zones:
+        Args:
+            points: (N, 2) float array of (x, y) pixel coords.
+            w, h: frame dimensions for normalized-polygon scaling.
+
+        Returns:
+            (N, Z) bool array; cell (i, j) True iff point i lies in zone j.
+        """
+        if points.size == 0 or not self._zones:
+            return np.zeros((len(points), len(self._zones)), dtype=bool)
+
+        out = np.zeros((len(points), len(self._zones)), dtype=bool)
+        for j, zone in enumerate(self._zones):
             poly_px = _poly_to_pixel(zone["polygon"], w, h)
-            hit = cv2.pointPolygonTest(poly_px.astype(np.int32), (cx, cy), False) >= 0
-            if hit:
-                return True, zone["id"]
-
-        return False, ""
+            out[:, j] = _MplPath(poly_px).contains_points(points)
+        return out
 
 
 # --------------------------------------------------------------------------- #

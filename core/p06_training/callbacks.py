@@ -258,9 +258,8 @@ class CheckpointSaver(Callback):
             "python": _random.getstate(),
             "numpy": _np.random.get_state(),
             "torch_cpu": torch.random.get_rng_state(),
+            "torch_cuda": torch.cuda.get_rng_state_all(),
         }
-        if torch.cuda.is_available():
-            checkpoint["rng_states"]["torch_cuda"] = torch.cuda.get_rng_state_all()
 
         # Callback states for correct resume behavior
         callback_runner = getattr(trainer, "callback_runner", None)

@@ -201,7 +201,7 @@ def build_timm_model(config: dict) -> TimmModel:
             config_dir = Path(config.get("_config_path", ".")).parent
             weights_path = (config_dir / weights_path).resolve()
         if weights_path.exists():
-            state = torch.load(weights_path, map_location="cpu", weights_only=False)
+            state = torch.load(weights_path, map_location="cuda", weights_only=False)
             if "model" in state:
                 state = state["model"]
             elif "model_state_dict" in state:

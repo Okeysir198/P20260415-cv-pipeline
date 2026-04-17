@@ -19,7 +19,11 @@ from core.p06_training.postprocess import postprocess as _dispatch_postprocess
 from utils.config import resolve_path
 from utils.device import get_device
 from utils.metrics import compute_iou
-from core.p08_evaluation.sv_metrics import compute_map, compute_precision_recall
+from core.p08_evaluation.sv_metrics import (
+    _compute_precision_recall_from_iou,
+    compute_map,
+    compute_precision_recall,
+)
 from utils.progress import ProgressBar
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, IMG_EXTENSIONS
 from core.p05_data.classification_dataset import (
@@ -185,12 +189,18 @@ class ModelEvaluator:
                     logits = self.model(images)  # (B, C)
                     probs = torch.softmax(logits, dim=-1)
 
-                    for i in range(logits.shape[0]):
-                        pred_class = probs[i].argmax().item()
+                    pred_classes = probs.argmax(dim=1)  # (B,)
+                    confidences = probs.gather(
+                        1, pred_classes.unsqueeze(1)
+                    ).squeeze(1)  # (B,)
+                    logits_np = logits.cpu().numpy()
+                    pred_classes_np = pred_classes.cpu().numpy()
+                    confidences_np = confidences.cpu().numpy()
+                    for i in range(len(logits_np)):
                         all_predictions.append({
-                            "logits": logits[i].cpu().numpy(),
-                            "class_id": pred_class,
-                            "confidence": probs[i, pred_class].item(),
+                            "logits": logits_np[i],
+                            "class_id": int(pred_classes_np[i]),
+                            "confidence": float(confidences_np[i]),
                         })
                         all_ground_truths.append({
                             "label": targets[i].item(),
@@ -405,14 +415,18 @@ class ModelEvaluator:
         intersection = np.zeros(self.num_classes)
         union = np.zeros(self.num_classes)
 
-        for pred, gt in zip(predictions, ground_truths):
-            pred_map = pred["class_map"]
-            gt_mask = gt["mask"]
+        if predictions:
+            pred_maps = np.stack(
+                [p["class_map"] for p in predictions], axis=0
+            )
+            gt_masks = np.stack(
+                [g["mask"] for g in ground_truths], axis=0
+            )
             for c in range(self.num_classes):
-                p = pred_map == c
-                g = gt_mask == c
-                intersection[c] += np.logical_and(p, g).sum()
-                union[c] += np.logical_or(p, g).sum()
+                p = pred_maps == c
+                g = gt_masks == c
+                intersection[c] = np.logical_and(p, g).sum()
+                union[c] = np.logical_or(p, g).sum()
 
         iou = np.where(union > 0, intersection / (union + 1e-10), 0.0)
         per_class: Dict = {}
@@ -462,10 +476,24 @@ class ModelEvaluator:
         """Compute per-class AP and PR curves from pre-computed predictions."""
         result: Dict = {}
 
+        # Pre-compute full per-image IoU matrices once; the per-class PR helper
+        # slices class rows/cols instead of recomputing IoU per class.
+        iou_matrices: List[np.ndarray] = []
+        for pred, gt in zip(predictions, ground_truths):
+            pred_boxes = np.asarray(pred["boxes"], dtype=np.float64).reshape(-1, 4)
+            gt_boxes = np.asarray(gt["boxes"], dtype=np.float64).reshape(-1, 4)
+            if pred_boxes.shape[0] == 0 or gt_boxes.shape[0] == 0:
+                iou_matrices.append(
+                    np.zeros((pred_boxes.shape[0], gt_boxes.shape[0]), dtype=np.float64)
+                )
+            else:
+                iou_matrices.append(compute_iou(pred_boxes, gt_boxes))
+
         for cls_id in range(self.num_classes):
             cls_name = self.class_names.get(cls_id, f"class_{cls_id}")
-            prec, rec, thresholds = compute_precision_recall(
-                predictions, ground_truths, cls_id, self.iou_threshold
+            prec, rec, thresholds = _compute_precision_recall_from_iou(
+                predictions, ground_truths, iou_matrices,
+                cls_id, self.iou_threshold,
             )
 
             if prec.size == 0:

@@ -3,6 +3,17 @@
 Given detection results from any upstream detector, crops the relevant
 regions, detects faces, extracts embeddings, and matches against an
 enrolled gallery to identify the person.
+
+Batching strategy
+-----------------
+SCRFD's current Python wrapper (``core.p06_models.scrfd``) accepts a
+single bbox per call and crops internally — so face *detection* stays in
+a per-detection loop. Embedding extraction and gallery matching, however,
+are batched: after looping over detections we stack the best face box and
+landmarks for each violator, call
+``FaceEmbedder.extract_embedding_batch(...)`` once, then
+``FaceGallery.match_batch(...)`` once. Large reduction in ONNX session
+overhead and CUDA round-trips when there are several violators per frame.
 """
 
 import logging
@@ -84,6 +95,13 @@ class FacePredictor:
 
         h, w = image.shape[:2]
 
+        # Pass 1 — per-detection face detection. Collect inputs for the
+        # batched embedding step; also record which detection each entry
+        # maps back to so we can scatter results in pass 3.
+        embed_indices: List[int] = []  # det index per face
+        embed_boxes: List[np.ndarray] = []
+        embed_landmarks: List[Optional[np.ndarray]] = []
+
         for i in range(n_dets):
             if int(labels[i]) not in self.violation_class_ids:
                 continue
@@ -91,7 +109,8 @@ class FacePredictor:
             # Expand bbox to capture full head region
             expanded = self._expand_bbox(boxes[i], self.expand_ratio, w, h)
 
-            # Detect faces within the expanded region
+            # SCRFD takes one bbox per call (does its own crop internally),
+            # so detection itself is not batched here.
             face_result = self.face_detector.detect_faces(image, expanded)
             if len(face_result["face_boxes"]) == 0:
                 identities[i] = "unknown"
@@ -107,22 +126,53 @@ class FacePredictor:
             best_landmarks = face_result["landmarks"][best_face_idx]
             face_boxes[i] = best_face_box
 
-            # Check if landmarks are valid (non-zero)
-            lm = best_landmarks if np.any(best_landmarks) else None
-
-            # Extract embedding and match
-            embedding = self.face_embedder.extract_embedding(
-                image, best_face_box, lm
+            embed_indices.append(i)
+            embed_boxes.append(best_face_box)
+            embed_landmarks.append(
+                best_landmarks if np.any(best_landmarks) else None
             )
-            identity, score = self.gallery.match(embedding)
-            identities[i] = identity
-            identity_scores[i] = score
+
+        # Pass 2 — batched embedding + gallery match.
+        if embed_indices:
+            face_boxes_arr = np.stack(embed_boxes, axis=0).astype(np.float32)
+            embeddings = self._extract_embeddings_batched(
+                image, face_boxes_arr, embed_landmarks
+            )
+            matches = self.gallery.match_batch(embeddings)
+            for det_idx, (identity, score) in zip(embed_indices, matches):
+                identities[det_idx] = identity
+                identity_scores[det_idx] = score
 
         return {
             "identities": identities,
             "identity_scores": identity_scores,
             "face_boxes": face_boxes,
         }
+
+    def _extract_embeddings_batched(
+        self,
+        image: np.ndarray,
+        face_boxes: np.ndarray,
+        landmarks_list: List[Optional[np.ndarray]],
+    ) -> np.ndarray:
+        """Extract embeddings for *N* faces, preferring a batched API.
+
+        Falls back to a per-face loop if the embedder does not expose
+        ``extract_embedding_batch``.
+
+        Returns:
+            ``(N, D)`` float32 L2-normalized embedding matrix.
+        """
+        batch_fn = getattr(self.face_embedder, "extract_embedding_batch", None)
+        if callable(batch_fn):
+            return batch_fn(image, face_boxes, landmarks_list)
+
+        # Fallback: one call per face
+        embeddings = [
+            self.face_embedder.extract_embedding(image, face_boxes[j], lm)
+            for j, lm in enumerate(landmarks_list)
+        ]
+        return np.stack(embeddings, axis=0).astype(np.float32)
 
     @staticmethod
     def _expand_bbox(

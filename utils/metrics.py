@@ -9,6 +9,7 @@ moved to utils/sv_metrics.py which uses the supervision library.
 
 import numpy as np
 import torch
+from torchvision.ops import box_iou, nms
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +74,7 @@ def xyxy_to_xywh(boxes: np.ndarray) -> np.ndarray:
 
 
 def compute_iou(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
-    """Compute IoU between two sets of boxes.
+    """Compute IoU between two sets of boxes (GPU-accelerated via torchvision).
 
     Args:
         boxes1: Array of shape (N, 4) in [x1, y1, x2, y2] format.
@@ -82,8 +83,8 @@ def compute_iou(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     Returns:
         IoU matrix of shape (N, M).
     """
-    boxes1 = np.asarray(boxes1, dtype=np.float64)
-    boxes2 = np.asarray(boxes2, dtype=np.float64)
+    boxes1 = np.asarray(boxes1, dtype=np.float32)
+    boxes2 = np.asarray(boxes2, dtype=np.float32)
 
     if boxes1.ndim == 1:
         boxes1 = boxes1[np.newaxis, :]
@@ -93,23 +94,9 @@ def compute_iou(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     if boxes1.shape[0] == 0 or boxes2.shape[0] == 0:
         return np.zeros((boxes1.shape[0], boxes2.shape[0]), dtype=np.float64)
 
-    # Intersection coordinates
-    x1 = np.maximum(boxes1[:, 0][:, np.newaxis], boxes2[:, 0][np.newaxis, :])
-    y1 = np.maximum(boxes1[:, 1][:, np.newaxis], boxes2[:, 1][np.newaxis, :])
-    x2 = np.minimum(boxes1[:, 2][:, np.newaxis], boxes2[:, 2][np.newaxis, :])
-    y2 = np.minimum(boxes1[:, 3][:, np.newaxis], boxes2[:, 3][np.newaxis, :])
-
-    intersection = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
-
-    # Areas
-    area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])
-    area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])
-
-    union = area1[:, np.newaxis] + area2[np.newaxis, :] - intersection
-
-    # Avoid division by zero
-    iou = np.where(union > 0, intersection / union, 0.0)
-    return iou
+    t1 = torch.from_numpy(boxes1).cuda()
+    t2 = torch.from_numpy(boxes2).cuda()
+    return box_iou(t1, t2).cpu().numpy()
 
 
 # ---------------------------------------------------------------------------
@@ -118,10 +105,7 @@ def compute_iou(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
 
 
 def nms_numpy(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndarray:
-    """Non-maximum suppression in pure NumPy.
-
-    Greedy NMS that iteratively selects the highest-scoring box and
-    removes overlapping boxes exceeding the IoU threshold.
+    """NumPy-in/out NMS wrapper; runs on GPU under the hood via torchvision.ops.nms.
 
     Args:
         boxes: (N, 4) array of [x1, y1, x2, y2].
@@ -134,37 +118,9 @@ def nms_numpy(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np
     if len(boxes) == 0:
         return np.array([], dtype=np.int64)
 
-    x1 = boxes[:, 0]
-    y1 = boxes[:, 1]
-    x2 = boxes[:, 2]
-    y2 = boxes[:, 3]
-
-    areas = (x2 - x1) * (y2 - y1)
-    order = scores.argsort()[::-1]
-
-    keep: list[int] = []
-    while order.size > 0:
-        i = order[0]
-        keep.append(int(i))
-
-        if order.size == 1:
-            break
-
-        xx1 = np.maximum(x1[i], x1[order[1:]])
-        yy1 = np.maximum(y1[i], y1[order[1:]])
-        xx2 = np.minimum(x2[i], x2[order[1:]])
-        yy2 = np.minimum(y2[i], y2[order[1:]])
-
-        w = np.maximum(0.0, xx2 - xx1)
-        h = np.maximum(0.0, yy2 - yy1)
-        inter = w * h
-
-        iou = inter / (areas[i] + areas[order[1:]] - inter + 1e-16)
-
-        remaining = np.where(iou <= iou_threshold)[0]
-        order = order[remaining + 1]
-
-    return np.array(keep, dtype=np.int64)
+    t_boxes = torch.as_tensor(boxes, dtype=torch.float32, device="cuda")
+    t_scores = torch.as_tensor(scores, dtype=torch.float32, device="cuda")
+    return nms(t_boxes, t_scores, iou_threshold).cpu().numpy().astype(np.int64)
 
 
 def nms_torch(boxes: "torch.Tensor", scores: "torch.Tensor",
