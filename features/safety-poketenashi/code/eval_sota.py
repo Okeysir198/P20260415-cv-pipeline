@@ -221,7 +221,10 @@ def main() -> None:
     samples = samples[:10]
 
     # Detector + 17-kpt baseline (one model).
-    yolo_pose = YOLO(str(ROOT / "ai/pretrained/nitto_denko/pose_estimation/yolov8n-pose.pt"))
+    _pose_pt = ROOT / "ai/pretrained/nitto_denko/pose_estimation/yolov8n-pose.pt"
+    if not _pose_pt.exists():
+        raise FileNotFoundError(f"yolov8n-pose weights not found: {_pose_pt}")
+    yolo_pose = YOLO(str(_pose_pt))
     dwpose = DWPose(PRETRAIN / "dw-ll_ucoco_384.onnx")
 
     out_baseline = PRED / "yolov8n-pose_body17"

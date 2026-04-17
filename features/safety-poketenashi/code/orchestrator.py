@@ -204,7 +204,7 @@ class PoketanashiOrchestrator:
         """Return list of (keypoints_17, scores_17, box_xyxy) per detected person."""
         persons = []
 
-        if self._pose_backend == "dwpose":
+        if self._pose_backend == "dwpose" and self._pose_model is not None:
             # Need person boxes first — use a lightweight YOLO detector or whole-frame fallback.
             boxes = self._detect_persons(image_bgr)
             for box in boxes:
@@ -213,16 +213,6 @@ class PoketanashiOrchestrator:
                 kpts17 = kpts[_WB_BODY]
                 sc17 = scores[_WB_BODY]
                 persons.append((kpts17, sc17, box))
-        else:
-            # YOLOv8n-pose returns all persons in one call.
-            results = self._pose_model.predict(image_bgr, conf=0.35, verbose=False)[0]
-            if results.keypoints is None or len(results.keypoints) == 0:
-                return []
-            kps_xy = results.keypoints.xy.cpu().numpy()  # (N, 17, 2)
-            kps_conf = results.keypoints.conf.cpu().numpy()  # (N, 17)
-            boxes = results.boxes.xyxy.cpu().numpy()  # (N, 4)
-            for i in range(len(kps_xy)):
-                persons.append((kps_xy[i], kps_conf[i], boxes[i]))
 
         return persons
 
@@ -233,7 +223,10 @@ class PoketanashiOrchestrator:
             try:
                 from ultralytics import YOLO
                 _pt = Path(__file__).resolve().parents[3] / "pretrained" / "access-zone_intrusion" / "yolo11n.pt"
-                self._person_detector = YOLO(str(_pt))
+                if _pt.exists():
+                    self._person_detector = YOLO(str(_pt))
+                else:
+                    self._person_detector = None
             except Exception:
                 self._person_detector = None
 

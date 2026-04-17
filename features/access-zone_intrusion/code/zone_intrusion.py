@@ -62,6 +62,8 @@ class ZoneIntrusionDetector:
 
         weights_raw = cfg["model"]["weights"]
         weights_path = (config_dir / weights_raw).resolve()
+        if not weights_path.exists():
+            raise FileNotFoundError(f"Model weights not found: {weights_path}")
         self._model = YOLO(str(weights_path))
 
         self._conf: float = cfg["model"].get("conf", 0.35)
