@@ -1,31 +1,20 @@
-# Default face recognition config for violation identification.
-#
-# Usage:
-#   from utils.config import load_config
-#   config = load_config("configs/face/default.yaml")
+# Face recognition pipeline config
+pipeline: insightface  # "insightface" or "opencv_dnn"
 
-face_detector:
-  arch: scrfd-500m
-  model_path: pretrained/scrfd_500m.onnx
-  input_size: [640, 640]
-  conf_threshold: 0.5
-  nms_threshold: 0.4
+insightface:
+  model_pack: "../../../pretrained/access-face_recognition/buffalo_l.zip"
+  det_size: [640, 640]
+  det_thresh: 0.5
 
-face_embedder:
-  arch: mobilefacenet
-  model_path: pretrained/mobilefacenet_arcface.onnx
-  input_size: [112, 112]
-  embedding_dim: 512
+opencv_dnn:  # Apache-2.0 fallback
+  detector: "../../../pretrained/access-face_recognition/yunet_2023mar_int8.onnx"
+  recognizer: "../../../pretrained/access-face_recognition/sface_2021dec_int8.onnx"
 
-gallery:
-  path: data/face_gallery/default.npz
-  similarity_threshold: 0.4
+gallery_path: "../eval/gallery.npz"
+similarity_threshold: 0.5
+unknown_label: "unknown"
 
-inference:
-  # Class IDs from the violation detector that trigger face recognition.
-  # Example for helmet model: 2 = head_without_helmet
-  violation_class_ids: [2]
-  # Expand violation bbox by this ratio to capture full head for face detection.
-  expand_ratio: 1.5
-  # Minimum face detection confidence to accept.
-  face_conf_threshold: 0.5
+anti_spoof:
+  enabled: false
+  model: "../../../pretrained/access-face_recognition/anti_spoof_2_7_80x80_MiniFASNetV2.pth"
+  threshold: 0.6

@@ -46,6 +46,8 @@ bash scripts/new_feature.sh my_new_feature
 uv run tests/run_all.py              # Full pipeline (sequential, stops on failure)
 uv run -m pytest tests/ -v           # Via pytest
 uv run tests/test_p06_training.py    # Single test file
+# Benchmark pretrained models against val split (outputs eval/benchmark_results.json)
+uv run features/<feature>/code/benchmark.py --split val
 ```
 
 ## Architecture
@@ -64,7 +66,9 @@ core/
   p08_evaluation/      Metrics (mAP, mIoU, accuracy) + error analysis
   p09_export/          ONNX export + INT8 quantization
   p10_inference/       PyTorch + ONNX inference, pose, face, tracking
-features/              Self-contained per-use-case folders (see features/README.md)
+features/              Self-contained per-use-case folders (see features/README.md + features/CLAUDE.md)
+                       Each feature has its own CLAUDE.md with checklist, benchmark results,
+                       and training config template.
   <category-name>/     Names follow a `<category>-<name>` convention matching
                        docs/03_platform/: access-, ppe-, safety-, traffic-
                        (e.g. safety-fire_detection, safety-fall-detection,

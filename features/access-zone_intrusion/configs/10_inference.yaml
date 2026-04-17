@@ -2,14 +2,20 @@
 # Uses a generic person-detector (pretrained or any detector) + polygon zones.
 
 model:
-  weights: ../../../pretrained/yolox_m.pth    # base person detector
-  conf: 0.3
+  weights: ../../../pretrained/access-zone_intrusion/yolo11m.pt
+  conf: 0.35
   iou: 0.45
 
 # Zone-intrusion specifics (consumed by app_demo.tabs.tab_zone)
 zone:
   person_class_id: 0
-  default_zones: []       # list of [[x,y], ...] polygons
+  # Named zones with normalized [0,1] polygon coordinates.
+  # Each zone triggers an alert when a person centroid falls inside it.
+  zones:
+    - id: zone_right_half
+      polygon: [[0.5, 0.0], [1.0, 0.0], [1.0, 1.0], [0.5, 1.0]]
+    - id: zone_full
+      polygon: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
 
 alerts:
   confidence_thresholds: {}

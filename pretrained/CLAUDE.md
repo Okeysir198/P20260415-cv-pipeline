@@ -163,34 +163,41 @@ No open-source pretrained model exists for safety shoes detection/classification
 
 ## Quick Reference: Best Model Per Use Case
 
-### For Training (PyTorch, fine-tunable)
+> Updated 2026-04-17 based on val-split benchmark results. See each feature's `CLAUDE.md` for full tables.
 
-| Use Case | Best Pretrained Base | Config `model.arch` | Size |
-|----------|---------------------|---------------------|------|
-| Fire Detection | `yolox_m.pth` (COCO) or `pretrained/nitto_denko/fire_detection/yolov10_fire_smoke/best.pt` | `yolox-m` | 194 MB / 62 MB |
-| Helmet/PPE | `yolox_m.pth` (COCO) or `pretrained/nitto_denko/helmet_detection/yolov8_ppe_detection/best.pt` | `yolox-m` | 194 MB / 6 MB |
-| Safety Shoes | `yolox_nano.pth` (COCO pretrained — no domain-specific base exists; fine-tune required) | `yolox-nano` | 7.4 MB |
-| Fall Detection | `yolox_s.pth` or `dfine_s_coco.pt` — fine-tune required; `nitto_denko/fall_detection/best.pt` is a benchmark reference only | `yolox-s` | 69 MB |
-| Phone Detection | `yolox_s.pth` or `dfine_s_coco.pt` — fine-tune required; `nitto_denko/phone_detection/` models are benchmark references only | `yolox-s` | 69 MB |
-| Pose Estimation | `yolox_nano.pth` + RTMPose (Apache-2.0 pipeline) | `yolox-nano` + pose | 7.4 MB |
-| Face Detection | `pretrained/nitto_denko/face_recognition/yolov11n_face/model.pt` | — | 5.3 MB |
-| Vehicle Detection | `yolox_s.pth` (COCO) or `../smart_parking/pretrained/highway_vehicle_detection/weights/best.pt` | `yolox-s` | 69 MB / 50 MB |
-| License Plate | `../smart_parking/pretrained/license_plate_yolov11/...-v1s.pt` (already trained) | — | 19 MB |
-| Vehicle Type | `../smart_parking/pretrained/vehicle_classification/model.safetensors` (already trained) | — | 328 MB |
-| Parking Occupancy | `nvidia/segformer-b0-finetuned-ade-512-512` (auto-download) | `hf-segformer` | 15 MB |
+### For Fine-Tuning (start from these weights)
 
-### For Direct Inference (no training needed)
+| Use Case | Best Pretrained Start | Path | val mAP50 |
+|---|---|---|---|
+| Fire Detection | SalahALHaismawi_yolov26-fire-detection | `pretrained/safety-fire_detection/SalahALHaismawi_yolov26-fire-detection/best.pt` | 0.153 |
+| Helmet/PPE | melihuzunoglu_yolov11_ppe | `pretrained/ppe-helmet_detection/melihuzunoglu_yolov11_ppe.pt` | 0.105 |
+| Fall Detection | yolov11_fall_melihuzunoglu | `pretrained/safety-fall-detection/yolov11_fall_melihuzunoglu.pt` | 0.050 |
+| Safety Shoes | COCO YOLOX-S (no foot detector exists) | `pretrained/yolox_s.pth` | 0.000 |
+| Phone Usage | COCO YOLOX-S (action class, no pretrained) | `pretrained/yolox_s.pth` | 0.000 |
+| Pose Estimation | DWPose ONNX (interim; RTMPose fine-tune pending) | `pretrained/safety-poketenashi/dwpose_384_pose.onnx` | det=1.0 |
 
-| Use Case | Model | Confidence |
-|----------|-------|------------|
-| License Plate Detection | `../smart_parking/pretrained/license_plate_yolov11/...-v1s.pt` | 0.38–0.77 |
-| Vehicle Type Classification | `../smart_parking/pretrained/vehicle_classification/model.safetensors` | 0.87–0.96 |
-| Fall Detection | `pretrained/nitto_denko/fall_detection/best.pt` | 0.86 |
-| Pose Estimation | `pretrained/nitto_denko/pose_estimation/yolov8n-pose.pt` | 7/7 images |
-| Phone Detection | `pretrained/nitto_denko/phone_detection/yolov8n-mobile-phone.pt` | 0.98 |
-| Helmet Detection | `pretrained/nitto_denko/helmet_detection/best.pt` | 0.29–0.73 |
-| Vehicle Detection (COCO) | `yolox_m.pth` or any COCO model | bus 0.85, car 0.73 |
-| Face Detection | `scrfd_500m.onnx` or `pretrained/nitto_denko/face_recognition/yolov11n_face/model.pt` | Works |
+### For Direct Inference (pretrained-only, no training needed)
+
+| Use Case | Model | Path | Metric |
+|---|---|---|---|
+| Zone Intrusion | yolox_tiny | `pretrained/yolox_tiny.pth` | acc=1.0, 6.9ms |
+| Zone Intrusion (edge) | yolov10n | `pretrained/access-zone_intrusion/yolov10n.pt` | acc=0.875, 4.6ms |
+| Face Detection | yunet_2023mar | `pretrained/access-face_recognition/yunet_2023mar.onnx` | det_rate=0.933, 2.1ms |
+| Face Recognition | yunet + sface_fp32 | `pretrained/access-face_recognition/{yunet_2023mar,sface_2021dec}.onnx` | rank-1=1.0 |
+| Pose (poketenashi) | dwpose_384_pose | `pretrained/safety-poketenashi/dwpose_384_pose.onnx` | det=1.0, 13ms |
+| Helmet (ONNX serving) | HudatersU_safety_helmet | `pretrained/ppe-helmet_detection/HudatersU_safety_helmet.onnx` | mAP50=0.124 |
+
+### COCO Backbone Pool (for custom fine-tuning)
+
+| Model | File | Size | License |
+|---|---|---|---|
+| YOLOX-S | `yolox_s.pth` | 69 MB | Apache-2.0 |
+| YOLOX-M | `yolox_m.pth` | 194 MB | Apache-2.0 |
+| YOLOX-Tiny | `yolox_tiny.pth` | 39 MB | Apache-2.0 |
+| YOLOX-Nano | `yolox_nano.pth` | 7.4 MB | Apache-2.0 |
+| D-FINE-S | `dfine_s_coco.pt` | 40 MB | Apache-2.0 |
+| D-FINE-M | `dfine_m_coco.pt` | 76 MB | Apache-2.0 |
+| RT-DETR-R18 | `rtdetr_v2_r18_coco.pt` | 78 MB | Apache-2.0 |
 
 ---
 
