@@ -1,0 +1,67 @@
+# Optuna HPO config — YOLOX architectures (lean)
+# Searches: lr, weight_decay, optimizer, warmup, loss weights only.
+# Augmentation fixed to arch defaults — not worth tuning on subset.
+# Scheduler fixed to cosine — almost always wins for detection.
+
+study:
+  name: "hpo_{dataset_name}_yolox"
+  direction: "maximize"
+  n_trials: 15
+  timeout: null
+  sampler: "tpe"
+  seed: 42
+
+pruning:
+  type: "median"
+  n_startup_trials: 3
+  n_warmup_epochs: 5
+  interval_epochs: 1
+
+trial:
+  epochs: 15
+  patience: 10
+  disable_wandb: true
+  save_checkpoints: false
+
+search_space:
+  training:
+    lr:
+      type: log_float
+      low: 1.0e-4
+      high: 0.1
+    weight_decay:
+      type: log_float
+      low: 1.0e-5
+      high: 1.0e-2
+    optimizer:
+      type: categorical
+      choices: [sgd, adamw]
+    momentum:
+      type: float
+      low: 0.8
+      high: 0.99
+      condition:
+        param: training.optimizer
+        value: sgd
+    warmup_epochs:
+      type: int
+      low: 1
+      high: 10
+
+  loss:
+    iou_variant:
+      type: categorical
+      choices: [giou, ciou, diou]
+    cls_weight:
+      type: float
+      low: 0.5
+      high: 2.0
+    obj_weight:
+      type: float
+      low: 0.5
+      high: 2.0
+
+output:
+  save_best_config: true
+  save_plots: true
+  save_study_json: true

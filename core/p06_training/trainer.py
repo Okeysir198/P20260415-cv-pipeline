@@ -325,16 +325,8 @@ class DetectionTrainer:
         """
         return build_scheduler(self.optimizer, self.config)
 
-    def _build_dataloaders(self) -> Tuple[DataLoader, Optional[DataLoader]]:
-        """Build training and validation data loaders from config.
-
-        Dispatches to the appropriate dataset builder based on the model's
-        output_format: classification models use ClassificationDataset,
-        detection models use YOLOXDataset.
-
-        Returns:
-            Tuple of (train_loader, val_loader). val_loader may be None.
-        """
+    def _get_data_components(self):
+        """Return (data_config, base_dir, build_fn) shared by all dataloader builders."""
         dataset_config_path = self._data_cfg.get("dataset_config")
         if dataset_config_path:
             if not Path(dataset_config_path).is_absolute():
@@ -346,10 +338,7 @@ class DetectionTrainer:
             data_config = self._data_cfg
 
         base_dir = str(self.config_path.parent)
-
-        # Dispatch dataloader builder by model output_format
-        base_model = self._base_model
-        output_format = getattr(base_model, "output_format", "yolox")
+        output_format = getattr(self._base_model, "output_format", "yolox")
 
         if output_format == "classification":
             from core.p05_data.classification_dataset import build_classification_dataloader
@@ -360,15 +349,46 @@ class DetectionTrainer:
         else:
             build_fn = _build_detection_dataloader
 
+        return data_config, base_dir, build_fn
+
+    def _build_dataloaders(self) -> Tuple[DataLoader, Optional[DataLoader]]:
+        """Build training and validation data loaders from config.
+
+        When ``training.val_full_interval > 0``, the quick val loader uses
+        ``training.val_subset_fraction`` (default 0.2) so per-epoch validation
+        is fast. A separate full val loader (no subset) is built in ``train()``
+        for periodic full evaluation.
+
+        Returns:
+            Tuple of (train_loader, val_loader). val_loader may be None.
+        """
+        import copy
+        data_config, base_dir, build_fn = self._get_data_components()
+
         train_loader = build_fn(
             data_config, split="train", training_config=self.config, base_dir=base_dir
         )
-        val_loader = build_fn(
-            data_config, split="val", training_config=self.config, base_dir=base_dir
-        )
+
+        # Quick val: apply val_subset_fraction when val_full_interval is active
+        val_full_interval = self._train_cfg.get("val_full_interval", 0)
+        val_subset_fraction = self._train_cfg.get("val_subset_fraction", 0.2)
+        if val_full_interval > 0 and val_subset_fraction is not None:
+            quick_config = copy.deepcopy(self.config)
+            quick_config.setdefault("data", {}).setdefault("subset", {})["val"] = val_subset_fraction
+            val_loader = build_fn(data_config, split="val", training_config=quick_config, base_dir=base_dir)
+        else:
+            val_loader = build_fn(data_config, split="val", training_config=self.config, base_dir=base_dir)
 
         self._loaded_data_cfg = data_config
         return train_loader, val_loader
+
+    def _build_full_val_loader(self) -> Optional[Any]:
+        """Build val loader on the full val set (no subset) for periodic full evaluation."""
+        import copy
+        data_config, base_dir, build_fn = self._get_data_components()
+        full_config = copy.deepcopy(self.config)
+        full_config.setdefault("data", {}).setdefault("subset", {})["val"] = None
+        return build_fn(data_config, split="val", training_config=full_config, base_dir=base_dir)
 
     def _build_callbacks(self) -> CallbackRunner:
         """Build training callbacks from config.
@@ -618,6 +638,10 @@ class DetectionTrainer:
         final_metrics: Dict[str, float] = {}
         epoch = self._start_epoch - 1  # in case total_epochs == 0
 
+        # Build full val loader once if val_full_interval is configured
+        val_full_interval = self._train_cfg.get("val_full_interval", 0)
+        self._full_val_loader = self._build_full_val_loader() if val_full_interval > 0 else None
+
         with TrainingProgress(
             total_epochs=total_epochs,
             batches_per_epoch=len(self.train_loader) if self.train_loader else 0,
@@ -630,16 +654,33 @@ class DetectionTrainer:
                 train_metrics = self._train_one_epoch(epoch, progress, grad_clip, use_amp)
 
                 # Validate (use EMA model if available)
+                # val_full_interval > 0: quick val (subset) every epoch for logging,
+                # full val every N epochs for checkpoint/early-stop/scheduler.
                 val_metrics = {}
+                is_full_val_epoch = val_full_interval > 0 and (epoch + 1) % val_full_interval == 0
                 if self.val_loader is not None:
-                    if self.ema is not None:
-                        # Swap model for validation
-                        orig_model = self.model
-                        self.model = self.ema.ema_model
-                        val_metrics = self._validate()
-                        self.model = orig_model
+                    def _run_validate(loader=None):
+                        if self.ema is not None:
+                            orig_model = self.model
+                            self.model = self.ema.ema_model
+                            m = self._validate(loader)
+                            self.model = orig_model
+                            return m
+                        return self._validate(loader)
+
+                    if val_full_interval > 0:
+                        # Quick val every epoch (logged but not used for checkpoint/ES)
+                        quick_metrics = _run_validate()
+                        logger.debug("Quick val: %s", quick_metrics)
+                        if is_full_val_epoch:
+                            # Full val every N epochs — drives checkpoint/ES/scheduler
+                            val_metrics = _run_validate(self._full_val_loader)
+                            logger.info("Full val (epoch %d): %s", epoch + 1, val_metrics)
+                        else:
+                            # Non-full-val epoch: use quick metrics for logging only
+                            val_metrics = quick_metrics
                     else:
-                        val_metrics = self._validate()
+                        val_metrics = _run_validate()
 
                 # Full evaluation (periodic, optional)
                 full_eval_interval = self._train_cfg.get("full_eval_interval", 0)
@@ -830,7 +871,7 @@ class DetectionTrainer:
         return epoch_metrics
 
     @torch.no_grad()
-    def _validate(self) -> Dict[str, float]:
+    def _validate(self, loader: Optional[Any] = None) -> Dict[str, float]:
         """Run validation and compute task-appropriate metrics.
 
         Dispatches metrics computation based on the model's ``output_format``:
@@ -847,7 +888,8 @@ class DetectionTrainer:
         """
         self.model.eval()
 
-        if self.val_loader is None:
+        active_loader = loader if loader is not None else self.val_loader
+        if active_loader is None:
             return {}
 
         base_model = self._base_model
@@ -868,7 +910,7 @@ class DetectionTrainer:
         use_amp = self._train_cfg.get("amp", True) and self.device.type == "cuda"
         input_h, input_w = self._model_cfg["input_size"]
 
-        for batch in self.val_loader:
+        for batch in active_loader:
             images = batch["images"].to(self.device, non_blocking=True)
             targets = [t.to(self.device, non_blocking=True) for t in batch["targets"]]
             # Scale normalised targets to pixel coordinates (detection only)

@@ -83,7 +83,10 @@ training:
     text_scale: 0.4
     dpi: 120
 
+  val_full_interval: 5        # 0 = full val every epoch; N = full val every N epochs
+  val_subset_fraction: 0.2   # fraction of val set for quick per-epoch val
   amp: false  # RT-DETRv2 decoder overflows in fp16 — keep fp32
+  gpu_augment: true
   grad_clip: 0.1
   ema: false
 

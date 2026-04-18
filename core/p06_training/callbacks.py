@@ -698,7 +698,10 @@ class DatasetStatsLogger(Callback):
         class_names = {int(k): str(v) for k, v in self.data_config.get("names", {}).items()}
         out_dir = self.save_dir / "data_preview"
         try:
-            from core.p05_data.run_viz import generate_dataset_stats
+            from core.p05_data.run_viz import generate_dataset_stats, _load_cached_stats
+            if _load_cached_stats(out_dir):
+                logger.info("DatasetStatsLogger: cache hit — skipping recompute (%s)", out_dir)
+                return
             generate_dataset_stats(self.data_config, self.base_dir, class_names, self.splits, out_dir, self.dpi)
             stats_path = out_dir / "dataset_stats.png"
             wb_cb = next((c for c in trainer.callback_runner.callbacks if isinstance(c, WandBLogger)), None)
@@ -832,11 +835,13 @@ class AugLabelGridLogger(Callback):
         std = np.array(self.data_config.get("std", [0.229, 0.224, 0.225]), dtype=np.float32).reshape(1, 1, 3)
         input_size = tuple(trainer._model_cfg["input_size"])
 
-        # Two passes: simple (no mosaic/mixup) and mosaic (full augmentation)
+        # Two passes: simple (no mosaic/mixup) and mosaic (full augmentation).
+        # Skip mosaic pass if mosaic is disabled in config — avoids slow CPU mosaic for DETR-family.
         aug_variants = [
             ("simple", {**self.aug_config, "mosaic": False, "mixup": False, "copypaste": False}),
-            ("mosaic",  self.aug_config),
         ]
+        if self.aug_config.get("mosaic", False):
+            aug_variants.append(("mosaic", self.aug_config))
 
         for split in self.splits:
             if split != "train":

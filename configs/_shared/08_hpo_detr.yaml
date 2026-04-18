@@ -1,0 +1,44 @@
+# Optuna HPO config — DETR-family architectures (D-FINE, RT-DETRv2) (lean)
+# Searches: lr, weight_decay, warmup only.
+# Optimizer fixed to adamw, scheduler fixed to cosine, augmentation fixed to arch defaults.
+# Loss weights not tunable — HF built-in loss.
+
+study:
+  name: "hpo_{dataset_name}_detr"
+  direction: "maximize"
+  n_trials: 15
+  timeout: null
+  sampler: "tpe"
+  seed: 42
+
+pruning:
+  type: "median"
+  n_startup_trials: 3
+  n_warmup_epochs: 5
+  interval_epochs: 1
+
+trial:
+  epochs: 15
+  patience: 10
+  disable_wandb: true
+  save_checkpoints: false
+
+search_space:
+  training:
+    lr:
+      type: log_float
+      low: 1.0e-5
+      high: 5.0e-4
+    weight_decay:
+      type: log_float
+      low: 1.0e-5
+      high: 1.0e-2
+    warmup_epochs:
+      type: int
+      low: 3
+      high: 15
+
+output:
+  save_best_config: true
+  save_plots: true
+  save_study_json: true

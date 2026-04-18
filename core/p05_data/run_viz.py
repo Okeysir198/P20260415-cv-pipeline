@@ -500,6 +500,11 @@ def generate_dataset_stats(
     logger.info("Saved: %s", out_path)
 
 
+def _load_cached_stats(out_dir: Path) -> bool:
+    """Return True if dataset_stats.json + .png already exist — skip recompute."""
+    return (out_dir / "dataset_stats.json").exists() and (out_dir / "dataset_stats.png").exists()
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

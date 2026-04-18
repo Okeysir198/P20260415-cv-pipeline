@@ -157,7 +157,7 @@ def generate_run_dir(
     Returns:
         Path to the new run directory (not yet created).
     """
-    leaf = f"{datetime.now().strftime('%Y-%m-%d_%H%M')}_{step}"
+    leaf = f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_{step}"
 
     if base_dir is not None:
         return Path(base_dir) / use_case / leaf

@@ -22,7 +22,7 @@ model:
 data:
   dataset_config: 05_data.yaml
   batch_size: 16
-  num_workers: 4
+  num_workers: 8
   pin_memory: true
   subset:                  # Limit each split independently (null = use all data)
     train: null            # int (N images), float (fraction 0.0–1.0), or null
@@ -83,6 +83,8 @@ training:
     text_scale: 0.4
     dpi: 120
 
+  val_full_interval: 5        # 0 = full val every epoch; N = full val every N epochs
+  val_subset_fraction: 0.2   # fraction of val set for quick per-epoch val
   amp: true
   grad_clip: 35.0
   ema: true
