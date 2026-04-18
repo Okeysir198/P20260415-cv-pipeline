@@ -30,14 +30,15 @@ data:
     test: null
 
 augmentation:
-  mosaic: true
-  mixup: false          # disabled for baseline run; enable after first stable mAP
+  mosaic: true          # YOLOX-specific; keep true for scale/context diversity
+  mixup: false
+  contrast: 0.4         # GPU luma-contrast; fire/smoke are inherently low-contrast
   hsv_h: 0.015
   hsv_s: 0.5
   hsv_v: 0.4
   fliplr: 0.5
   flipud: 0.0
-  scale: [0.5, 1.5]
+  scale: [0.8, 1.2]
   degrees: 10.0
   translate: 0.1
   shear: 2.0

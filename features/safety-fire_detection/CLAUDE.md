@@ -26,9 +26,9 @@ Detects fire and smoke in images/video. Both classes are absent from COCO — pr
 - [x] `p00_data_prep` — 17,373 imgs, DATASET_REPORT
 - [x] `p02_annotation_qa` — LS project 13
 - [x] `code/benchmark.py` — pretrained benchmark complete
-- [x] `06_training.yaml` — gpu_augment enabled; data_viz/aug_viz callbacks wired; subset config added
-- [x] Arch comparison configs — `06_training_dfine.yaml`, `06_training_rtdetr.yaml`, `06_training_yolox.yaml` created for arch selection
-- [ ] `p06_training` — freeze backbone 5 epochs, then full fine-tune
+- [x] Arch comparison configs — `06_training_dfine.yaml`, `06_training_rtdetr.yaml`, `06_training_yolox.yaml` created and tested
+- [x] Arch comparison complete — **RT-DETRv2-R18 wins** (mAP50=0.541 @ ep15, 10% data); proceed with `06_training_rtdetr.yaml`
+- [ ] `p06_training` — full training: `06_training_rtdetr.yaml`, bs=32, 150 epochs, 100% dataset
 - [ ] `p08_evaluation` — evaluate on test split
 - [ ] `p09_export` — ONNX export
 - [ ] `release/` — `utils/release.py`
@@ -94,57 +94,38 @@ Mosaic stays CPU. GPU path: batched `affine_grid+grid_sample`, vectorized HSV, r
 ## Training Commands
 
 ```bash
-# Train with default config
-uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml
-
-# Arch comparison (run each, pick best mAP50, then full train)
-uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
-uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml
+# Full training — RT-DETRv2 (winner, bs=32, 150 epochs)
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_rtdetr.yaml
+
+# Other arch configs (arch comparison complete — kept for reference)
+uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml
+uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
 ```
 
 ## Key Files
 
 ```
-configs/00_data_preparation.yaml  — data sources + class map
-configs/05_data.yaml              — dataset paths + class names
-configs/06_training.yaml          — (to create) training config
-code/benchmark.py                 — pretrained benchmark
-eval/benchmark_results.json       — benchmark output
-eval/benchmark_report.md          — benchmark summary
+configs/00_data_preparation.yaml   — data sources + class map
+configs/05_data.yaml               — dataset paths + class names
+configs/06_training_rtdetr.yaml    — RT-DETRv2-R18 (winner — use for full training)
+configs/06_training_dfine.yaml     — D-FINE-S (reference)
+configs/06_training_yolox.yaml     — YOLOX-M (reference)
+code/benchmark.py                  — pretrained benchmark
+eval/benchmark_results.json        — benchmark output
+eval/benchmark_report.md           — benchmark summary
 ```
 
-## Training Config Template
+## Arch Comparison Results (2026-04-18, 10% data, 15 epochs)
 
-```yaml
-# features/safety-fire_detection/configs/06_training.yaml
-model:
-  arch: yolox-s          # start with s; upgrade to m if mAP plateaus
-  num_classes: 2
-  pretrained: ../../../pretrained/yolox_m.pth   # SalahALHaismawi is Ultralytics DetectionModel (YOLO v2.6) — incompatible with custom YOLOX; use COCO yolox_m.pth backbone
+| Arch | best val/mAP50 | train/loss drop | Notes |
+|---|---|---|---|
+| **RT-DETRv2-R18** | **0.541** (ep 15, still rising) | 32.5 → 11.7 (-64%) | Winner |
+| D-FINE-S | 0.190 (ep 9, plateau) | 32.5 → 18.3 (-44%) | — |
+| YOLOX-M | 0.113 (ep 73, early stop) | — | Previous run |
 
-training:
-  epochs: 100
-  freeze_backbone_epochs: 5
-  lr: 0.001
-  lr_backbone: 0.0001
-  gpu_augment: true
+Max safe batch size on RTX 5090 (28 GB free, fp32): **bs=32** (14.7 GB peak). bs=48 fits but leaves only 0.3 GB headroom.
 
-augmentation:
-  mosaic: true
-  contrast: 0.4          # vectorized luma-contrast on GPU (fire/smoke are low-contrast)
-  hsv_h: 0.015
-  hsv_s: 0.5
-  hsv_v: 0.4
-  fliplr: 0.5
-  scale: [0.5, 1.5]
-  degrees: 10.0
-  translate: 0.1
-  shear: 2.0
+## Gotchas
 
-data:
-  batch_size: 16
-  num_workers: 8
-  prefetch_factor: 4     # Mosaic does 4 disk reads/sample — deep prefetch critical
-  pin_memory: true
-```
+- **D-FINE/RT-DETR require `amp: false`** — HF DETR decoder overflows in fp16, producing NaN `pred_boxes` that crash `generalized_box_iou` on first forward pass. Both configs already set this.
+- **`ValPredictionLogger` class names** — reads `trainer._loaded_data_cfg` (the resolved `05_data.yaml`). Using `trainer._data_cfg` (the `data:` section of the training YAML) returns no `names` key and labels show as IDs only. Fixed in `callbacks.py`.

@@ -505,11 +505,11 @@ class WandBLogger(Callback):
 
 
 class ValPredictionLogger(Callback):
-    """Save a grid of val predictions each epoch.
+    """Save a grid of predictions each epoch for a given split (val or train).
 
     GT boxes: solid purple (thickness=2) drawn first.
-    Pred boxes: solid supervision palette colors (thickness=1) drawn on top.
-    Saved to ``<save_dir>/val_predictions/epoch_<N>.png``.
+    Pred boxes: solid green (thickness=1) drawn on top.
+    Saved to ``<save_dir>/{split}_predictions/epoch_<N>.png``.
     """
 
     _DEFAULT_GT_COLOR = sv.Color(r=160, g=32, b=240)   # purple
@@ -518,8 +518,9 @@ class ValPredictionLogger(Callback):
     def __init__(
         self,
         save_dir: str,
+        split: str = "val",
         num_samples: int = 12,
-        conf_threshold: float = 0.25,
+        conf_threshold: float = 0.05,
         grid_cols: int = 2,
         gt_thickness: int = 2,
         pred_thickness: int = 1,
@@ -529,6 +530,7 @@ class ValPredictionLogger(Callback):
         dpi: int = 150,
     ) -> None:
         self.save_dir = Path(save_dir)
+        self.split = split
         self.num_samples = num_samples
         self.conf_threshold = conf_threshold
         self.grid_cols = grid_cols
@@ -548,12 +550,15 @@ class ValPredictionLogger(Callback):
             return dataset.dataset, lambda i: indices[i]
         return dataset, lambda i: i
 
+    def _get_loader(self, trainer: Any):
+        return trainer.train_loader if self.split == "train" else trainer.val_loader
+
     def on_train_start(self, trainer: Any) -> None:
-        dataset = trainer.val_loader.dataset
+        dataset = self._get_loader(trainer).dataset
         n = len(dataset)
         k = min(self.num_samples, n)
         self._sample_indices = sorted(random.sample(range(n), k))
-        logger.info("ValPredictionLogger: sampled %d images for visualization", k)
+        logger.info("ValPredictionLogger(%s): sampled %d images for visualization", self.split, k)
 
     def on_epoch_end(
         self, trainer: Any, epoch: int, metrics: Dict[str, float]
@@ -561,14 +566,13 @@ class ValPredictionLogger(Callback):
         if self._sample_indices is None:
             return
 
-        raw_dataset, idx_map = self._unwrap_subset(trainer.val_loader.dataset)
+        raw_dataset, idx_map = self._unwrap_subset(self._get_loader(trainer).dataset)
         model = trainer.model
         device = trainer.device
         model.eval()
         input_h, input_w = trainer._model_cfg["input_size"]
-        class_names = {
-            int(k): str(v) for k, v in trainer._data_cfg.get("names", {}).items()
-        }
+        loaded_cfg = getattr(trainer, "_loaded_data_cfg", trainer._data_cfg)
+        class_names = {int(k): str(v) for k, v in loaded_cfg.get("names", {}).items()}
 
         # --- Phase 1: load images + prepare input tensors (CPU) ---
         samples = []  # (subset_idx, orig_bgr, input_tensor_chw_float)
@@ -651,12 +655,12 @@ class ValPredictionLogger(Callback):
         fig.suptitle(f"Epoch {epoch + 1} — mAP50: {map_val:.4f}", fontsize=14)
         fig.tight_layout()
 
-        out_dir = self.save_dir / "val_predictions"
+        out_dir = self.save_dir / f"{self.split}_predictions"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"epoch_{epoch + 1:03d}.png"
         fig.savefig(str(out_path), dpi=self.dpi, bbox_inches="tight")
         plt.close(fig)
-        logger.info("Saved val prediction grid: %s", out_path)
+        logger.info("Saved %s prediction grid: %s", self.split, out_path)
 
         # Log to wandb if available
         cb_runner = getattr(trainer, "callback_runner", None)
@@ -664,7 +668,7 @@ class ValPredictionLogger(Callback):
             wb_cb = cb_runner.get_callback(WandBLogger)
             if wb_cb is not None and wb_cb._enabled:
                 wb_cb._wandb.log(
-                    {"val/predictions": wandb.Image(str(out_path))},
+                    {f"{self.split}/predictions": wandb.Image(str(out_path))},
                     step=epoch + 1,
                 )
 

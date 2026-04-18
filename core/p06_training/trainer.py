@@ -438,23 +438,25 @@ class DetectionTrainer:
                 )
             )
 
-        # Val prediction visualization
-        val_viz_cfg = self._train_cfg.get("val_viz", {})
-        if val_viz_cfg.get("enabled", False):
-            callbacks.append(
-                ValPredictionLogger(
-                    save_dir=save_dir,
-                    num_samples=val_viz_cfg.get("num_samples", 12),
-                    conf_threshold=val_viz_cfg.get("conf_threshold", 0.25),
-                    grid_cols=val_viz_cfg.get("grid_cols", 2),
-                    gt_thickness=val_viz_cfg.get("gt_thickness", 2),
-                    pred_thickness=val_viz_cfg.get("pred_thickness", 1),
-                    gt_color_rgb=tuple(val_viz_cfg.get("gt_color_rgb", [160, 32, 240])),
-                    pred_color_rgb=tuple(val_viz_cfg.get("pred_color_rgb", [0, 200, 0])),
-                    text_scale=val_viz_cfg.get("text_scale", 0.4),
-                    dpi=val_viz_cfg.get("dpi", 150),
+        # Prediction visualization (val and optionally train)
+        for split, cfg_key in (("val", "val_viz"), ("train", "train_viz")):
+            viz_cfg = self._train_cfg.get(cfg_key, {})
+            if viz_cfg.get("enabled", False):
+                callbacks.append(
+                    ValPredictionLogger(
+                        save_dir=save_dir,
+                        split=split,
+                        num_samples=viz_cfg.get("num_samples", 8),
+                        conf_threshold=viz_cfg.get("conf_threshold", 0.05),
+                        grid_cols=viz_cfg.get("grid_cols", 2),
+                        gt_thickness=viz_cfg.get("gt_thickness", 2),
+                        pred_thickness=viz_cfg.get("pred_thickness", 1),
+                        gt_color_rgb=tuple(viz_cfg.get("gt_color_rgb", [160, 32, 240])),
+                        pred_color_rgb=tuple(viz_cfg.get("pred_color_rgb", [0, 200, 0])),
+                        text_scale=viz_cfg.get("text_scale", 0.4),
+                        dpi=viz_cfg.get("dpi", 150),
+                    )
                 )
-            )
 
         # Data label visualization (raw images + GT, once at train start)
         data_viz_cfg = self._train_cfg.get("data_viz", {})
@@ -706,6 +708,8 @@ class DetectionTrainer:
             Dictionary of training metrics for this epoch:
                 {"train/loss", "train/cls_loss", "train/obj_loss", "train/reg_loss"}.
         """
+        import math as _math
+
         self.model.train()
         if hasattr(self.loss_fn, 'set_epoch'):
             self.loss_fn.set_epoch(epoch)
@@ -753,7 +757,13 @@ class DetectionTrainer:
 
             is_accum_step = (batch_idx + 1) % grad_accum_steps == 0
 
-            if use_amp and self.scaler is not None:
+            loss_val = loss.item()
+            if not _math.isfinite(loss_val):
+                # Skip backward entirely — NaN gradients would corrupt weights even if
+                # the optimizer step is later skipped by GradScaler
+                logger.debug("Skipping batch %d: loss=%s", batch_idx, loss_val)
+                self.optimizer.zero_grad()
+            elif use_amp and self.scaler is not None:
                 self.scaler.scale(loss).backward()
                 if is_accum_step:
                     if grad_clip > 0:
@@ -770,17 +780,15 @@ class DetectionTrainer:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
 
-            # EMA update (only on optimizer step)
-            if is_accum_step and self.ema is not None:
+            # EMA update (only on finite optimizer step)
+            if is_accum_step and _math.isfinite(loss_val) and self.ema is not None:
                 self.ema.update(base_model)
 
             # Accumulate metrics — skip NaN/inf batches so epoch average remains meaningful
-            loss_val = loss.item()
             cls_val = loss_dict.get("cls_loss", _LOSS_ZERO).item()
             obj_val = loss_dict.get("obj_loss", _LOSS_ZERO).item()
             reg_val = loss_dict.get("reg_loss", _LOSS_ZERO).item()
 
-            import math as _math
             if _math.isfinite(loss_val):
                 running_loss += loss_val
                 running_cls += cls_val if _math.isfinite(cls_val) else 0.0

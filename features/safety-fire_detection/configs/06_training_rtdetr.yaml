@@ -22,7 +22,8 @@ model:
 data:
   dataset_config: 05_data.yaml
   batch_size: 8
-  num_workers: 4
+  num_workers: 8
+  prefetch_factor: 4
   pin_memory: true
   subset:                  # Limit each split independently (null = use all data)
     train: null            # int (N images), float (fraction 0.0–1.0), or null
@@ -30,8 +31,9 @@ data:
     test: null
 
 augmentation:
-  mosaic: false
+  mosaic: false         # not supported for DETR-family models
   mixup: false
+  contrast: 0.4         # GPU luma-contrast; fire/smoke are inherently low-contrast
   hsv_h: 0.015
   hsv_s: 0.5
   hsv_v: 0.4
@@ -53,8 +55,15 @@ training:
   patience: 30
   val_viz:
     enabled: true
-    num_samples: 10
-    conf_threshold: 0.25
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 2
+
+  train_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 2
 
   data_viz:                # Raw images + GT label grid (once before training)
     enabled: true
@@ -74,7 +83,7 @@ training:
     text_scale: 0.4
     dpi: 120
 
-  amp: true
+  amp: false  # RT-DETRv2 decoder overflows in fp16 — keep fp32
   grad_clip: 0.1
   ema: false
 

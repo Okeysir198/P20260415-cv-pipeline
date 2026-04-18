@@ -13,7 +13,7 @@
 
 | Folder | Type | Mode | Best Pretrained | Pretrained mAP50 | Status |
 |---|---|---|---|---|---|
-| `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | 🔄 in progress |
+| `safety-fire_detection` | Detection | 🎯 Fine-tune | RT-DETRv2-R18 (fine-tuned) | 0.541 (10% data) | 🔄 arch selected, full train pending |
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi` | Orchestrator | 🔧 Pretrained only | dwpose_384_pose (det_rate=1.0) | — | 🔄 pipelines done |
@@ -94,6 +94,21 @@ Do not start until all Phase 1 individual models are stable and mAP baselines ar
 ---
 
 ## Iteration Log
+
+### Iteration 5 — 2026-04-18
+
+Arch comparison for `safety-fire_detection` on 10% data (1,737 imgs), 15 epochs. RT-DETRv2-R18 wins decisively.
+
+| Arch | best val/mAP50 | Notes |
+|---|---|---|
+| **RT-DETRv2-R18** | **0.541** (ep 15, still rising) | Winner — use `06_training_rtdetr.yaml` |
+| D-FINE-S | 0.190 (ep 9, plateau) | `amp: false` required (fp16 NaN crash) |
+| YOLOX-M | 0.113 (ep 73, early stop) | Previous run |
+
+Max safe batch size on RTX 5090 (28 GB free, fp32): **bs=32** (14.7 GB peak).
+Next: full training — `06_training_rtdetr.yaml`, bs=32, 150 epochs, 100% dataset.
+
+---
 
 ### Iteration 4 — 2026-04-17
 
