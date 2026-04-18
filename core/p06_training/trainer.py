@@ -28,9 +28,13 @@ from utils.device import get_device, set_seed
 from utils.progress import TrainingProgress
 
 from core.p06_training.callbacks import (
+    AugLabelGridLogger,
     CallbackRunner,
     CheckpointSaver,
+    DataLabelGridLogger,
+    DatasetStatsLogger,
     EarlyStopping,
+    ValPredictionLogger,
     WandBLogger,
 )
 from core.p06_training.losses import build_loss
@@ -39,6 +43,7 @@ from core.p06_training.lr_scheduler import build_scheduler
 from core.p06_training.postprocess import postprocess as _postprocess_registry
 from core.p06_models import build_model
 from core.p05_data.detection_dataset import build_dataloader as _build_detection_dataloader
+from core.p05_data.transforms import build_gpu_transforms
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +157,7 @@ class DetectionTrainer:
         self.scaler: Optional[torch.amp.GradScaler] = None
         self.train_loader: Optional[DataLoader] = None
         self.val_loader: Optional[DataLoader] = None
+        self.gpu_transform: Optional[Any] = None
         self.loss_fn: Optional[nn.Module] = None
         self.callback_runner: Optional[CallbackRunner] = None
         self.ema: Optional[ModelEMA] = None
@@ -361,6 +367,7 @@ class DetectionTrainer:
             data_config, split="val", training_config=self.config, base_dir=base_dir
         )
 
+        self._loaded_data_cfg = data_config
         return train_loader, val_loader
 
     def _build_callbacks(self) -> CallbackRunner:
@@ -394,6 +401,19 @@ class DetectionTrainer:
             )
         )
 
+        # Dataset statistics — always generated, not conditional on data_viz config
+        data_splits = self._train_cfg.get("data_viz", {}).get("splits", ["train", "val", "test"])
+        loaded_data_cfg = getattr(self, "_loaded_data_cfg", self._data_cfg)
+        callbacks.append(
+            DatasetStatsLogger(
+                save_dir=save_dir,
+                data_config=loaded_data_cfg,
+                base_dir=str(self.config_path.parent),
+                splits=data_splits,
+                dpi=self._train_cfg.get("data_viz", {}).get("dpi", 120),
+            )
+        )
+
         # Early stopping
         patience = self._train_cfg.get("patience", 0)
         if patience > 0:
@@ -415,6 +435,59 @@ class DetectionTrainer:
                     run_name=self._log_cfg.get("run_name"),
                     config=self.config,
                     log_interval=self._log_cfg.get("log_interval", 0),
+                )
+            )
+
+        # Val prediction visualization
+        val_viz_cfg = self._train_cfg.get("val_viz", {})
+        if val_viz_cfg.get("enabled", False):
+            callbacks.append(
+                ValPredictionLogger(
+                    save_dir=save_dir,
+                    num_samples=val_viz_cfg.get("num_samples", 12),
+                    conf_threshold=val_viz_cfg.get("conf_threshold", 0.25),
+                    grid_cols=val_viz_cfg.get("grid_cols", 2),
+                    gt_thickness=val_viz_cfg.get("gt_thickness", 2),
+                    pred_thickness=val_viz_cfg.get("pred_thickness", 1),
+                    gt_color_rgb=tuple(val_viz_cfg.get("gt_color_rgb", [160, 32, 240])),
+                    pred_color_rgb=tuple(val_viz_cfg.get("pred_color_rgb", [0, 200, 0])),
+                    text_scale=val_viz_cfg.get("text_scale", 0.4),
+                    dpi=val_viz_cfg.get("dpi", 150),
+                )
+            )
+
+        # Data label visualization (raw images + GT, once at train start)
+        data_viz_cfg = self._train_cfg.get("data_viz", {})
+        if data_viz_cfg.get("enabled", False):
+            callbacks.append(
+                DataLabelGridLogger(
+                    save_dir=save_dir,
+                    splits=data_viz_cfg.get("splits", ["train"]),
+                    data_config=loaded_data_cfg,
+                    base_dir=str(self.config_path.parent),
+                    num_samples=data_viz_cfg.get("num_samples", 16),
+                    grid_cols=data_viz_cfg.get("grid_cols", 4),
+                    thickness=data_viz_cfg.get("thickness", 2),
+                    text_scale=data_viz_cfg.get("text_scale", 0.4),
+                    dpi=data_viz_cfg.get("dpi", 120),
+                )
+            )
+
+        # Augmentation label visualization (once at train start)
+        aug_viz_cfg = self._train_cfg.get("aug_viz", {})
+        if aug_viz_cfg.get("enabled", False):
+            callbacks.append(
+                AugLabelGridLogger(
+                    save_dir=save_dir,
+                    splits=aug_viz_cfg.get("splits", ["train"]),
+                    data_config=loaded_data_cfg,
+                    aug_config=self.config.get("augmentation", {}),
+                    base_dir=str(self.config_path.parent),
+                    num_samples=aug_viz_cfg.get("num_samples", 16),
+                    grid_cols=aug_viz_cfg.get("grid_cols", 4),
+                    thickness=aug_viz_cfg.get("thickness", 2),
+                    text_scale=aug_viz_cfg.get("text_scale", 0.4),
+                    dpi=aug_viz_cfg.get("dpi", 120),
                 )
             )
 
@@ -492,6 +565,10 @@ class DetectionTrainer:
         self.optimizer = self._build_optimizer()
         self.scheduler = self._build_scheduler()
         self.loss_fn = self._build_loss()
+
+        # Data loaders must come before callbacks so _loaded_data_cfg is available
+        self.train_loader, self.val_loader = self._build_dataloaders()
+
         self.callback_runner = self._build_callbacks()
 
         # EMA
@@ -510,8 +587,25 @@ class DetectionTrainer:
         else:
             self.scaler = None
 
-        # Data loaders
-        self.train_loader, self.val_loader = self._build_dataloaders()
+        # GPU augmentation (stateless transforms: RandomAffine, ColorJitter, Flips, Normalize)
+        if self._train_cfg.get("gpu_augment", False):
+            base_model = self._base_model
+            output_format = getattr(base_model, "output_format", "yolox")
+            if output_format not in ("classification", "segmentation"):
+                data_cfg = getattr(self, "_loaded_data_cfg", self._data_cfg)
+                input_size = tuple(data_cfg.get("input_size", self._model_cfg["input_size"]))
+                self.gpu_transform = build_gpu_transforms(
+                    config=self.config.get("augmentation", {}),
+                    input_size=input_size,
+                    mean=data_cfg.get("mean"),
+                    std=data_cfg.get("std"),
+                )
+                logger.info(
+                    "GPU augmentation enabled: RandomAffine, ColorJitter, Flips on %s. "
+                    "Label correctness guaranteed by TVTensor dispatch (same affine matrix "
+                    "applied to image and boxes, then ClampBoundingBoxes + SanitizeBoundingBoxes).",
+                    self.device,
+                )
 
         total_epochs = self._train_cfg["epochs"]
         grad_clip = self._train_cfg.get("grad_clip", 35.0)
@@ -639,11 +733,15 @@ class DetectionTrainer:
         for batch_idx, batch in enumerate(self.train_loader):
             images = batch["images"].to(self.device, non_blocking=True)
             targets = [t.to(self.device, non_blocking=True) for t in batch["targets"]]
-            # Scale normalised targets to pixel coordinates (detection only)
-            if output_format not in ("classification", "segmentation"):
-                targets = self._scale_targets_to_pixels(targets, input_h, input_w)
 
             with torch.amp.autocast(device_type=amp_device_type, enabled=use_amp):
+                if self.gpu_transform is not None:
+                    images, targets = self.gpu_transform(images, targets)
+
+                # Scale normalised targets to pixel coordinates (detection only)
+                if output_format not in ("classification", "segmentation"):
+                    targets = self._scale_targets_to_pixels(targets, input_h, input_w)
+
                 if hasattr(base_model, 'forward_with_loss'):
                     loss, loss_dict, predictions = base_model.forward_with_loss(images, targets)
                 else:
@@ -676,17 +774,19 @@ class DetectionTrainer:
             if is_accum_step and self.ema is not None:
                 self.ema.update(base_model)
 
-            # Accumulate metrics
+            # Accumulate metrics — skip NaN/inf batches so epoch average remains meaningful
             loss_val = loss.item()
             cls_val = loss_dict.get("cls_loss", _LOSS_ZERO).item()
             obj_val = loss_dict.get("obj_loss", _LOSS_ZERO).item()
             reg_val = loss_dict.get("reg_loss", _LOSS_ZERO).item()
 
-            running_loss += loss_val
-            running_cls += cls_val
-            running_obj += obj_val
-            running_reg += reg_val
-            num_batches += 1
+            import math as _math
+            if _math.isfinite(loss_val):
+                running_loss += loss_val
+                running_cls += cls_val if _math.isfinite(cls_val) else 0.0
+                running_obj += obj_val if _math.isfinite(obj_val) else 0.0
+                running_reg += reg_val if _math.isfinite(reg_val) else 0.0
+                num_batches += 1
 
             # Progress + callback — flexible batch metrics
             batch_metrics = {

@@ -9,17 +9,70 @@ Provides:
 """
 
 import logging
+import math
+import random
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import cv2
+import numpy as np
+import supervision as sv
 import torch
 import torch.nn as nn
 import wandb
 
+from core.p10_inference.supervision_bridge import annotate_gt_pred
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 logger = logging.getLogger(__name__)
+
+_LABEL_PALETTE = [
+    (0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255),
+    (255, 0, 255), (255, 255, 0), (0, 128, 255), (128, 0, 255),
+    (0, 255, 128), (255, 128, 0), (64, 0, 255), (255, 64, 0),
+    (0, 255, 64), (64, 255, 0), (255, 0, 64), (0, 64, 255),
+    (128, 128, 0), (0, 128, 128), (128, 0, 128), (64, 64, 0),
+]
+
+
+def _draw_gt_boxes(image: np.ndarray, targets: np.ndarray, class_names: dict, thickness: int = 2, text_scale: float = 0.5) -> np.ndarray:
+    """Draw normalized CXCYWH GT boxes on image. Returns annotated copy."""
+    vis = image.copy()
+    h, w = vis.shape[:2]
+    for row in targets:
+        cls_id = int(row[0])
+        cx, cy, bw, bh = row[1], row[2], row[3], row[4]
+        x1, y1 = int((cx - bw/2)*w), int((cy - bh/2)*h)
+        x2, y2 = int((cx + bw/2)*w), int((cy + bh/2)*h)
+        color = _LABEL_PALETTE[cls_id % len(_LABEL_PALETTE)]
+        cv2.rectangle(vis, (x1, y1), (x2, y2), color, thickness)
+        label = class_names.get(cls_id, str(cls_id))
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 1)
+        cv2.rectangle(vis, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
+        cv2.putText(vis, label, (x1+2, y1-4), cv2.FONT_HERSHEY_SIMPLEX, text_scale, (255,255,255), 1)
+    return vis
+
+
+def _save_image_grid(annotated: List[np.ndarray], grid_cols: int, title: str, out_path: Path, dpi: int) -> None:
+    """Tile a list of BGR images into a grid and save as PNG."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    ncols = min(grid_cols, len(annotated))
+    nrows = math.ceil(len(annotated) / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 4, nrows * 3.5))
+    axes = np.asarray(axes).ravel()
+    for i in range(nrows * ncols):
+        axes[i].axis("off")
+        if i < len(annotated):
+            axes[i].imshow(cv2.cvtColor(annotated[i], cv2.COLOR_BGR2RGB))
+    fig.suptitle(title, fontsize=12)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
 
 
 class Callback:
@@ -449,6 +502,396 @@ class WandBLogger(Callback):
             self._run.finish()
             logger.info("W&B run finished.")
             self._enabled = False
+
+
+class ValPredictionLogger(Callback):
+    """Save a grid of val predictions each epoch.
+
+    GT boxes: solid purple (thickness=2) drawn first.
+    Pred boxes: solid supervision palette colors (thickness=1) drawn on top.
+    Saved to ``<save_dir>/val_predictions/epoch_<N>.png``.
+    """
+
+    _DEFAULT_GT_COLOR = sv.Color(r=160, g=32, b=240)   # purple
+    _DEFAULT_PRED_COLOR = sv.Color(r=0, g=200, b=0)    # green
+
+    def __init__(
+        self,
+        save_dir: str,
+        num_samples: int = 12,
+        conf_threshold: float = 0.25,
+        grid_cols: int = 2,
+        gt_thickness: int = 2,
+        pred_thickness: int = 1,
+        gt_color_rgb: tuple = (160, 32, 240),
+        pred_color_rgb: tuple = (0, 200, 0),
+        text_scale: float = 0.4,
+        dpi: int = 150,
+    ) -> None:
+        self.save_dir = Path(save_dir)
+        self.num_samples = num_samples
+        self.conf_threshold = conf_threshold
+        self.grid_cols = grid_cols
+        self.gt_thickness = gt_thickness
+        self.pred_thickness = pred_thickness
+        self.gt_color = sv.Color(r=gt_color_rgb[0], g=gt_color_rgb[1], b=gt_color_rgb[2])
+        self.pred_color = sv.Color(r=pred_color_rgb[0], g=pred_color_rgb[1], b=pred_color_rgb[2])
+        self.text_scale = text_scale
+        self.dpi = dpi
+        self._sample_indices: Optional[List[int]] = None
+
+    @staticmethod
+    def _unwrap_subset(dataset: Any):
+        """Return (underlying_dataset, index_fn) unwrapping torch Subset if needed."""
+        if hasattr(dataset, "indices"):  # torch.utils.data.Subset
+            indices = dataset.indices
+            return dataset.dataset, lambda i: indices[i]
+        return dataset, lambda i: i
+
+    def on_train_start(self, trainer: Any) -> None:
+        dataset = trainer.val_loader.dataset
+        n = len(dataset)
+        k = min(self.num_samples, n)
+        self._sample_indices = sorted(random.sample(range(n), k))
+        logger.info("ValPredictionLogger: sampled %d images for visualization", k)
+
+    def on_epoch_end(
+        self, trainer: Any, epoch: int, metrics: Dict[str, float]
+    ) -> None:
+        if self._sample_indices is None:
+            return
+
+        raw_dataset, idx_map = self._unwrap_subset(trainer.val_loader.dataset)
+        model = trainer.model
+        device = trainer.device
+        model.eval()
+        input_h, input_w = trainer._model_cfg["input_size"]
+        class_names = {
+            int(k): str(v) for k, v in trainer._data_cfg.get("names", {}).items()
+        }
+
+        # --- Phase 1: load images + prepare input tensors (CPU) ---
+        samples = []  # (subset_idx, orig_bgr, input_tensor_chw_float)
+        for idx in self._sample_indices:
+            real_idx = idx_map(idx)
+            img_path = raw_dataset.img_paths[real_idx]
+            image = cv2.imread(str(img_path))
+            if image is None:
+                continue
+            raw_img = raw_dataset.get_raw_item(real_idx)["image"]
+            if isinstance(raw_img, np.ndarray):
+                resized = cv2.resize(raw_img, (input_w, input_h))
+                tensor = torch.from_numpy(
+                    np.ascontiguousarray((resized.astype(np.float32) / 255.0).transpose(2, 0, 1))
+                )
+            else:
+                tensor = raw_img
+            samples.append((real_idx, image, tensor))
+
+        if not samples:
+            return
+
+        # --- Phase 2: single batched GPU forward pass ---
+        batch = torch.stack([t for _, _, t in samples]).to(device)
+        with torch.no_grad():
+            all_preds = model(batch)
+        all_decoded = trainer._decode_predictions(all_preds, conf_threshold=self.conf_threshold)
+
+        # --- Phase 3: draw GT + pred via shared supervision bridge (CPU) ---
+        rows = []
+        for i, (real_idx, image, _) in enumerate(samples):
+            orig_h, orig_w = image.shape[:2]
+
+            # Ground truth boxes (YOLO normalized → pixel xyxy)
+            gt_xyxy, gt_class_ids = None, None
+            gt_targets = raw_dataset._load_label(raw_dataset.img_paths[real_idx])
+            if gt_targets is not None and len(gt_targets) > 0:
+                gt_np = gt_targets if isinstance(gt_targets, np.ndarray) else np.array(gt_targets)
+                cx, cy, w, h = gt_np[:, 1], gt_np[:, 2], gt_np[:, 3], gt_np[:, 4]
+                gt_xyxy = np.stack([
+                    (cx - w / 2) * orig_w, (cy - h / 2) * orig_h,
+                    (cx + w / 2) * orig_w, (cy + h / 2) * orig_h,
+                ], axis=1)
+                gt_class_ids = gt_np[:, 0].astype(np.int64)
+
+            # Predictions (scale from model input size to original image size)
+            pred = all_decoded[i] if i < len(all_decoded) else {}
+            pred_boxes = np.asarray(pred.get("boxes", []), dtype=np.float64).reshape(-1, 4)
+            pred_labels = np.asarray(pred.get("labels", []), dtype=np.int64).ravel()
+            pred_scores = np.asarray(pred.get("scores", []), dtype=np.float64).ravel()
+            if pred_boxes.shape[0] > 0:
+                pred_boxes[:, [0, 2]] *= orig_w / input_w
+                pred_boxes[:, [1, 3]] *= orig_h / input_h
+            pred_dets = sv.Detections(xyxy=pred_boxes, class_id=pred_labels, confidence=pred_scores)
+
+            rows.append(annotate_gt_pred(
+                image, gt_xyxy, gt_class_ids, pred_dets, class_names,
+                gt_color=self.gt_color, pred_color=self.pred_color,
+                gt_thickness=self.gt_thickness, pred_thickness=self.pred_thickness,
+                text_scale=self.text_scale, draw_legend=True,
+            ))
+
+        if not rows:
+            return
+
+        ncols = self.grid_cols
+        nrows = math.ceil(len(rows) / ncols)
+        map_val = metrics.get("val/mAP50", 0.0)
+
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 6, nrows * 5))
+        axes = np.asarray(axes).ravel()
+        for i in range(nrows * ncols):
+            axes[i].axis("off")
+            if i < len(rows):
+                axes[i].imshow(cv2.cvtColor(rows[i], cv2.COLOR_BGR2RGB))
+        fig.suptitle(f"Epoch {epoch + 1} — mAP50: {map_val:.4f}", fontsize=14)
+        fig.tight_layout()
+
+        out_dir = self.save_dir / "val_predictions"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"epoch_{epoch + 1:03d}.png"
+        fig.savefig(str(out_path), dpi=self.dpi, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved val prediction grid: %s", out_path)
+
+        # Log to wandb if available
+        cb_runner = getattr(trainer, "callback_runner", None)
+        if cb_runner is not None:
+            wb_cb = cb_runner.get_callback(WandBLogger)
+            if wb_cb is not None and wb_cb._enabled:
+                wb_cb._wandb.log(
+                    {"val/predictions": wandb.Image(str(out_path))},
+                    step=epoch + 1,
+                )
+
+
+
+class DatasetStatsLogger(Callback):
+    """Save dataset_stats.png and dataset_stats.json once before training starts.
+
+    Always runs — not conditional on data_viz.enabled.
+    """
+
+    def __init__(
+        self,
+        save_dir: str,
+        data_config: dict,
+        base_dir: str,
+        splits: List[str],
+        dpi: int = 120,
+    ) -> None:
+        self.save_dir = Path(save_dir)
+        self.data_config = data_config
+        self.base_dir = base_dir
+        self.splits = splits
+        self.dpi = dpi
+
+    def on_train_start(self, trainer: Any, **kwargs: Any) -> None:
+        class_names = {int(k): str(v) for k, v in self.data_config.get("names", {}).items()}
+        out_dir = self.save_dir / "data_preview"
+        try:
+            from core.p05_data.run_viz import generate_dataset_stats
+            generate_dataset_stats(self.data_config, self.base_dir, class_names, self.splits, out_dir, self.dpi)
+            stats_path = out_dir / "dataset_stats.png"
+            wb_cb = next((c for c in trainer.callback_runner.callbacks if isinstance(c, WandBLogger)), None)
+            if wb_cb is not None and wb_cb._enabled:
+                wb_cb._wandb.log({"viz/dataset_stats": wandb.Image(str(stats_path))})
+        except Exception as e:
+            logger.warning("DatasetStatsLogger: dataset stats failed — %s", e)
+
+
+class DataLabelGridLogger(Callback):
+    """Save a grid of raw images with GT labels for each configured split.
+
+    Runs once in on_train_start — never per epoch.
+    Output: <save_dir>/data_preview/data_labels_<split>.png
+    """
+
+    def __init__(
+        self,
+        save_dir: str,
+        splits: List[str],
+        data_config: dict,
+        base_dir: str,
+        num_samples: int = 16,
+        grid_cols: int = 4,
+        thickness: int = 2,
+        text_scale: float = 0.4,
+        dpi: int = 120,
+    ) -> None:
+        self.save_dir = Path(save_dir)
+        self.splits = splits
+        self.data_config = data_config
+        self.base_dir = base_dir
+        self.num_samples = num_samples
+        self.grid_cols = grid_cols
+        self.thickness = thickness
+        self.text_scale = text_scale
+        self.dpi = dpi
+
+    def on_train_start(self, trainer: Any) -> None:
+        from core.p05_data.detection_dataset import YOLOXDataset
+        class_names = {int(k): str(v) for k, v in self.data_config.get("names", {}).items()}
+
+        for split in self.splits:
+            try:
+                ds = YOLOXDataset(
+                    data_config=self.data_config,
+                    split=split,
+                    transforms=None,
+                    base_dir=self.base_dir,
+                )
+            except Exception as e:
+                logger.warning("DataLabelGridLogger: skip split %s — %s", split, e)
+                continue
+
+            n = len(ds)
+            if n == 0:
+                logger.warning("DataLabelGridLogger: split %s is empty, skipping", split)
+                continue
+
+            k = min(self.num_samples, n)
+            indices = sorted(random.sample(range(n), k))
+
+            annotated = []
+            for idx in indices:
+                item = ds.get_raw_item(idx)
+                img = item["image"]  # HWC BGR uint8
+                targets = ds._load_label(ds.img_paths[idx])
+                if targets is None or len(targets) == 0:
+                    targets = np.zeros((0, 5), dtype=np.float32)
+                annotated.append(_draw_gt_boxes(img, targets, class_names, self.thickness, self.text_scale))
+
+            if not annotated:
+                continue
+
+            out_path = self.save_dir / "data_preview" / f"data_labels_{split}.png"
+            _save_image_grid(
+                annotated, self.grid_cols,
+                f"Data + Labels [{split}] — {k} samples",
+                out_path, self.dpi,
+            )
+            logger.info("Saved data label grid (%s): %s", split, out_path)
+
+            # Log to WandB if available
+            cb_runner = getattr(trainer, "callback_runner", None)
+            if cb_runner is not None:
+                wb_cb = cb_runner.get_callback(WandBLogger)
+                if wb_cb is not None and wb_cb._enabled:
+                    wb_cb._wandb.log({f"viz/data_labels_{split}": wandb.Image(str(out_path))})
+
+
+class AugLabelGridLogger(Callback):
+    """Save a grid of augmented training images with transformed GT labels.
+
+    Mosaic/MixUp/CopyPaste are disabled so each cell shows a single identifiable
+    image — makes flip/HSV/affine parameters visually verifiable.
+
+    Runs once in on_train_start — never per epoch.
+    Output: <save_dir>/data_preview/aug_labels_<split>.png
+    """
+
+    def __init__(
+        self,
+        save_dir: str,
+        splits: List[str],
+        data_config: dict,
+        aug_config: dict,
+        base_dir: str,
+        num_samples: int = 16,
+        grid_cols: int = 4,
+        thickness: int = 2,
+        text_scale: float = 0.4,
+        dpi: int = 120,
+    ) -> None:
+        self.save_dir = Path(save_dir)
+        self.splits = splits
+        self.data_config = data_config
+        self.aug_config = aug_config
+        self.base_dir = base_dir
+        self.num_samples = num_samples
+        self.grid_cols = grid_cols
+        self.thickness = thickness
+        self.text_scale = text_scale
+        self.dpi = dpi
+
+    def on_train_start(self, trainer: Any) -> None:
+        from core.p05_data.detection_dataset import YOLOXDataset
+        from core.p05_data.transforms import build_transforms
+
+        class_names = {int(k): str(v) for k, v in self.data_config.get("names", {}).items()}
+        mean = np.array(self.data_config.get("mean", [0.485, 0.456, 0.406]), dtype=np.float32).reshape(1, 1, 3)
+        std = np.array(self.data_config.get("std", [0.229, 0.224, 0.225]), dtype=np.float32).reshape(1, 1, 3)
+        input_size = tuple(trainer._model_cfg["input_size"])
+
+        # Two passes: simple (no mosaic/mixup) and mosaic (full augmentation)
+        aug_variants = [
+            ("simple", {**self.aug_config, "mosaic": False, "mixup": False, "copypaste": False}),
+            ("mosaic",  self.aug_config),
+        ]
+
+        for split in self.splits:
+            if split != "train":
+                logger.info("AugLabelGridLogger: skip split %s (no augmentation)", split)
+                continue
+
+            for label, aug_cfg in aug_variants:
+                transforms = build_transforms(
+                    config=aug_cfg, is_train=True, input_size=input_size,
+                    mean=self.data_config.get("mean"), std=self.data_config.get("std"),
+                )
+                try:
+                    ds = YOLOXDataset(
+                        data_config=self.data_config, split=split,
+                        transforms=transforms, base_dir=self.base_dir,
+                    )
+                except Exception as e:
+                    logger.warning("AugLabelGridLogger: skip %s/%s — %s", split, label, e)
+                    continue
+
+                n = len(ds)
+                if n == 0:
+                    continue
+
+                k = min(self.num_samples, n)
+                indices = sorted(random.sample(range(n), k))
+
+                annotated = []
+                for i in indices:
+                    try:
+                        result = ds[i]
+                        aug_tensor, targets_tensor = result[0], result[1]
+                    except Exception as e:
+                        logger.warning("AugLabelGridLogger: failed idx %d — %s", i, e)
+                        continue
+                    aug_np = aug_tensor.numpy().transpose(1, 2, 0)
+                    aug_np = np.clip(aug_np * std + mean, 0, 1)
+                    aug_bgr = (aug_np[:, :, ::-1] * 255).astype(np.uint8)
+                    targets_np = targets_tensor.numpy() if len(targets_tensor) > 0 else np.zeros((0, 5), dtype=np.float32)
+                    annotated.append(_draw_gt_boxes(aug_bgr, targets_np, class_names, self.thickness, self.text_scale))
+
+                if not annotated:
+                    continue
+
+                suffix = "" if label == "simple" else "_mosaic"
+                out_path = self.save_dir / "data_preview" / f"aug_labels_{split}{suffix}.png"
+                desc = "no mosaic/mixup" if label == "simple" else "with mosaic/mixup"
+                _save_image_grid(
+                    annotated, self.grid_cols,
+                    f"Augmented + Labels [{split}] ({desc}) — {k} samples",
+                    out_path, self.dpi,
+                )
+                logger.info("Saved aug label grid (%s/%s): %s", split, label, out_path)
+
+                cb_runner = getattr(trainer, "callback_runner", None)
+                if cb_runner is not None:
+                    wb_cb = cb_runner.get_callback(WandBLogger)
+                    if wb_cb is not None and wb_cb._enabled:
+                        wb_cb._wandb.log({f"viz/aug_labels_{split}_{label}": wandb.Image(str(out_path))})
 
 
 class CallbackRunner:

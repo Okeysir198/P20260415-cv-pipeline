@@ -4,6 +4,7 @@ Reads image files and corresponding YOLO-format label ``.txt`` files
 (one row per object: ``class_id cx cy w h``, normalised 0-1).
 """
 
+import random
 import sys
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
@@ -335,13 +336,16 @@ def build_dataloader(
     std = data_config.get("std", IMAGENET_STD)
 
     aug_config = training_config.get("augmentation", {})
-    transforms = build_transforms(
-        config=aug_config,
-        is_train=is_train,
-        input_size=input_size,
-        mean=mean,
-        std=std,
-    )
+    gpu_augment = training_config.get("training", {}).get("gpu_augment", False)
+    if gpu_augment and is_train:
+        from core.p05_data.transforms import build_cpu_transforms
+        transforms = build_cpu_transforms(
+            config=aug_config, is_train=True, input_size=input_size, mean=mean, std=std
+        )
+    else:
+        transforms = build_transforms(
+            config=aug_config, is_train=is_train, input_size=input_size, mean=mean, std=std
+        )
 
     dataset = YOLOXDataset(
         data_config=data_config,
@@ -350,10 +354,24 @@ def build_dataloader(
         base_dir=base_dir,
     )
 
+    # Apply split-level subset if configured
+    subset_cfg = training_config.get("data", {}).get("subset") or {}
+    subset_val = subset_cfg.get(split) if isinstance(subset_cfg, dict) else None
+    if subset_val is not None:
+        n_total = len(dataset)
+        if isinstance(subset_val, float):
+            n_keep = max(1, int(n_total * subset_val))
+        else:
+            n_keep = min(int(subset_val), n_total)
+        kept_indices = sorted(random.sample(range(n_total), n_keep))
+        dataset = torch.utils.data.Subset(dataset, kept_indices)
+        logger.info("Subset %s split: %d → %d samples", split, n_total, n_keep)
+
     data_section = training_config.get("data", {})
     batch_size = data_section.get("batch_size", 16)
     num_workers = data_section.get("num_workers", 4)
     pin_memory = data_section.get("pin_memory", True)
+    prefetch_factor = data_section.get("prefetch_factor", 4) if num_workers > 0 else None
     sampler_mode = data_section.get("sampler", "none")
 
     # Use forkserver to avoid deadlocks with torchvision v2 transforms (nn.Module)
@@ -377,35 +395,48 @@ def build_dataloader(
         collate_fn=collate_fn,
         drop_last=is_train,
         multiprocessing_context=mp_context,
+        persistent_workers=num_workers > 0,
+        prefetch_factor=prefetch_factor,
     )
 
     return loader
 
 
 def _build_weighted_sampler(
-    dataset: YOLOXDataset,
+    dataset,
     mode: str = "balanced",
 ) -> WeightedRandomSampler:
     """Build a WeightedRandomSampler for class-imbalanced datasets.
 
+    Handles both bare :class:`YOLOXDataset` and
+    :class:`torch.utils.data.Subset` wrapping one.
+
     Args:
-        dataset: The detection dataset to sample from.
+        dataset: The detection dataset (or a Subset of one) to sample from.
         mode: ``"balanced"`` for inverse-frequency weighting,
             ``"sqrt"`` for square-root inverse-frequency (softer).
 
     Returns:
         A :class:`WeightedRandomSampler` for the dataset.
     """
-    # Count dominant class per image
-    class_counts = np.zeros(dataset.num_classes, dtype=np.float64)
+    # Unwrap Subset to access YOLOXDataset methods
+    if isinstance(dataset, torch.utils.data.Subset):
+        raw_ds = dataset.dataset
+        active_indices = list(dataset.indices)
+    else:
+        raw_ds = dataset
+        active_indices = list(range(len(dataset)))
+
+    class_counts = np.zeros(raw_ds.num_classes, dtype=np.float64)
     image_classes: List[int] = []
 
-    for img_path in dataset.img_paths:
-        labels = dataset._load_label(img_path)
+    for idx in active_indices:
+        img_path = raw_ds.img_paths[idx]
+        labels = raw_ds._load_label(img_path)
         if len(labels) > 0:
             cls_ids = labels[:, 0].astype(int)
             # Assign image to most frequent class
-            dominant = int(np.bincount(cls_ids, minlength=dataset.num_classes).argmax())
+            dominant = int(np.bincount(cls_ids, minlength=raw_ds.num_classes).argmax())
             image_classes.append(dominant)
             for c in cls_ids:
                 class_counts[c] += 1
@@ -420,20 +451,10 @@ def _build_weighted_sampler(
     else:
         class_weights = 1.0 / class_counts
     class_weights /= class_weights.sum()
+    min_weight = float(class_weights.min())
 
-    # Background images get minimum weight
-    bg_weight = float(class_weights.min())
-
-    # Assign weight per sample
-    sample_weights = []
-    for cls_id in image_classes:
-        if cls_id < 0:
-            sample_weights.append(bg_weight)
-        else:
-            sample_weights.append(float(class_weights[cls_id]))
-
-    return WeightedRandomSampler(
-        weights=sample_weights,
-        num_samples=len(sample_weights),
-        replacement=True,
-    )
+    weights = [
+        float(class_weights[c]) if c >= 0 else min_weight
+        for c in image_classes
+    ]
+    return WeightedRandomSampler(weights, num_samples=len(active_indices), replacement=True)

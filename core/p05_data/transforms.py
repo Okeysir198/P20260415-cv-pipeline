@@ -669,3 +669,482 @@ def build_transforms(
     transforms.append(v2.Normalize(mean=mean, std=std))
 
     return DetectionTransform(transforms, canvas_size=input_size)
+
+
+# ---------------------------------------------------------------------------
+# GPU-side augmentation helpers
+# ---------------------------------------------------------------------------
+
+def _rgb_to_hsv(images: torch.Tensor) -> torch.Tensor:
+    """Convert (B, 3, H, W) RGB [0, 1] to HSV [0, 1]."""
+    r, g, b = images[:, 0], images[:, 1], images[:, 2]
+    maxc, maxc_idx = images.max(dim=1)
+    minc = images.min(dim=1).values
+    delta = (maxc - minc).clamp(min=1e-8)
+    s = torch.where(maxc > 1e-8, (maxc - minc) / maxc, torch.zeros_like(maxc))
+    rc = (g - b) / delta
+    gc = 2.0 + (b - r) / delta
+    bc = 4.0 + (r - g) / delta
+    h = torch.where(maxc_idx == 0, rc, torch.where(maxc_idx == 1, gc, bc))
+    h = (h / 6.0) % 1.0
+    h = torch.where((maxc - minc) > 1e-8, h, torch.zeros_like(h))
+    return torch.stack([h, s, maxc], dim=1)
+
+
+def _hsv_to_rgb(hsv: torch.Tensor) -> torch.Tensor:
+    """Convert (B, 3, H, W) HSV [0, 1] to RGB [0, 1]."""
+    h, s, v = hsv[:, 0], hsv[:, 1], hsv[:, 2]
+    h6 = h * 6.0
+    i = h6.long() % 6
+    f = h6 - h6.floor()
+    p = v * (1.0 - s)
+    q = v * (1.0 - s * f)
+    t = v * (1.0 - s * (1.0 - f))
+    # Stack 6 sector values per channel: indices 0-5 correspond to hue sectors
+    r_vals = torch.stack([v, q, p, p, t, v], dim=1)  # (B, 6, H, W)
+    g_vals = torch.stack([t, v, v, q, p, p], dim=1)
+    b_vals = torch.stack([p, p, t, v, v, q], dim=1)
+    idx = i.unsqueeze(1)  # (B, 1, H, W)
+    r = torch.gather(r_vals, 1, idx).squeeze(1)
+    g = torch.gather(g_vals, 1, idx).squeeze(1)
+    b = torch.gather(b_vals, 1, idx).squeeze(1)
+    return torch.stack([r, g, b], dim=1)
+
+
+# ---------------------------------------------------------------------------
+# GPU-side augmentation
+# ---------------------------------------------------------------------------
+
+
+class GpuDetectionTransform:
+    """Fully-vectorised detection augmentations on GPU batches.
+
+    All B images are warped in a single CUDA call via F.affine_grid +
+    F.grid_sample (one kernel launch vs B sequential launches). ColorJitter
+    (brightness / saturation / hue) runs as batched tensor math with no
+    per-image Python overhead. Flips are one CUDA call each.
+
+    Affine box transformation: M_fwd = inv(M_inv) maps 4 input corners to
+    output space; new bbox is the axis-aligned envelope of the transformed
+    corners, clamped and filtered by area >= 1 px.
+
+    Hue/saturation use a vectorised RGB↔HSV pipeline (torch.gather-based
+    sector lookup — no loops).
+    """
+
+    def __init__(
+        self,
+        degrees: float,
+        translate: Optional[Tuple[float, float]],
+        scale_range: Tuple[float, float],
+        shear: Optional[Tuple[float, float, float, float]],
+        fill: float,
+        hsv_h: float,
+        hsv_s: float,
+        hsv_v: float,
+        contrast: float,
+        flip_h_p: float,
+        flip_v_p: float,
+        mean: Sequence[float],
+        std: Sequence[float],
+        input_size: Tuple[int, int],
+    ) -> None:
+        self.degrees = degrees
+        self.translate = translate
+        self.scale_range = scale_range
+        self.shear = shear
+        self.fill = fill
+        self.hsv_h = hsv_h
+        self.hsv_s = hsv_s
+        self.hsv_v = hsv_v
+        self.contrast = contrast
+        self.flip_h_p = flip_h_p
+        self.flip_v_p = flip_v_p
+        self._mean = torch.tensor(list(mean), dtype=torch.float32).view(1, -1, 1, 1)
+        self._std = torch.tensor(list(std), dtype=torch.float32).view(1, -1, 1, 1)
+        self.input_size = input_size  # (H, W)
+
+    def __call__(
+        self,
+        images: torch.Tensor,
+        targets: List[torch.Tensor],
+    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        """Apply GPU augmentations to a collated batch.
+
+        Args:
+            images: (B, C, H, W) float32 [0, 1] on GPU.
+            targets: List of B tensors, each (N_i, 5) normalized CXCYWH on GPU.
+
+        Returns:
+            (images, targets) augmented, with Normalize applied to images.
+        """
+        H, W = self.input_size  # target spatial dims from config
+        B, _C, img_H, img_W = images.shape
+        device = images.device
+
+        # GPU letterbox resize — scale uniformly to fit (H, W), pad remainder with fill
+        # All images in the batch share the same size (torch.stack guarantee), so one
+        # scale/padding applies to the whole batch.
+        if img_H != H or img_W != W:
+            scale = min(H / img_H, W / img_W)
+            new_H, new_W = round(img_H * scale), round(img_W * scale)
+            images = torch.nn.functional.interpolate(
+                images, size=(new_H, new_W), mode="bilinear", antialias=True
+            )
+            # Centre the scaled image inside the target canvas
+            pad_top = (H - new_H) // 2
+            pad_left = (W - new_W) // 2
+            images = torch.nn.functional.pad(
+                images,
+                (pad_left, W - new_W - pad_left, pad_top, H - new_H - pad_top),
+                value=self.fill,
+            )
+            # Adjust boxes: normalized coords shift with scale + padding
+            scale_w, scale_h = new_W / W, new_H / H
+            off_x, off_y = pad_left / W, pad_top / H
+            new_targets: List[torch.Tensor] = []
+            for tgt in targets:
+                if len(tgt) == 0:
+                    new_targets.append(tgt)
+                    continue
+                t = tgt.clone()
+                t[:, 1] = t[:, 1] * scale_w + off_x  # cx
+                t[:, 2] = t[:, 2] * scale_h + off_y  # cy
+                t[:, 3] = t[:, 3] * scale_w           # bw
+                t[:, 4] = t[:, 4] * scale_h           # bh
+                new_targets.append(t)
+            targets = new_targets
+
+        # --- Affine: one CUDA warp for all B images ---
+        angles = torch.empty(B, device=device).uniform_(-self.degrees, self.degrees)
+        if self.translate is not None:
+            tx = torch.empty(B, device=device).uniform_(-self.translate[0] * W, self.translate[0] * W)
+            ty = torch.empty(B, device=device).uniform_(-self.translate[1] * H, self.translate[1] * H)
+        else:
+            tx = torch.zeros(B, device=device)
+            ty = torch.zeros(B, device=device)
+        scales = torch.empty(B, device=device).uniform_(self.scale_range[0], self.scale_range[1])
+        if self.shear is not None:
+            shear_x = torch.empty(B, device=device).uniform_(self.shear[0], self.shear[1])
+            shear_y = torch.empty(B, device=device).uniform_(self.shear[2], self.shear[3])
+        else:
+            shear_x = torch.zeros(B, device=device)
+            shear_y = torch.zeros(B, device=device)
+
+        M_inv, theta = _build_affine_theta(angles, tx, ty, scales, shear_x, shear_y, H, W)
+
+        # Shift by fill so zero-padding outside the warp becomes fill
+        shifted = images - self.fill
+        grid = torch.nn.functional.affine_grid(theta, images.shape, align_corners=False)
+        warped = torch.nn.functional.grid_sample(
+            shifted, grid, mode="bilinear", padding_mode="zeros", align_corners=False
+        )
+        images = (warped + self.fill).clamp(0.0, 1.0)
+
+        # Transform boxes via forward map M_fwd = inv(M_inv)
+        M_fwd = torch.linalg.inv(M_inv)  # (B, 3, 3)
+        targets = _transform_boxes(targets, M_fwd, H, W)
+
+        # --- ColorJitter: randomized order, fully vectorized ---
+        color_ops: List[str] = []
+        if self.hsv_v > 0:
+            color_ops.append("brightness")
+        if self.contrast > 0:
+            color_ops.append("contrast")
+        if self.hsv_s > 0 or self.hsv_h > 0:
+            color_ops.append("sat_hue")
+        random.shuffle(color_ops)
+
+        for op in color_ops:
+            if op == "brightness":
+                factors = torch.empty(B, device=device).uniform_(
+                    max(0.0, 1.0 - self.hsv_v), 1.0 + self.hsv_v
+                )
+                images = (images * factors.view(B, 1, 1, 1)).clamp(0.0, 1.0)
+            elif op == "contrast":
+                luma = 0.2126 * images[:, 0] + 0.7152 * images[:, 1] + 0.0722 * images[:, 2]
+                mean_luma = luma.mean(dim=(-2, -1)).view(B, 1, 1, 1)
+                factors = torch.empty(B, device=device).uniform_(
+                    max(0.0, 1.0 - self.contrast), 1.0 + self.contrast
+                )
+                fv = factors.view(B, 1, 1, 1)
+                images = (images * fv + mean_luma * (1.0 - fv)).clamp(0.0, 1.0)
+            elif op == "sat_hue":
+                hsv = _rgb_to_hsv(images)
+                if self.hsv_s > 0:
+                    s_factors = torch.empty(B, device=device).uniform_(
+                        max(0.0, 1.0 - self.hsv_s), 1.0 + self.hsv_s
+                    )
+                    hsv[:, 1] = (hsv[:, 1] * s_factors.view(B, 1, 1)).clamp(0.0, 1.0)
+                if self.hsv_h > 0:
+                    h_shifts = torch.empty(B, device=device).uniform_(-self.hsv_h, self.hsv_h)
+                    hsv[:, 0] = (hsv[:, 0] + h_shifts.view(B, 1, 1)) % 1.0
+                images = _hsv_to_rgb(hsv).clamp(0.0, 1.0)
+
+        # --- Flips: one CUDA call per axis ---
+        if self.flip_h_p > 0:
+            mask = torch.rand(B, device=device) < self.flip_h_p
+            if mask.any():
+                images[mask] = torch.flip(images[mask], dims=[-1])
+                for i in mask.nonzero(as_tuple=True)[0]:
+                    t = targets[i]
+                    if len(t) > 0:
+                        t = t.clone()
+                        t[:, 1] = 1.0 - t[:, 1]  # cx_new = 1 - cx_old
+                        targets[i] = t
+
+        if self.flip_v_p > 0:
+            mask = torch.rand(B, device=device) < self.flip_v_p
+            if mask.any():
+                images[mask] = torch.flip(images[mask], dims=[-2])
+                for i in mask.nonzero(as_tuple=True)[0]:
+                    t = targets[i]
+                    if len(t) > 0:
+                        t = t.clone()
+                        t[:, 2] = 1.0 - t[:, 2]  # cy_new = 1 - cy_old
+                        targets[i] = t
+
+        mean = self._mean.to(device)
+        std = self._std.to(device)
+        images = (images - mean) / std
+
+        return images, targets
+
+    def __repr__(self) -> str:
+        return (
+            f"GpuDetectionTransform(degrees={self.degrees}, scale={self.scale_range}, "
+            f"hsv=({self.hsv_h},{self.hsv_s},{self.hsv_v}), "
+            f"flip_h={self.flip_h_p}, flip_v={self.flip_v_p})"
+        )
+
+
+def _build_affine_theta(
+    angles: torch.Tensor,
+    tx: torch.Tensor,
+    ty: torch.Tensor,
+    scales: torch.Tensor,
+    shear_x: torch.Tensor,
+    shear_y: torch.Tensor,
+    H: int,
+    W: int,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Return (B,3,3) pixel-space M_inv and (B,2,3) normalized theta.
+
+    Uses torchvision's exact affine formula so box transforms match image warps.
+    theta is for F.affine_grid(align_corners=False).
+    """
+    B = angles.shape[0]
+    device = angles.device
+    dtype = angles.dtype
+
+    rot = torch.deg2rad(angles)
+    sx = torch.deg2rad(shear_x)
+    sy = torch.deg2rad(shear_y)
+    cos_sy = torch.cos(sy).clamp(min=1e-7)
+
+    a = torch.cos(rot - sy) / cos_sy
+    b = -torch.cos(rot - sy) * torch.tan(sx) / cos_sy - torch.sin(rot)
+    c = torch.sin(rot - sy) / cos_sy
+    d = -torch.sin(rot - sy) * torch.tan(sx) / cos_sy + torch.cos(rot)
+    a, b, c, d = scales * a, scales * b, scales * c, scales * d
+
+    cx = W / 2.0
+    cy = H / 2.0
+    t03 = cx - a * cx - b * cy + tx
+    t13 = cy - c * cx - d * cy + ty
+
+    zeros = torch.zeros(B, device=device, dtype=dtype)
+    ones = torch.ones(B, device=device, dtype=dtype)
+    M_inv = torch.stack([
+        torch.stack([a, b, t03], dim=1),
+        torch.stack([c, d, t13], dim=1),
+        torch.stack([zeros, zeros, ones], dim=1),
+    ], dim=1)  # (B, 3, 3)
+
+    # Convert pixel-space M_inv to normalized theta for affine_grid(align_corners=False)
+    # theta = D_inv @ M_inv @ D
+    # D: normalized→pixel: x_pixel = W/2*x_norm + W/2 - 0.5
+    # D_inv: pixel→normalized: x_norm = 2/W*x_pixel - (W-1)/W
+    D = torch.tensor([
+        [W / 2.0, 0.0, W / 2.0 - 0.5],
+        [0.0, H / 2.0, H / 2.0 - 0.5],
+        [0.0, 0.0, 1.0],
+    ], device=device, dtype=dtype).unsqueeze(0)  # (1, 3, 3)
+    D_inv = torch.tensor([
+        [2.0 / W, 0.0, -(W - 1.0) / W],
+        [0.0, 2.0 / H, -(H - 1.0) / H],
+        [0.0, 0.0, 1.0],
+    ], device=device, dtype=dtype).unsqueeze(0)  # (1, 3, 3)
+
+    theta_3x3 = D_inv @ M_inv @ D  # (B, 3, 3)
+    return M_inv, theta_3x3[:, :2, :]  # (B, 3, 3), (B, 2, 3)
+
+
+def _transform_boxes(
+    targets: List[torch.Tensor],
+    M_fwd: torch.Tensor,
+    H: int,
+    W: int,
+) -> List[torch.Tensor]:
+    """Transform normalized CXCYWH boxes using forward affine matrices.
+
+    Each box's 4 corners are mapped through M_fwd[i], the axis-aligned
+    envelope is taken, clamped to [0,W]×[0,H], and boxes with area < 1px
+    are dropped.
+    """
+    new_targets: List[torch.Tensor] = []
+    for i, tgt in enumerate(targets):
+        if len(tgt) == 0:
+            new_targets.append(tgt)
+            continue
+
+        device = tgt.device
+        cls_ids = tgt[:, 0]
+        cx_px = tgt[:, 1] * W
+        cy_px = tgt[:, 2] * H
+        bw_px = tgt[:, 3] * W
+        bh_px = tgt[:, 4] * H
+
+        x1 = cx_px - bw_px / 2
+        y1 = cy_px - bh_px / 2
+        x2 = cx_px + bw_px / 2
+        y2 = cy_px + bh_px / 2
+
+        N = len(tgt)
+        # (N, 4, 3): 4 corners (TL,TR,BL,BR) in homogeneous pixel coords
+        corners = torch.stack([
+            torch.stack([x1, x2, x1, x2], dim=1),
+            torch.stack([y1, y1, y2, y2], dim=1),
+            torch.ones(N, 4, device=device),
+        ], dim=2)  # (N, 4, 3)
+
+        # m: (2,3) — apply forward map to all corners at once
+        m = M_fwd[i, :2, :]  # (2, 3)
+        out_xy = (m @ corners.permute(0, 2, 1).reshape(3, N * 4)).reshape(2, N, 4).permute(1, 2, 0)
+
+        new_x1 = out_xy[:, :, 0].min(dim=1).values.clamp(0.0, float(W))
+        new_y1 = out_xy[:, :, 1].min(dim=1).values.clamp(0.0, float(H))
+        new_x2 = out_xy[:, :, 0].max(dim=1).values.clamp(0.0, float(W))
+        new_y2 = out_xy[:, :, 1].max(dim=1).values.clamp(0.0, float(H))
+
+        valid = ((new_x2 - new_x1) * (new_y2 - new_y1)) >= 1.0
+        if valid.any():
+            x1v, y1v, x2v, y2v = new_x1[valid], new_y1[valid], new_x2[valid], new_y2[valid]
+            new_tgt = torch.stack([
+                cls_ids[valid],
+                (x1v + x2v) / 2.0 / W,
+                (y1v + y2v) / 2.0 / H,
+                (x2v - x1v) / W,
+                (y2v - y1v) / H,
+            ], dim=1)
+        else:
+            new_tgt = torch.zeros((0, 5), dtype=tgt.dtype, device=device)
+
+        new_targets.append(new_tgt)
+
+    return new_targets
+
+
+def build_cpu_transforms(
+    config: dict,
+    is_train: bool = True,
+    input_size: Optional[Tuple[int, int]] = None,
+    mean: Optional[Sequence[float]] = None,
+    std: Optional[Sequence[float]] = None,
+) -> DetectionTransform:
+    """CPU-only transform pipeline when GPU augmentation is enabled.
+
+    Includes Mosaic/MixUp/CopyPaste (require disk I/O, must stay on CPU) and
+    IRSimulation (uint8-specific ops), plus Resize and ToDtype. Excludes
+    RandomAffine, ColorJitter, Flips, and Normalize — handled on GPU.
+
+    Args:
+        config: The ``augmentation`` section of a training YAML config.
+        is_train: If True, include composite augmentations.
+        input_size: ``(height, width)``. Required.
+        mean: Unused — present for API compatibility.
+        std: Unused — present for API compatibility.
+
+    Returns:
+        A DetectionTransform with only CPU-mandatory transforms.
+    """
+    if input_size is None:
+        raise ValueError("input_size is required for build_cpu_transforms")
+
+    transforms: List[Any] = []
+
+    if is_train:
+        if config.get("mosaic", False):
+            transforms.append(Mosaic(input_size=input_size))
+        if config.get("mixup", False):
+            transforms.append(MixUp())
+        if config.get("copypaste", False):
+            transforms.append(CopyPaste(
+                p=config.get("copypaste_p", 0.5),
+                max_objects=config.get("copypaste_max", 3),
+            ))
+        if config.get("ir_simulation", False):
+            transforms.append(IRSimulation(
+                ir_prob=config.get("ir_prob", 0.3),
+                low_light_prob=config.get("low_light_prob", 0.2),
+                noise_sigma=config.get("noise_sigma", 15),
+            ))
+
+    # Mosaic always outputs input_size — skip the no-op CPU resize
+    if not (is_train and config.get("mosaic", False)):
+        transforms.append(v2.Resize(size=list(input_size), antialias=True))
+    transforms.append(v2.ToDtype(torch.float32, scale=True))
+    # Normalize is deferred to GpuDetectionTransform
+
+    return DetectionTransform(transforms, canvas_size=input_size)
+
+
+def build_gpu_transforms(
+    config: dict,
+    input_size: Tuple[int, int],
+    mean: Optional[Sequence[float]] = None,
+    std: Optional[Sequence[float]] = None,
+) -> GpuDetectionTransform:
+    """Stateless augmentations to run on GPU after batch transfer.
+
+    The pipeline is split so that box-coupled spatial transforms (RandomAffine,
+    Clamp, Sanitize) run per-sample, while box-independent transforms (ColorJitter,
+    Flips, Normalize) run once on the stacked (B,C,H,W) batch to eliminate
+    per-sample Python overhead for those ops.
+
+    Args:
+        config: The ``augmentation`` section of a training YAML config.
+        input_size: ``(height, width)`` — must match the collated batch spatial dims.
+        mean: Normalisation mean. Defaults to ImageNet values.
+        std: Normalisation std. Defaults to ImageNet values.
+
+    Returns:
+        A GpuDetectionTransform callable: (images, targets) -> (images, targets).
+    """
+    if mean is None:
+        mean = IMAGENET_MEAN
+    if std is None:
+        std = IMAGENET_STD
+
+    scale = config.get("scale", [0.5, 1.5])
+    scale_range = tuple(scale) if isinstance(scale, (list, tuple)) and len(scale) == 2 else (0.5, 1.5)
+    degrees = config.get("degrees", 0.0)
+    translate_val = config.get("translate", 0.0)
+    shear_val = config.get("shear", 0.0)
+
+    return GpuDetectionTransform(
+        degrees=degrees,
+        translate=(translate_val, translate_val) if translate_val > 0 else None,
+        scale_range=scale_range,
+        shear=(-shear_val, shear_val, -shear_val, shear_val) if shear_val > 0 else None,
+        fill=114 / 255.0,
+        hsv_h=config.get("hsv_h", 0.0),
+        hsv_s=config.get("hsv_s", 0.0),
+        hsv_v=config.get("hsv_v", 0.0),
+        contrast=config.get("contrast", 0.0),
+        flip_h_p=config.get("fliplr", 0.0),
+        flip_v_p=config.get("flipud", 0.0),
+        mean=mean,
+        std=std,
+        input_size=input_size,
+    )

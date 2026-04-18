@@ -53,7 +53,7 @@ code/benchmark.py                 — pose benchmark on samples
 
 ## Notes
 
-- mmpose must be installed to run RTMPose-S/M: `pip install mmpose`
+- mmpose must be installed to run RTMPose-S/M — not in the main venv; use `uv add mmpose` or a separate venv. RTMPose models are skipped in benchmarks until installed.
 - DWPose ONNX checkpoint lives in `pretrained/safety-poketenashi/` — symlink or copy for use here
 - This feature shares its trained model with `safety-poketenashi` orchestrator
 - OKS (Object Keypoint Similarity) and PCK (Percentage of Correct Keypoints) are the target metrics

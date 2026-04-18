@@ -203,7 +203,8 @@ def main() -> None:
 
     for i, idx in enumerate(indices):
         # Original (raw)
-        orig_img, orig_tgt = raw_dataset.get_raw_item(idx)
+        raw_item = raw_dataset.get_raw_item(idx)
+        orig_img, orig_tgt = raw_item["image"], raw_item["targets"]
         orig_resized = cv2.resize(orig_img, (input_size[1], input_size[0]))
         orig_vis = draw_bboxes(orig_resized, orig_tgt, class_names)
 

@@ -52,7 +52,7 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 | `raw/ear_protection` | 37 MB | 780 | rf_earplug |
 | `raw/_coco_val` | — | 0 | empty (COCO val2017 placeholder) |
 | `site_collected/` | — | 0 | placeholders only (populate on-site) |
-| `training_ready/` | — | 0 | not built yet — run `core/p00_data_prep/run.py` |
+| `training_ready/` | ~37 GB | ~112K | Phase A complete (2026-04-17) — 5 features built |
 
 **Total raw: ~62 GB across 12 categories, ~450K images.**
 
@@ -178,10 +178,20 @@ All empty placeholders — populate on-site. No public source. Layout:
 
 ## training_ready/ (derived)
 
-Empty. Build per feature with:
+Phase A complete (2026-04-17) — 5 features built. Build remaining features with:
 ```bash
 uv run core/p00_data_prep/run.py --config features/<feature>/configs/00_data_preparation.yaml
 ```
+
+### Built datasets (Phase A)
+
+| Feature | dataset_name | Images | Splits |
+|---|---|---|---|
+| safety-fire_detection | `fire_detection` | 17,373 | train/val/test |
+| ppe-helmet_detection | `helmet_detection` | 22,323 | train/val/test |
+| ppe-shoes_detection | `shoes_detection` | 37,026 | train/val/test |
+| safety-fall-detection | `fall_detection` | 12,402 | train/val/test |
+| safety-poketenashi-phone-usage | `safety_poketenashi_phone_usage` | 22,975 | train/val/test |
 
 ### Phase 1 v1 — planned distribution (dry-run verified)
 

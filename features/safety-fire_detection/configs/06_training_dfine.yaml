@@ -1,0 +1,96 @@
+# Training config — Fire Detection (D-FINE)
+# License: Apache 2.0 (USTC / DEIM)
+#
+# Variants (override via --override model.arch=<key>):
+#   dfine-n   — smallest, fastest inference (~4M params)
+#   dfine-s   — 16M params, good accuracy-speed tradeoff   (DEFAULT)
+#   dfine-m   — 31M params, highest accuracy, slower
+#
+# Pretrained weights downloaded from HuggingFace Hub on first run:
+#   ustc-community/dfine_s_coco, ustc-community/dfine_m_coco
+# Local cache available at: pretrained/safety-fire_detection/ustc-community_dfine-*-coco/
+#
+# Usage:
+#   uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml
+#   uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml \
+#       --override model.arch=dfine-m training.epochs=300
+
+model:
+  arch: dfine-s
+  pretrained: ustc-community/dfine_s_coco
+  num_classes: 2
+  input_size: [640, 640]
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+  subset:                  # Limit each split independently (null = use all data)
+    train: null            # int (N images), float (fraction 0.0–1.0), or null
+    val: null              # Use for: quick code checks, experiments, progressive training
+    test: null
+
+augmentation:
+  mosaic: false
+  mixup: false
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  fliplr: 0.5
+  flipud: 0.0
+  scale: [0.8, 1.2]
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: pytorch
+  epochs: 150
+  optimizer: adamw
+  lr: 0.0001
+  weight_decay: 0.0001
+  warmup_epochs: 10
+  scheduler: cosine
+  patience: 30
+  val_viz:
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.25
+
+  data_viz:                # Raw images + GT label grid (once before training)
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+  aug_viz:                 # Augmented images + label grid (once before training)
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+  amp: true
+  grad_clip: 0.1
+  ema: false
+
+loss:
+  type: detr
+
+logging:
+  wandb_project: smart-camera
+  run_name: fire_dfines_v1
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 10
+
+seed: 42

@@ -197,6 +197,108 @@ def annotate_frame(
 
 
 # ---------------------------------------------------------------------------
+# GT + Prediction overlay (shared by training callbacks and inference)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_GT_COLOR = sv.Color(r=160, g=32, b=240)    # purple
+_DEFAULT_PRED_COLOR = sv.Color(r=0, g=200, b=0)      # green
+
+
+def annotate_gt_pred(
+    image: np.ndarray,
+    gt_xyxy: Optional[np.ndarray],
+    gt_class_ids: Optional[np.ndarray],
+    pred_dets: sv.Detections,
+    class_names: Dict[int, str],
+    gt_color: sv.Color = _DEFAULT_GT_COLOR,
+    pred_color: sv.Color = _DEFAULT_PRED_COLOR,
+    gt_thickness: int = 2,
+    pred_thickness: int = 1,
+    text_scale: float = 0.4,
+    draw_legend: bool = True,
+) -> np.ndarray:
+    """Annotate a BGR image with GT boxes (solid, thick) and pred boxes (solid, thin).
+
+    GT boxes are drawn first; predictions are drawn on top.
+    GT labels appear at BOTTOM_LEFT; pred labels appear at TOP_LEFT.
+
+    Args:
+        image: BGR image (H, W, 3).
+        gt_xyxy: Ground-truth boxes in pixel xyxy format, shape (N, 4), or None.
+        gt_class_ids: Ground-truth class IDs, shape (N,), or None.
+        pred_dets: Predicted detections as ``sv.Detections`` (pixel coords).
+        class_names: Mapping from class ID to display name.
+        gt_color: Supervision Color for GT boxes and labels.
+        pred_color: Supervision Color for prediction boxes and labels.
+        gt_thickness: Line thickness for GT boxes.
+        pred_thickness: Line thickness for prediction boxes.
+        text_scale: Font scale for all labels.
+        draw_legend: Whether to draw a small legend in the top-left corner.
+
+    Returns:
+        Annotated BGR image (copy).
+    """
+    gt_box_ann = sv.BoxAnnotator(color=gt_color, thickness=gt_thickness)
+    gt_lbl_ann = sv.LabelAnnotator(
+        color=gt_color, text_scale=text_scale, text_thickness=1,
+        text_position=sv.Position.BOTTOM_LEFT,
+    )
+    pred_box_ann = sv.BoxAnnotator(color=pred_color, thickness=pred_thickness)
+    pred_lbl_ann = sv.LabelAnnotator(
+        color=pred_color, text_scale=text_scale, text_thickness=1,
+        text_position=sv.Position.TOP_LEFT,
+    )
+
+    annotated = image.copy()
+
+    # GT
+    if gt_xyxy is not None and len(gt_xyxy) > 0 and gt_class_ids is not None:
+        gt_dets = sv.Detections(xyxy=gt_xyxy.astype(np.float64), class_id=gt_class_ids)
+        gt_labels = [
+            f"GT:{int(c)} {class_names.get(int(c), str(int(c)))}" for c in gt_class_ids
+        ]
+        annotated = gt_box_ann.annotate(scene=annotated, detections=gt_dets)
+        annotated = gt_lbl_ann.annotate(scene=annotated, detections=gt_dets, labels=gt_labels)
+
+    # Predictions
+    if len(pred_dets) > 0:
+        pred_labels = [
+            f"P:{int(pred_dets.class_id[i])} {class_names.get(int(pred_dets.class_id[i]), str(int(pred_dets.class_id[i])))} "
+            f"{pred_dets.confidence[i]:.2f}" if pred_dets.confidence is not None
+            else f"P:{int(pred_dets.class_id[i])} {class_names.get(int(pred_dets.class_id[i]), str(int(pred_dets.class_id[i])))}"
+            for i in range(len(pred_dets))
+        ]
+        annotated = pred_box_ann.annotate(scene=annotated, detections=pred_dets)
+        annotated = pred_lbl_ann.annotate(scene=annotated, detections=pred_dets, labels=pred_labels)
+
+    if draw_legend:
+        annotated = draw_gt_pred_legend(annotated, gt_color.as_bgr(), pred_color.as_bgr())
+
+    return annotated
+
+
+def draw_gt_pred_legend(image: np.ndarray, gt_bgr: tuple, pred_bgr: tuple) -> np.ndarray:
+    """Overlay a small legend: GT color solid thick, Pred color solid thin.
+
+    Args:
+        image: BGR image to draw on (modified in-place on a copy).
+        gt_bgr: GT box color as BGR tuple.
+        pred_bgr: Pred box color as BGR tuple.
+
+    Returns:
+        Image with legend drawn.
+    """
+    import cv2
+    img = image.copy()
+    font, margin, line_len, y = cv2.FONT_HERSHEY_SIMPLEX, 6, 30, 16
+    cv2.line(img, (margin, y), (margin + line_len, y), gt_bgr, 2, cv2.LINE_AA)
+    cv2.putText(img, "GT", (margin + line_len + 4, y + 4), font, 0.4, gt_bgr, 1)
+    cv2.line(img, (margin, y + 18), (margin + line_len, y + 18), pred_bgr, 1, cv2.LINE_AA)
+    cv2.putText(img, "Pred", (margin + line_len + 4, y + 22), font, 0.4, pred_bgr, 1)
+    return img
+
+
+# ---------------------------------------------------------------------------
 # Tracker helpers
 # ---------------------------------------------------------------------------
 

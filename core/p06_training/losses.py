@@ -252,9 +252,9 @@ class IoULoss(nn.Module):
 
         inter_area = (inter_x2 - inter_x1).clamp(min=0) * (inter_y2 - inter_y1).clamp(min=0)
 
-        # Union
-        pred_area = (pred[:, 2] - pred[:, 0]) * (pred[:, 3] - pred[:, 1])
-        target_area = (target[:, 2] - target[:, 0]) * (target[:, 3] - target[:, 1])
+        # Union — clamp dims to ≥0 so degenerate predictions don't produce NaN
+        pred_area = (pred[:, 2] - pred[:, 0]).clamp(min=0) * (pred[:, 3] - pred[:, 1]).clamp(min=0)
+        target_area = (target[:, 2] - target[:, 0]).clamp(min=0) * (target[:, 3] - target[:, 1]).clamp(min=0)
         union_area = pred_area + target_area - inter_area + self.eps
 
         iou = inter_area / union_area
@@ -448,8 +448,9 @@ class YOLOXLoss(DetectionLoss):
             obj_target[fg_mask] = 1.0
             obj_loss = self.bce_loss(pred[:, 4:5], obj_target).sum()
 
-            # Regression loss (IoU-based)
-            reg_loss = self.iou_loss_fn(fg_pred_boxes, fg_gt_boxes).sum()
+            # Regression loss (IoU-based); nan_to_num guards against fp16 overflow edge cases
+            reg_loss = self.iou_loss_fn(fg_pred_boxes, fg_gt_boxes)
+            reg_loss = torch.nan_to_num(reg_loss, nan=0.0, posinf=0.0, neginf=0.0).sum()
 
             total_cls_loss = total_cls_loss + cls_loss
             total_obj_loss = total_obj_loss + obj_loss
@@ -586,8 +587,8 @@ class YOLOXLoss(DetectionLoss):
 
         inter_area = (inter_x2 - inter_x1).clamp(min=0) * (inter_y2 - inter_y1).clamp(min=0)
 
-        area_a = (boxes_a[:, 2] - boxes_a[:, 0]) * (boxes_a[:, 3] - boxes_a[:, 1])
-        area_b = (boxes_b[:, 2] - boxes_b[:, 0]) * (boxes_b[:, 3] - boxes_b[:, 1])
+        area_a = (boxes_a[:, 2] - boxes_a[:, 0]).clamp(min=0) * (boxes_a[:, 3] - boxes_a[:, 1]).clamp(min=0)
+        area_b = (boxes_b[:, 2] - boxes_b[:, 0]).clamp(min=0) * (boxes_b[:, 3] - boxes_b[:, 1]).clamp(min=0)
 
         union = area_a.unsqueeze(1) + area_b.unsqueeze(0) - inter_area + eps
 

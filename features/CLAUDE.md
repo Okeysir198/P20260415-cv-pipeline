@@ -13,7 +13,7 @@
 
 | Folder | Type | Mode | Best Pretrained | Pretrained mAP50 | Status |
 |---|---|---|---|---|---|
-| `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | ⬜ not started |
+| `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | 🔄 in progress |
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi` | Orchestrator | 🔧 Pretrained only | dwpose_384_pose (det_rate=1.0) | — | 🔄 pipelines done |
@@ -60,7 +60,7 @@ GPU 2 has ~28 GB — run one training job at a time to avoid OOM.
 **Phase A — Data prep:** ✅ Complete (all 5 ML features)
 
 **Phase B — Training (sequential, one at a time on GPU 2):**
-1. `safety-fire_detection` — largest dataset, best pretrained baseline (mAP50=0.153)
+1. `safety-fire_detection` — 🔄 `06_training.yaml` done (gpu_augment enabled, 3 arch configs); ready to train
 2. `ppe-helmet_detection` — 4 classes, start from melihuzunoglu_yolov11_ppe.pt
 3. `safety-fall-detection` — specialized class, start from yolov11_fall_melihuzunoglu.pt
 4. `ppe-shoes_detection` — largest dataset (37k imgs), COCO backbone only

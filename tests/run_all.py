@@ -49,6 +49,7 @@ CORE_TESTS = [
     "test_p06_classification_training.py",
     "test_p06_segmentation_metrics.py",
     "test_p06_segmentation_training.py",
+    "test_p06_val_prediction_logger.py",
     # p07: HPO
     "test_p07_hpo.py",
     # p08: Evaluation (depends on p06 checkpoint)

@@ -26,7 +26,8 @@ Detects fire and smoke in images/video. Both classes are absent from COCO — pr
 - [x] `p00_data_prep` — 17,373 imgs, DATASET_REPORT
 - [x] `p02_annotation_qa` — LS project 13
 - [x] `code/benchmark.py` — pretrained benchmark complete
-- [ ] `06_training.yaml` — use SalahALHaismawi_yolov26 as starting weights
+- [x] `06_training.yaml` — gpu_augment enabled; data_viz/aug_viz callbacks wired; subset config added
+- [x] Arch comparison configs — `06_training_dfine.yaml`, `06_training_rtdetr.yaml`, `06_training_yolox.yaml` created for arch selection
 - [ ] `p06_training` — freeze backbone 5 epochs, then full fine-tune
 - [ ] `p08_evaluation` — evaluate on test split
 - [ ] `p09_export` — ONNX export
@@ -74,6 +75,34 @@ Detects fire and smoke in images/video. Both classes are absent from COCO — pr
 
 Full results: `eval/benchmark_results.json` | `eval/benchmark_report.md`
 
+## Data Findings
+
+- **Test class imbalance**: test split is ~35% fire / 65% smoke vs ~53/47 in train+val — test set was not stratified by class. Per-class AP50 on test will be biased; interpret AP50_cls0 (fire) vs AP50_cls1 (smoke) with this skew in mind.
+- **Objects are predominantly tiny**: bbox area distribution peaks at 0.01–0.1% of image area. Most objects are below the "tiny (<1%)" tier — do not reduce input resolution below 640×640.
+- **~18% empty images**: significant background-only image fraction across all splits — good for false-positive suppression, keep them in training.
+
+## GPU Augmentation Benchmark (2026-04-18, 640×640, 4 workers, updated post-vectorization)
+
+| batch_size | CPU ms/batch | GPU ms/batch | Speedup | GPU img/s |
+|---|---|---|---|---|
+| 16 | 192 ms | 60 ms | 3.23x | 269 |
+| 32 | 397 ms | 137 ms | 2.90x | 234 |
+| 64 | 782 ms | 273 ms | 2.86x | 234 |
+
+Mosaic stays CPU. GPU path: batched `affine_grid+grid_sample`, vectorized HSV, randomized ColorJitter order. Enabled via `training.gpu_augment: true`.
+
+## Training Commands
+
+```bash
+# Train with default config
+uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training.yaml
+
+# Arch comparison (run each, pick best mAP50, then full train)
+uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
+uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml
+uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_rtdetr.yaml
+```
+
 ## Key Files
 
 ```
@@ -92,13 +121,30 @@ eval/benchmark_report.md          — benchmark summary
 model:
   arch: yolox-s          # start with s; upgrade to m if mAP plateaus
   num_classes: 2
-  pretrained: true
-  pretrained_path: pretrained/safety-fire_detection/SalahALHaismawi_yolov26-fire-detection/best.pt
+  pretrained: ../../../pretrained/yolox_m.pth   # SalahALHaismawi is Ultralytics DetectionModel (YOLO v2.6) — incompatible with custom YOLOX; use COCO yolox_m.pth backbone
 
 training:
   epochs: 100
   freeze_backbone_epochs: 5
   lr: 0.001
   lr_backbone: 0.0001
+  gpu_augment: true
+
+augmentation:
+  mosaic: true
+  contrast: 0.4          # vectorized luma-contrast on GPU (fire/smoke are low-contrast)
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  fliplr: 0.5
+  scale: [0.5, 1.5]
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+data:
   batch_size: 16
+  num_workers: 8
+  prefetch_factor: 4     # Mosaic does 4 disk reads/sample — deep prefetch critical
+  pin_memory: true
 ```

@@ -1,7 +1,7 @@
 # Training config — Fire Detection (YOLOX-M)
 model:
   arch: yolox-m
-  pretrained: ../../pretrained/yolox_m.pth
+  pretrained: ../../../pretrained/yolox_m.pth
   num_classes: 2
   input_size: [640, 640]
   depth: 0.67
@@ -10,18 +10,24 @@ model:
 data:
   dataset_config: 05_data.yaml
   batch_size: 16
-  num_workers: 4
+  num_workers: 8             # Mosaic does 4 disk reads/sample — more workers pay off
+  prefetch_factor: 4         # deep prefetch queue; critical for Mosaic throughput
   pin_memory: true
+  subset:                    # Limit each split independently (null = use all data)
+    train: null              # int (N images), float (fraction 0.0–1.0), or null
+    val: null                # Use for: quick code checks, experiments, progressive training
+    test: null
 
 augmentation:
   mosaic: true
-  mixup: true
+  mixup: false               # disabled for baseline run; enable after first stable mAP
+  contrast: 0.4              # GPU luma-contrast; fire/smoke are inherently low-contrast
   hsv_h: 0.015
-  hsv_s: 0.7
+  hsv_s: 0.5
   hsv_v: 0.4
   fliplr: 0.5
   flipud: 0.0
-  scale: [0.1, 2.0]
+  scale: [0.5, 1.5]
   degrees: 10.0
   translate: 0.1
   shear: 2.0
@@ -40,6 +46,35 @@ training:
   grad_clip: 35.0
   ema: true
   ema_decay: 0.9998
+  gpu_augment: true            # RandomAffine/ColorJitter/Flips run on GPU; Mosaic stays CPU
+
+  data_viz:                # Raw images + GT label grid (once before training)
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+  aug_viz:                 # Augmented images + label grid (once before training)
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+  val_viz:                 # Pred vs GT grid saved each epoch to val_predictions/
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.25
+    grid_cols: 2
+    gt_thickness: 2
+    pred_thickness: 1
+    text_scale: 0.4
+    dpi: 120
 
 loss:
   type: yolox

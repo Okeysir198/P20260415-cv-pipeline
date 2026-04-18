@@ -511,8 +511,10 @@ class YOLOXModel(DetectionModel):
             # cx, cy = (grid + 0.5 + raw_xy) * stride  — YOLOX style
             # w, h = exp(raw_wh) * stride
             decoded = raw.clone()
-            decoded[..., :2] = (grid + 0.5 + raw[..., :2]) * stride
-            decoded[..., 2:4] = torch.exp(raw[..., 2:4].clamp(min=-5.0, max=10.0)) * stride
+            # clamp offsets: (grid+0.5+offset)*stride must fit fp16 (<65504/32≈2047→offset≤1967)
+            decoded[..., :2] = (grid + 0.5 + raw[..., :2].clamp(min=-100.0, max=100.0)) * stride
+            # max=7.0: exp(7)*stride_max(32)=32891 < fp16_max(65504), prevents inf→NaN in GIoU under AMP
+            decoded[..., 2:4] = torch.exp(raw[..., 2:4].clamp(min=-5.0, max=7.0)) * stride
 
             outputs.append(decoded)
 

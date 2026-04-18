@@ -31,6 +31,7 @@ uv run -m pytest tests/test_p06_training.py -v
 | `test_utils07_paddle_bridge.py` | YOLO → COCO JSON converter (end-to-end on synthetic tree) |
 | `test_utils08_release.py` | Version bump, use-case detection, full release promotion |
 | `test_utils09_yolo_io.py` | `pil_to_b64` round-trip, YOLO label parsing edge cases |
+| `test_p06_aug_benchmark.py` | CPU vs GPU augmentation throughput — **standalone perf benchmark, not in `run_all.py`**; run with `uv run tests/test_p06_aug_benchmark.py` |
 
 ### Pipeline (sequential — run in order via `run_all.py`)
 

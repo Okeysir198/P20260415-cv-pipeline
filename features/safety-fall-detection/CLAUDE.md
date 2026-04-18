@@ -61,6 +61,12 @@ Detects fallen persons (on the ground) distinct from upright persons. COCO `pers
 
 Full results: `eval/benchmark_results.json` | `eval/benchmark_report.md`
 
+## Notes
+
+- `fallen_person` bbox is often horizontal/wide-aspect — mosaic augmentation helps; keep input resolution at 640×640
+- If post-training AP_fallen is low, check that `cctv_fall` (112 imgs, ceiling-mounted angle) is included — it's the only CCTV-angle source
+- Low pretrained mAP (0.05) is expected and normal; the class does not exist in COCO
+
 ## Key Files
 
 ```
