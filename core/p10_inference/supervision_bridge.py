@@ -10,7 +10,10 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import supervision as sv
-from trackers import ByteTrackTracker
+
+# `trackers` is only used by create_tracker/update_tracker (video inference).
+# Imported lazily so training workflows that only need annotate_gt_pred
+# don't require the trackers package.
 
 # Allow imports from pipeline root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -303,7 +306,7 @@ def draw_gt_pred_legend(image: np.ndarray, gt_bgr: tuple, pred_bgr: tuple) -> np
 # ---------------------------------------------------------------------------
 
 
-def create_tracker(config: Optional[Dict] = None) -> ByteTrackTracker:
+def create_tracker(config: Optional[Dict] = None) -> "ByteTrackTracker":
     """Create a ByteTrackTracker from config.
 
     Args:
@@ -312,6 +315,7 @@ def create_tracker(config: Optional[Dict] = None) -> ByteTrackTracker:
     Returns:
         ``ByteTrackTracker`` instance.
     """
+    from trackers import ByteTrackTracker
     tracker_cfg = config or {}
 
     return ByteTrackTracker(
@@ -323,7 +327,7 @@ def create_tracker(config: Optional[Dict] = None) -> ByteTrackTracker:
 
 
 def update_tracker(
-    tracker: ByteTrackTracker,
+    tracker: "ByteTrackTracker",
     detections: sv.Detections,
 ) -> sv.Detections:
     """Run tracker update and return detections with tracker_id populated.

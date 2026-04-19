@@ -23,13 +23,19 @@ from core.p06_models.face_registry import (
     build_face_embedder,
 )
 
-# Import model modules to trigger registration
+# Import model modules to trigger registration.
+# yolox is always available (only needs torch). HF-backed modules are
+# soft-imported so minimal venvs (e.g. .venv-yolox-official/) that omit
+# transformers / timm still get a usable yolox registry.
 import core.p06_models.yolox  # noqa: F401
-import core.p06_models.hf_model  # noqa: F401
-import core.p06_models.dfine  # noqa: F401
-import core.p06_models.rtdetr  # noqa: F401
-import core.p06_models.hf_classification_variants  # noqa: F401
-import core.p06_models.hf_segmentation_variants  # noqa: F401
+try:
+    import core.p06_models.hf_model  # noqa: F401
+    import core.p06_models.dfine  # noqa: F401
+    import core.p06_models.rtdetr  # noqa: F401
+    import core.p06_models.hf_classification_variants  # noqa: F401
+    import core.p06_models.hf_segmentation_variants  # noqa: F401
+except ImportError:
+    pass
 
 # Import timm model module to trigger registration (optional dep)
 try:

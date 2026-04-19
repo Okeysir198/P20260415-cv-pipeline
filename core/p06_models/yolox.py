@@ -37,28 +37,128 @@ _YOLOX_VARIANTS: Dict[str, Tuple[float, float]] = {
 # ---------------------------------------------------------------------------
 
 
-def _build_yolox_official(
-    num_classes: int, depth: float, width: float
-) -> nn.Module:
-    """Attempt to build YOLOX from the official package.
+class _OfficialYOLOXAdapter(DetectionModel):
+    """Adapter wrapping the official Megvii ``yolox`` package.
 
-    Args:
-        num_classes: Number of detection classes.
-        depth: Depth multiplier (e.g. 0.67 for YOLOX-M).
-        width: Width multiplier (e.g. 0.75 for YOLOX-M).
+    Selected via ``config["model"]["impl"] = "official"``. Requires the
+    ``yolox`` package — install by running ``bash scripts/setup-yolox-venv.sh``
+    and using the resulting ``.venv-yolox-official/`` for training.
 
-    Returns:
-        YOLOX model if official package is available.
-
-    Raises:
-        ImportError: If the official YOLOX package is not installed.
+    Exposes the same :class:`DetectionModel` contract as
+    :class:`YOLOXModel` so the existing ``DetectionTrainer`` works unchanged
+    via its ``forward_with_loss()`` dispatch hook.
     """
-    from yolox.models import YOLOX, YOLOPAFPN, YOLOXHead
 
-    in_channels = [256, 512, 1024]
-    backbone = YOLOPAFPN(depth, width, in_channels=in_channels)
-    head = YOLOXHead(num_classes, width, in_channels=in_channels)
-    return YOLOX(backbone, head)
+    def __init__(
+        self, num_classes: int, depth: float, width: float
+    ) -> None:
+        super().__init__()
+        from yolox.models import YOLOX, YOLOPAFPN, YOLOXHead
+
+        in_channels = [256, 512, 1024]
+        backbone = YOLOPAFPN(depth, width, in_channels=in_channels)
+        head = YOLOXHead(num_classes, width, in_channels=in_channels)
+        self._model = YOLOX(backbone, head)
+        # Decoded outputs (B, N, 5+C) in eval mode — matches YOLOXModel layout
+        self._model.head.decode_in_inference = True
+        self.num_classes = num_classes
+        self._strides = [8, 16, 32]
+
+    @property
+    def output_format(self) -> str:
+        return "yolox"
+
+    @property
+    def strides(self) -> List[int]:
+        return list(self._strides)
+
+    @staticmethod
+    def _convert_targets(targets: List[torch.Tensor]) -> torch.Tensor:
+        """Convert per-image target list to official padded batch tensor.
+
+        Args:
+            targets: List of B tensors, each ``(M_i, 5)`` with
+                ``[cls, cx, cy, w, h]`` in pixel coordinates.
+
+        Returns:
+            Padded tensor of shape ``(B, max_M, 5)``. All-zero rows are
+            ignored by ``YOLOXHead`` (class id 0 + zero box = padding).
+        """
+        B = len(targets)
+        max_m = max((t.shape[0] for t in targets), default=0)
+        if max_m == 0:
+            max_m = 1  # YOLOXHead requires at least 1 slot
+        device = targets[0].device if B > 0 else torch.device("cpu")
+        dtype = targets[0].dtype if B > 0 else torch.float32
+        out = torch.zeros(B, max_m, 5, device=device, dtype=dtype)
+        for i, t in enumerate(targets):
+            if t.shape[0] > 0:
+                out[i, : t.shape[0]] = t[:, :5]
+        return out
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Decoded predictions in eval mode; raw loss dict is not exposed here.
+
+        The trainer uses :meth:`forward_with_loss` for both training and
+        validation; this method is the inference-only fallback used by
+        downstream pipelines that call ``model(imgs)`` directly.
+        """
+        return self._model(x)
+
+    def load_state_dict(self, state_dict, strict: bool = True):
+        """Forward to wrapped upstream ``YOLOX`` module.
+
+        Upstream Megvii checkpoints (``pretrained/yolox_*.pth``) use keys like
+        ``backbone.backbone.*`` and ``head.*`` — matching this adapter's
+        ``self._model`` exactly. Without this override, those keys would land
+        unprefixed on the adapter, produce all-missing / all-unexpected (and
+        silently train-from-scratch under ``strict=False``). Also filters
+        shape-mismatched entries (e.g. 80-class COCO ``cls_preds`` into a
+        custom ``num_classes`` head) when ``strict=False``.
+        """
+        has_model_prefix = any(k.startswith("_model.") for k in state_dict)
+        target = self if has_model_prefix else self._model
+        if not strict:
+            state_dict = _filter_shape_mismatched(state_dict, target)
+        return target.load_state_dict(state_dict, strict=strict)
+
+    def forward_with_loss(
+        self, images: torch.Tensor, targets: List[torch.Tensor]
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        """Forward + loss contract matching HF detection models.
+
+        Training mode: returns ``(loss, loss_dict, None)`` — predictions
+        unused in the training loop.
+
+        Eval mode: two forwards — one in train mode under ``no_grad`` for
+        loss, one in eval mode for decoded predictions.
+        """
+        official_targets = self._convert_targets(targets)
+
+        if self.training:
+            loss_dict = self._model(images, official_targets)
+            loss = loss_dict["total_loss"]
+            mapped = {
+                "cls_loss": loss_dict["cls_loss"],
+                "obj_loss": loss_dict["conf_loss"],
+                "reg_loss": loss_dict["iou_loss"],
+            }
+            return loss, mapped, None
+
+        # Eval: loss requires train-mode forward (targets path); predictions
+        # require eval-mode forward. Official YOLOX can't return both.
+        self._model.train()
+        with torch.no_grad():
+            loss_dict = self._model(images, official_targets)
+        self._model.eval()
+        predictions = self._model(images)
+        loss = loss_dict["total_loss"]
+        mapped = {
+            "cls_loss": loss_dict["cls_loss"],
+            "obj_loss": loss_dict["conf_loss"],
+            "reg_loss": loss_dict["iou_loss"],
+        }
+        return loss, mapped, predictions
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +167,35 @@ def _build_yolox_official(
 
 
 _ACT_MAP = {"silu": nn.SiLU, "relu": nn.ReLU, "hardswish": nn.Hardswish}
+
+
+def _filter_shape_mismatched(
+    state_dict: Dict[str, torch.Tensor], model: nn.Module
+) -> Dict[str, torch.Tensor]:
+    """Drop state_dict entries whose shape does not match the target model.
+
+    ``nn.Module.load_state_dict(strict=False)`` handles missing/unexpected
+    keys but still raises ``RuntimeError`` on shape mismatches. When loading
+    an 80-class COCO-pretrained YOLOX checkpoint into a model with a
+    different ``num_classes``, the classification head ``cls_preds.*`` shapes
+    differ and must be dropped so the rest of the weights (backbone, neck,
+    regression head) load.
+    """
+    target = model.state_dict()
+    filtered: Dict[str, torch.Tensor] = {}
+    skipped: List[str] = []
+    for k, v in state_dict.items():
+        if k in target and target[k].shape != v.shape:
+            skipped.append(f"{k}: ckpt={tuple(v.shape)} model={tuple(target[k].shape)}")
+        else:
+            filtered[k] = v
+    if skipped:
+        logger.info(
+            "Skipping %d shape-mismatched pretrained weights (e.g. class head "
+            "on num_classes change): %s",
+            len(skipped), ", ".join(skipped[:3]) + (" ..." if len(skipped) > 3 else ""),
+        )
+    return filtered
 
 
 class _BaseConv(nn.Module):
@@ -529,10 +658,16 @@ class YOLOXModel(DetectionModel):
         return remapped
 
     def load_state_dict(self, state_dict: Dict[str, torch.Tensor], strict: bool = True):
-        """Load state dict, auto-remapping official yolox package key format if detected."""
+        """Load state dict, auto-remapping official yolox package key format if detected.
+
+        When ``strict=False`` also filters shape-mismatched entries (e.g.
+        80-class COCO ``cls_preds`` loading into a ``num_classes=2`` head).
+        """
         if any(k.startswith("backbone.backbone.") for k in state_dict):
             logger.info("Detected official YOLOX key format — remapping to YOLOXModel convention")
             state_dict = self._remap_official_keys(state_dict)
+        if not strict:
+            state_dict = _filter_shape_mismatched(state_dict, self)
         return super().load_state_dict(state_dict, strict=strict)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -570,11 +705,14 @@ class YOLOXModel(DetectionModel):
                 )
             grid = self._grid_cache[cache_key]
 
-            # cx, cy = (grid + 0.5 + raw_xy) * stride  — YOLOX style
-            # w, h = exp(raw_wh) * stride
+            # cx, cy = (grid + raw_xy) * stride  — matches official YOLOX
+            # (Megvii/YOLOX). Previously the custom path added "+ 0.5", which
+            # worked self-consistently when training from scratch but produced
+            # a half-grid-cell offset when loading Megvii pretrained weights —
+            # boxes shifted by up to 16 px on stride 32. Removed for parity.
             decoded = raw.clone()
-            # clamp offsets: (grid+0.5+offset)*stride must fit fp16 (<65504/32≈2047→offset≤1967)
-            decoded[..., :2] = (grid + 0.5 + raw[..., :2].clamp(min=-100.0, max=100.0)) * stride
+            # clamp offsets: (grid+offset)*stride must fit fp16 (<65504/32≈2047→offset≤1967)
+            decoded[..., :2] = (grid + raw[..., :2].clamp(min=-100.0, max=100.0)) * stride
             # max=7.0: exp(7)*stride_max(32)=32891 < fp16_max(65504), prevents inf→NaN in GIoU under AMP
             decoded[..., 2:4] = torch.exp(raw[..., 2:4].clamp(min=-5.0, max=7.0)) * stride
 
@@ -658,8 +796,12 @@ class YOLOXModel(DetectionModel):
 def build_yolox(config: dict) -> nn.Module:
     """Build a YOLOX model from config.
 
-    Tries the official ``yolox`` package first; falls back to the
-    self-contained :class:`YOLOXModel`.
+    Dispatches on ``config["model"]["impl"]``:
+
+    * ``"custom"`` (default) — self-contained :class:`YOLOXModel`.
+    * ``"official"`` — :class:`_OfficialYOLOXAdapter` wrapping the Megvii
+      ``yolox`` package. Requires ``.venv-yolox-official/`` (see
+      ``scripts/setup-yolox-venv.sh``).
 
     The variant name (e.g. ``yolox-m``) provides default depth/width, but
     explicit ``depth`` and ``width`` in ``config["model"]`` take precedence.
@@ -674,15 +816,34 @@ def build_yolox(config: dict) -> nn.Module:
     model_cfg = config.get("model", {})
     arch = model_cfg.get("arch", "yolox-m").lower()
     num_classes = model_cfg["num_classes"]
+    impl = model_cfg.get("impl", "custom").lower()
 
     # Resolve default depth/width from variant, allow config override
     default_depth, default_width = _YOLOX_VARIANTS.get(arch, (0.67, 0.75))
     depth = model_cfg.get("depth", default_depth)
     width = model_cfg.get("width", default_width)
 
+    if impl == "official":
+        if model_cfg.get("act_type", "silu") != "silu" or model_cfg.get("depthwise", False):
+            logger.warning(
+                "model.impl=official ignores act_type / depthwise config keys "
+                "(fixed to upstream defaults: silu, depthwise=False)."
+            )
+        model = _OfficialYOLOXAdapter(num_classes, depth, width)
+        logger.info(
+            "Built YOLOX via official Megvii package "
+            "(depth=%.2f, width=%.2f, classes=%d).",
+            depth, width, num_classes,
+        )
+        return model
+
+    if impl != "custom":
+        raise ValueError(
+            f"Unknown model.impl={impl!r}. Expected 'custom' or 'official'."
+        )
+
     act_type = model_cfg.get("act_type", "silu")
     depthwise = model_cfg.get("depthwise", False)
-
     model = YOLOXModel(num_classes, depth, width, act_type=act_type, depthwise=depthwise)
     logger.info(
         "Built YOLOX model using built-in architecture "
