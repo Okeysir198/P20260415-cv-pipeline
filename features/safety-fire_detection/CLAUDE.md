@@ -28,6 +28,7 @@ Detects fire and smoke in images/video. Both classes are absent from COCO — pr
 - [x] `code/benchmark.py` — pretrained benchmark complete
 - [x] Arch comparison configs — `06_training_dfine.yaml`, `06_training_rtdetr.yaml`, `06_training_yolox.yaml` created and tested
 - [x] Arch comparison complete — **RT-DETRv2-R18 wins** (mAP50=0.541 @ ep15, 10% data); proceed with `06_training_rtdetr.yaml`
+- [x] `p07_hpo` — RT-DETRv2 best: lr=1.6e-4, warmup=15, wd=1.15e-5 (mAP50=0.119 @ 5% data). Applied to `06_training_rtdetr.yaml`.
 - [ ] `p06_training` — full training: `06_training_rtdetr.yaml`, bs=32, 150 epochs, 100% dataset
 - [ ] `p08_evaluation` — evaluate on test split
 - [ ] `p09_export` — ONNX export
@@ -129,3 +130,20 @@ Max safe batch size on RTX 5090 (28 GB free, fp32): **bs=32** (14.7 GB peak). bs
 
 - **D-FINE/RT-DETR require `amp: false`** — HF DETR decoder overflows in fp16, producing NaN `pred_boxes` that crash `generalized_box_iou` on first forward pass. Both configs already set this.
 - **`ValPredictionLogger` class names** — reads `trainer._loaded_data_cfg` (the resolved `05_data.yaml`). Using `trainer._data_cfg` (the `data:` section of the training YAML) returns no `names` key and labels show as IDs only. Fixed in `callbacks.py`.
+- **`gpu_augment: true` is mandatory** for all three arch configs — always verify it's present. DETR-family (D-FINE, RT-DETRv2) additionally require `augmentation.mosaic: false` since DETR does not support mosaic.
+- **HPO commands** (parallel on two GPUs):
+  ```bash
+  # GPU 0 — YOLOX
+  CUDA_VISIBLE_DEVICES=0 uv run core/p07_hpo/run_hpo.py \
+    --config features/safety-fire_detection/configs/06_training_yolox.yaml \
+    --hpo-config configs/_shared/08_hpo_yolox.yaml \
+    --override data.subset.train=0.05 data.subset.val=0.10 data.batch_size=32 \
+      augmentation.mosaic=false \
+      training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
+  # GPU 1 — D-FINE (then RT-DETRv2 sequentially)
+  CUDA_VISIBLE_DEVICES=1 uv run core/p07_hpo/run_hpo.py \
+    --config features/safety-fire_detection/configs/06_training_dfine.yaml \
+    --hpo-config configs/_shared/08_hpo_detr.yaml \
+    --override data.subset.train=0.05 data.subset.val=0.10 data.batch_size=32 \
+      training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
+  ```

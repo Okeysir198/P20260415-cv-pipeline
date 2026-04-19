@@ -42,6 +42,16 @@ Every CLI that produces a timestamped run folder funnels through `utils.config.g
 
 See `tests/test_p12_raw_pipeline.py` for the canonical "both overrides" setup: it sets `CV_RUNS_BASE` at module level AND `output_dir_override` in p01's state as belt-and-suspenders.
 
+## Pretrained weight sanity check
+
+`core/p06_models/check_pretrained.py` runs COCO inference across YOLOX-M, D-FINE-S, and RT-DETRv2-R18 on one image and saves a side-by-side grid. Use it to confirm pretrained weights load correctly before starting a training run:
+
+```bash
+uv run core/p06_models/check_pretrained.py --image path/to/image.jpg --out eval/pretrained_check.png
+```
+
+`YOLOXModel.load_state_dict()` auto-detects official Megvii key format (`backbone.backbone.*`) and remaps to `YOLOXModel` convention — no manual key renaming needed.
+
 ## Registry pattern (p06_models)
 
 Models are built by `build_model(config)` which dispatches on `config["model"]["arch"]`. New architectures register themselves with a decorator — no edit to `build_model` needed.

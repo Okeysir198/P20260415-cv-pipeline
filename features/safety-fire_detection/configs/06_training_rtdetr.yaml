@@ -21,7 +21,7 @@ model:
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 8
+  batch_size: 32
   num_workers: 8
   prefetch_factor: 4
   pin_memory: true
@@ -48,9 +48,9 @@ training:
   backend: pytorch
   epochs: 150
   optimizer: adamw
-  lr: 0.0001
-  weight_decay: 0.0001
-  warmup_epochs: 10
+  lr: 0.00016         # HPO best (trial 3, mAP50=0.1195 @ 5% data)
+  weight_decay: 0.0000115
+  warmup_epochs: 15
   scheduler: cosine
   patience: 30
   val_viz:

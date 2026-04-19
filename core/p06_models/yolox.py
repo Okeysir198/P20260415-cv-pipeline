@@ -416,6 +416,12 @@ class _DecoupledHead(nn.Module):
         reg_out = self.reg_pred(reg_feat)
         obj_out = self.obj_pred(reg_feat)
 
+        # During inference apply sigmoid to confidence outputs (matches official YOLOX).
+        # During training keep raw logits — loss functions apply sigmoid internally.
+        if not self.training:
+            obj_out = obj_out.sigmoid()
+            cls_out = cls_out.sigmoid()
+
         # Concatenate: (B, 5+C, H, W)
         output = torch.cat([reg_out, obj_out, cls_out], dim=1)
         return output
@@ -472,6 +478,62 @@ class YOLOXModel(DetectionModel):
         for head in self.heads:
             nn.init.constant_(head.cls_pred.bias, bias_value)
             nn.init.constant_(head.obj_pred.bias, bias_value)
+
+    @staticmethod
+    def _remap_official_keys(state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Remap official yolox_m.pth keys to YOLOXModel naming convention.
+
+        Official YOLOX wraps CSPDarknet inside YOLOPAFPN (→ backbone.backbone.xxx)
+        and uses a single YOLOXHead with ModuleList (→ head.cls_convs.i.j.xxx).
+        Our YOLOXModel uses separate backbone/neck modules and per-scale heads.
+
+        Mapping:
+          backbone.backbone.*  →  backbone.*
+          backbone.*           →  neck.*           (PAFPN layers)
+          head.cls_convs.i.j.* →  heads.i.cls_convs.j.*
+          head.cls_preds.i.*   →  heads.i.cls_pred.*
+          head.obj_preds.i.*   →  heads.i.obj_pred.*
+          head.reg_convs.i.j.* →  heads.i.reg_convs.j.*
+          head.reg_preds.i.*   →  heads.i.reg_pred.*
+          head.stems.i.*       →  heads.i.stem.*
+        """
+        def _fix_blocks(key: str) -> str:
+            # Official YOLOX names bottleneck ModuleList "m"; ours is "blocks"
+            return key.replace(".m.", ".blocks.")
+
+        remapped: Dict[str, torch.Tensor] = {}
+        for k, v in state.items():
+            if k.startswith("backbone.backbone."):
+                remapped[_fix_blocks(k[len("backbone."):])] = v
+            elif k.startswith("backbone."):
+                remapped[_fix_blocks("neck." + k[len("backbone."):])] = v
+            elif k.startswith("head."):
+                parts = k.split(".", 3)  # ["head", <field>, <i>, <rest>]
+                field = parts[1]
+                if field in ("cls_convs", "reg_convs") and len(parts) == 4:
+                    i, rest = parts[2], parts[3]
+                    remapped[f"heads.{i}.{field}.{rest}"] = v
+                elif field in ("cls_preds", "obj_preds", "reg_preds") and len(parts) >= 3:
+                    i = parts[2]
+                    rest = parts[3] if len(parts) == 4 else ""
+                    dest_field = field.rstrip("s")  # cls_preds→cls_pred, etc.
+                    remapped[f"heads.{i}.{dest_field}.{rest}".rstrip(".")] = v
+                elif field == "stems" and len(parts) >= 3:
+                    i = parts[2]
+                    rest = parts[3] if len(parts) == 4 else ""
+                    remapped[f"heads.{i}.stem.{rest}".rstrip(".")] = v
+                else:
+                    remapped[k] = v
+            else:
+                remapped[k] = v
+        return remapped
+
+    def load_state_dict(self, state_dict: Dict[str, torch.Tensor], strict: bool = True):
+        """Load state dict, auto-remapping official yolox package key format if detected."""
+        if any(k.startswith("backbone.backbone.") for k in state_dict):
+            logger.info("Detected official YOLOX key format — remapping to YOLOXModel convention")
+            state_dict = self._remap_official_keys(state_dict)
+        return super().load_state_dict(state_dict, strict=strict)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the full YOLOX model.
