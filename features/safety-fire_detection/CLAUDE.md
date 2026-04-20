@@ -126,6 +126,79 @@ eval/benchmark_report.md           — benchmark summary
 
 Max safe batch size on RTX 5090 (28 GB free, fp32): **bs=32** (14.7 GB peak). bs=48 fits but leaves only 0.3 GB headroom.
 
+## Full Training Run — YOLOX-M (official), 2026-04-19
+
+**Setup:** `06_training_yolox.yaml` + `--override model.impl=official augmentation.normalize=false`. Ran in `.venv-yolox-official/`. Trainer unchanged — adapter uses existing `forward_with_loss()` hook.
+
+**Result (ep51 / early stopped ep101):**
+
+| Metric | Quick val (20% subset, drove best.pth) | Full val (true) | With TTA (3 scales × h-flip) |
+|---|---|---|---|
+| mAP@0.5 | 0.510 | **0.442** | **0.492** |
+| Fire AP | 0.607 | 0.530 | 0.546 |
+| Smoke AP | 0.413 | 0.354 | 0.438 |
+| Best F1 @ conf 0.42 | — | fire 0.561 / smoke 0.446 | — |
+
+**Headline lessons from error analysis (`eval/yolox_official_ep51/`)**:
+
+1. **99.9% of errors are background false positives** (9.05M FPs vs 579 missed GT, 126 class confusions). When the model matches a real object it classifies correctly ~85% of the time (confusion diagonal 0.87 fire / 0.83 smoke).
+2. **F1-vs-confidence curve is pinched** — useful only in `[0.33, 0.52]`, peak at 0.42. Model is miscalibrated: overconfident on many FPs.
+3. **Hardest val images are indoor warehouses** (4/6 top hardest). Packaging / stacked boxes / reflective surfaces get confused with smoke. Landscape scenes with distant small fires are handled better than warehouse clutter.
+4. **Smoke is systematically weaker** (AP 0.35 vs fire 0.53). Scale-variant and fuzzy-boundary → TTA closes most of the gap (+24% smoke AP).
+5. **Max achievable recall ~0.85** for fire, ~0.80 for smoke — some true boxes are literally never proposed even at conf=0.
+
+**YOLOX-M v2 retrain (in progress)**: `val_full_interval=0` → best-checkpoint selection on full val; expecting the true best epoch, not the lucky-quick-val peak.
+
+## Full Training Run — RT-DETRv2-R18, 2026-04-19
+
+**First run** (config defaults: lr=0.00016, patience=30): best quick val 0.345 @ ep9; **full val diverged** — 0.303 @ ep10 → 0.194 @ ep15 → 0.063 @ ep35 → early stopped ep39. LR from 5%-data HPO was too hot for full data; after 15-epoch warmup completed at ep15, model oscillated then collapsed.
+
+**Retrain** (lr=0.0001, patience=50, `val_full_interval=0`): plateaued ~0.335 mAP by ep17. Even at the lower LR, RT-DETRv2 cannot break the mid-0.30s ceiling on this dataset at scale. See Iteration 7 overfit-capability analysis below.
+
+## Arch Learnings — D-FINE-S, 2026-04-19
+
+**Tried twice, both failed with class collapse** (one class → AP≈0, other inches up):
+
+| Run | Config | Outcome |
+|---|---|---|
+| #1 | Defaults (lr=0.0001, bs=8, warmup=10) | ep38 mAP 0.034, **fire AP 0.0002** (smoke-only) |
+| #2 | RT-DETR-style (lr=0.00016, bs=16, wd=1.15e-5, warmup=15) | ep22 mAP 0.016, fire AP 0.000 (class flip — now smoke-only, even lower) |
+
+The hparam tune (2.6× stronger gradient signal per step) **flipped which class collapsed** but did not fix the underlying problem — this is the signature of mode collapse, not undertraining.
+
+**Root-cause investigation** (what we verified, not what we guessed):
+
+1. **Load-report reinits are identical between D-FINE and RT-DETRv2** — both reinit `decoder.class_embed.{0,1,2}.weight + bias`, `denoising_class_embed.weight` (`[81,256]→[3,256]`), and `enc_score_head.weight + bias`. The earlier guess that D-FINE reinits more was wrong. `.venv-yolox-official/bin/python -c "from transformers import DFineForObjectDetection, RTDetrV2ForObjectDetection; ..."` — diff is zero on the reinit keys.
+2. **HF loss coefficients are identical**: `weight_loss_vfl=1.0, weight_loss_bbox=5.0, weight_loss_giou=2.0`, `matcher_class_cost=2.0, matcher_bbox_cost=5.0, matcher_giou_cost=2.0`, `eos_coefficient=0.0001`, `focal_loss_α=0.75 γ=2.0`, `num_queries=300`, `num_denoising=100`. Same for both archs.
+3. **Only architectural difference left** is D-FINE's **Distribution Focal Loss (DFL) + Fine-grained Distribution Refinement** on the reg head: D-FINE predicts a distribution over 16 bins per box offset (4 × 16 × N_queries extra reg params to train), while RT-DETRv2 predicts 4 direct coordinates. With reinit'd cls head and ~17k-image fine-tune, D-FINE's reg head is too unstable at startup for the bipartite matcher to find consistent matches → one class's queries win and the other starves.
+
+**Hypotheses to try if you want to rescue D-FINE** (not done — RT-DETRv2 is the pragmatic choice):
+- `num_denoising: 300` (3× default) to force more cls-head training via noise queries
+- `warmup_epochs: 40` (2–4× default) to stabilise before reg head dominates
+- Freeze backbone + neck for first 10 epochs via `training.freeze: ["model.backbone", "model.encoder"]`
+- Set `matcher_class_cost: 5.0` (up from 2.0) to make matcher weight class correctness more than box accuracy — should force balanced query specialization
+
+**Also found/fixed: `cls_loss` logging was 0 for DETR-family.** `hf_model.py::forward_with_loss` filtered `raw_loss_dict` keys for `"ce"` or `"class"` — but HF DETR returns keys `loss_vfl` (Varifocal Loss) and `loss_dfl` (Distribution Focal Loss). So the per-component loss breakdown was silently empty. Fixed to also match `vfl / focal / dfl / reg`. This means **any prior DETR training log where `train/cls_loss=0.0` was an artifact**, not actual zero.
+
+**Rule of thumb (for this repo's detection tasks)**: prefer RT-DETRv2-R18 over D-FINE-S when `num_classes ≤ 4` and dataset is under 50k images. D-FINE is probably fine for COCO-sized problems with 80+ classes where the cls head has enough signal to specialize queries.
+
+## Overfit-capability analysis — 2026-04-20 (Iteration 7)
+
+On 5% subset (585 train / 130 val, augmentation OFF, 150 epochs):
+
+| Arch | Config | train/mAP50 | val/mAP50 | Memorizes? |
+|---|---|---|---|---|
+| YOLOX-M | `lr=0.0025`, bs=16 (Megvii scaling) | **0.978** | 0.478 | ✅ yes |
+| RT-DETRv2-R18 | `matcher_class_cost=5`, `num_denoising=20`, `lr=5e-5`, bs=8 | 0.282 | 0.138 | ❌ no |
+| RT-DETRv2-R18 | `num_queries=100` variant | 0.234 | 0.116 | ❌ no |
+| RT-DETRv2-R18 | `lr=1e-4` variant | 0.194 | 0.133 | ❌ no |
+
+**Key fix (YOLOX)**: Megvii's `basic_lr = 0.01 × bs/64` rule means `lr=0.01` at `bs=16` is 4× too hot. Use `lr=0.0025` at `bs=16` for small-batch training. With this fix + aug off, YOLOX-M memorizes the 5% train subset to near-perfection (train mAP 0.978) while also generalizing (val 0.478).
+
+**Key finding (RT-DETR)**: pipeline is correct (verified via single-batch overfit: loss 215 → 2.75 in 300 steps on 8 images with predictions matching GT at 0.99+ confidence after the `id2label` fix), but the bipartite matcher cannot stabilize query specialization on 585 images regardless of matcher cost / query count / LR / num_denoising. Not a tunable hparam issue — architectural. Use **YOLOX-M as the production arch for fire_detection**; re-evaluate RT-DETRv2 only on full 17k data.
+
+See `notebooks/detr_finetune_reference/CLAUDE.md` for the isolated reference-notebook environment used to sanity-check this finding against qubvel's canonical recipe.
+
 ## Gotchas
 
 - **D-FINE/RT-DETR require `amp: false`** — HF DETR decoder overflows in fp16, producing NaN `pred_boxes` that crash `generalized_box_iou` on first forward pass. Both configs already set this.

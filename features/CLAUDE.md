@@ -13,7 +13,7 @@
 
 | Folder | Type | Mode | Best Pretrained | Pretrained mAP50 | Status |
 |---|---|---|---|---|---|
-| `safety-fire_detection` | Detection | 🎯 Fine-tune | RT-DETRv2-R18 (fine-tuned) | 0.541 (10% data) | 🔄 arch selected, full train pending |
+| `safety-fire_detection` | Detection | 🎯 Fine-tune | YOLOX-M (canonical lr) | 0.478 (5% val) / 0.978 (5% train) | ✅ YOLOX-M memorizes 5%; RT-DETRv2 plateaus at 0.28 train mAP (architectural small-data limit) |
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi` | Orchestrator | 🔧 Pretrained only | dwpose_384_pose (det_rate=1.0) | — | 🔄 pipelines done |
@@ -94,6 +94,33 @@ Do not start until all Phase 1 individual models are stable and mAP baselines ar
 ---
 
 ## Iteration Log
+
+### Iteration 7 — 2026-04-20
+
+Learning-capability / overfit analysis on 5% of `safety-fire_detection` (585 train / 130 val). Goal: verify which arch can memorize a small subset with augmentation OFF.
+
+- **YOLOX-M wins** at `lr=0.0025` (Megvii scaling rule `basic_lr × bs/64` for bs=16). Train mAP = **0.978**, val = 0.478, 150 ep in 21 min. Default `lr=0.01` at bs=16 was 4× too hot → plateau at train loss ~4, val mAP 0.38.
+- **RT-DETRv2-R18 cannot memorize 585 images** — tested 5 configs (lr=5e-5 / 1e-4 / 1.6e-4, `matcher_class_cost=2/5`, `num_denoising=20/100`, `num_queries=100/300`). Best train mAP = 0.28. Single-batch overfit works (loss 215 → 2.75 in 300 steps) so the pipeline is correct; the 5%-data plateau is a **steps-per-image shortage** compounded by bipartite-matcher instability on low-GT-density data.
+- Fixed `id2label`/`label2id` missing in `build_hf_model` — unblocked single-batch class memorization (fire top-1 conf 0.118 → 0.993) but didn't move 5%-data val numbers materially.
+- New: `notebooks/detr_finetune_reference/` — isolated `.venv-notebook/` with byte-for-byte ports of qubvel's RT-DETRv2 + D-FINE reference notebooks. Use as the known-good baseline for future DETR-family debugging. See that folder's `CLAUDE.md`.
+
+**Rule of thumb**: prefer YOLOX-M when train data < ~5k images for 2–4 classes. RT-DETR is expected to work at 17k+ images; small-data weakness is a DETR-family architectural trait (matches the D-FINE findings in Iteration 6).
+
+---
+
+### Iteration 6 — 2026-04-19
+
+Full training on `safety-fire_detection`, parallel on 2× RTX 5090. Main outcomes:
+
+- **YOLOX-M (official Megvii impl)** via new `.venv-yolox-official/` + `model.impl=official`. Early-stopped ep101, best quick-val mAP=0.510 @ ep51 (full val at that epoch: 0.442; see gotcha about quick-val overstating mAP). TTA eval (3 scales × h-flip) brings it to **0.492 mAP@0.5** (+11%), smoke AP +24%. Error analysis: 99.9% of errors are background FPs, F1-vs-conf curve is pinched at conf ≈ 0.42, hardest val images are indoor warehouses. See `features/safety-fire_detection/eval/yolox_official_ep51/`.
+- **RT-DETRv2-R18 diverges at published HPO LR (0.00016) on full data**: full-val peaks 0.303 @ ep10, collapses to 0.063 @ ep35. The HPO sweet-spot (from 5% data) is too hot for full data. Retraining with `lr=0.0001`, `patience=50`, `val_full_interval=0` (in progress).
+- **D-FINE-S class collapse confirmed structural, not hparam**: two runs with different hparams both collapsed one class to AP≈0; the tuned run flipped which class collapsed. Load-report reinits and HF loss coefficients are *identical* to RT-DETRv2 — the remaining architectural difference is D-FINE's DFL reg head, which is too unstable at startup for bipartite matching on a 2-class, ~17k-image fine-tune. Recommendation: use RT-DETRv2 for small-class detection tasks; save D-FINE for COCO-scale class counts. Full investigation in `features/safety-fire_detection/CLAUDE.md`.
+
+Dual-venv pattern added (custom vs official YOLOX); `scripts/setup-yolox-venv.sh`, `scripts/compare_yolox_impls.py`, `scripts/yolox_tta_eval.py`, `scripts/yolox_failure_cases.py` are the new tooling. Root CLAUDE.md updated with new gotchas (p08 preprocessing parity, quick-val overstatement, TTA utility, RT-DETR lr regression).
+
+Fixed along the way: (1) YOLOX custom `+ 0.5` half-grid-cell decode bug — bit-identical parity with official now; (2) p08 evaluator used its own `_MinimalDetectionDataset` with letterbox + `/255` only → 5× mAP gap vs training; now uses YOLOXDataset + `build_transforms(is_train=False)`; (3) HF detection logs `cls_loss=0.0` because loss-dict key filter missed `loss_vfl` / `loss_dfl` — fixed.
+
+---
 
 ### Iteration 5 — 2026-04-18
 

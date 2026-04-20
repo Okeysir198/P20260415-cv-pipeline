@@ -117,19 +117,32 @@ class ModelEvaluator:
                 f"Ensure dataset is prepared at {base_path}"
             )
 
-        # NOTE: We intentionally use _MinimalDetectionDataset instead of
-        # the project's YOLOXDataset + build_dataloader because the evaluator
-        # expects targets as dicts with "boxes" (xyxy pixel) and "labels" keys,
-        # whereas YOLOXDataset returns tensors in [class_id, cx, cy, w, h] format.
+        # Use the project's YOLOXDataset with the same val-split transform
+        # pipeline used during training (Resize + ToDtype + ImageNet Normalize).
+        # Target tensors are converted to the dict format expected by the
+        # mAP matching code in _get_predictions_detection.
+        from core.p05_data.detection_dataset import YOLOXDataset, collate_fn as det_collate
+        from core.p05_data.transforms import build_transforms
 
-        # Minimal fallback dataset
-        dataset = _MinimalDetectionDataset(images_dir, self.input_size)
+        transforms = build_transforms(
+            config={}, is_train=False,
+            input_size=tuple(self.input_size),
+            mean=self.data_config.get("mean", IMAGENET_MEAN),
+            std=self.data_config.get("std", IMAGENET_STD),
+        )
+        # YOLOXDataset expects a dict config with at least 'path' and split key
+        dataset = YOLOXDataset(
+            data_config=self.data_config,
+            split=split,
+            transforms=transforms,
+            base_dir=str(config_path),
+        )
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            collate_fn=_collate_fn,
+            collate_fn=det_collate,
             pin_memory=self.device.type == "cuda",
         )
 
@@ -217,12 +230,30 @@ class ModelEvaluator:
         dataloader = self._build_dataloader(split)
         all_predictions: List[Dict] = []
         all_ground_truths: List[Dict] = []
+        input_h, input_w = self.input_size
+
+        def _gt_to_dict(t: torch.Tensor) -> Dict:
+            """YOLOXDataset emits per-image (N, 5) tensor [cls, cx, cy, w, h]
+            normalized [0, 1]. Convert to xyxy pixel-space dict for mAP."""
+            arr = t.cpu().numpy() if hasattr(t, "cpu") else np.asarray(t)
+            if arr.shape[0] == 0:
+                return {"boxes": np.zeros((0, 4), dtype=np.float64),
+                        "labels": np.zeros(0, dtype=np.int64)}
+            cx = arr[:, 1] * input_w
+            cy = arr[:, 2] * input_h
+            w = arr[:, 3] * input_w
+            h = arr[:, 4] * input_h
+            x1, y1, x2, y2 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
+            return {
+                "boxes": np.stack([x1, y1, x2, y2], axis=1).astype(np.float64),
+                "labels": arr[:, 0].astype(np.int64),
+            }
 
         with ProgressBar(total=len(dataloader), desc=f"Evaluating [{split}]") as pbar:
             with torch.no_grad():
                 for batch in dataloader:
                     images = batch["images"].to(self.device)
-                    targets = batch["targets"]  # list of dicts
+                    targets = batch["targets"]  # list of (N, 5) tensors
 
                     # Forward pass
                     outputs = self.model(images)
@@ -239,9 +270,7 @@ class ModelEvaluator:
                         )
                         for pred_dict, gt in zip(batch_preds, targets):
                             all_predictions.append(pred_dict)
-                            gt_boxes = np.asarray(gt.get("boxes", []), dtype=np.float64).reshape(-1, 4)
-                            gt_labels = np.asarray(gt.get("labels", []), dtype=np.int64).ravel()
-                            all_ground_truths.append({"boxes": gt_boxes, "labels": gt_labels})
+                            all_ground_truths.append(_gt_to_dict(gt))
                         pbar.update()
                         continue
 
@@ -256,13 +285,7 @@ class ModelEvaluator:
                     # Collect results (postprocess returns dicts with boxes/scores/labels)
                     for pred_dict, gt in zip(detections, targets):
                         all_predictions.append(pred_dict)
-
-                        gt_boxes = np.asarray(gt.get("boxes", []), dtype=np.float64).reshape(-1, 4)
-                        gt_labels = np.asarray(gt.get("labels", []), dtype=np.int64).ravel()
-                        all_ground_truths.append({
-                            "boxes": gt_boxes,
-                            "labels": gt_labels,
-                        })
+                        all_ground_truths.append(_gt_to_dict(gt))
 
                     pbar.update()
 

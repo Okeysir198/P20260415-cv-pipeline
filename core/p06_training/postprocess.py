@@ -159,8 +159,13 @@ def _postprocess_yolox(
     for b in range(batch_size):
         pred = predictions[b]  # (N, 5+C)
 
-        obj_conf = pred[:, 4].sigmoid()
-        cls_probs = pred[:, 5:].sigmoid()
+        # Both custom YOLOXModel (_DecoupledHead at yolox.py:555-559) and the
+        # official adapter (decode_in_inference=True) sigmoid obj+cls inside
+        # the model's eval-mode forward. Applying sigmoid here would be a
+        # double-sigmoid — squashes all scores to [0.25, 0.55] and makes
+        # conf_threshold meaningless. Trust the model output.
+        obj_conf = pred[:, 4]
+        cls_probs = pred[:, 5:]
         cls_conf, cls_id = cls_probs.max(dim=1)
         scores = obj_conf * cls_conf
 

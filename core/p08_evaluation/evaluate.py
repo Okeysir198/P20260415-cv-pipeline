@@ -91,9 +91,13 @@ def load_model(model_path: str, data_config: dict, device: torch.device) -> torc
     trainer = DetectionTrainer.__new__(DetectionTrainer)
     trainer.config = trainer_config
     trainer.device = device
-    trainer._model_cfg = trainer_config["model"]
+    trainer._model_cfg = dict(trainer_config["model"])
     trainer._train_cfg = trainer_config.get("training", {})
     trainer._data_cfg = trainer_config.get("data", {})
+    # Skip the pretrained-weight load path — the checkpoint's weights
+    # will be loaded below and overwrite anything the trainer loaded.
+    # Avoids needing trainer.config_path (not set on this trainer stub).
+    trainer._model_cfg.pop("pretrained", None)
     model = trainer._build_model()
 
     # Load weights

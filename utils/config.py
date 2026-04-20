@@ -206,6 +206,15 @@ def _parse_value(value_str: str):
         return False
     if value_str.lower() == "none":
         return None
+    # JSON-ish list/dict literals, e.g. "[1,1]" or "[0.5,1.5]"
+    stripped = value_str.strip()
+    if (stripped.startswith("[") and stripped.endswith("]")) or \
+       (stripped.startswith("{") and stripped.endswith("}")):
+        import json
+        try:
+            return json.loads(stripped)
+        except (ValueError, TypeError):
+            pass
     try:
         return int(value_str)
     except ValueError:

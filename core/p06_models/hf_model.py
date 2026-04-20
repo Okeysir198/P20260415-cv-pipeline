@@ -92,9 +92,11 @@ class HFDetectionModel(DetectionModel):
         reg_loss = loss * 0
         for key, val in raw_loss_dict.items():
             key_lower = key.lower()
-            if "ce" in key_lower or "class" in key_lower:
+            # VFL = Varifocal Loss (D-FINE, RT-DETRv2), also covers CE/focal.
+            # DFL = Distribution Focal Loss (D-FINE reg component) goes under reg_loss.
+            if "vfl" in key_lower or "ce" in key_lower or "class" in key_lower or "focal" in key_lower:
                 cls_loss = cls_loss + val
-            if "bbox" in key_lower or "giou" in key_lower:
+            if "bbox" in key_lower or "giou" in key_lower or "dfl" in key_lower or "reg" in key_lower:
                 reg_loss = reg_loss + val
 
         loss_dict = {
@@ -195,6 +197,18 @@ def build_hf_model(config: dict) -> HFDetectionModel:
     # Collect all non-pipeline keys as HF kwargs
     hf_kwargs = {k: v for k, v in model_cfg.items() if k not in _NON_HF_KEYS}
     hf_kwargs["num_labels"] = num_classes
+
+    # HF cookbook passes id2label/label2id so reinitialised cls-head + matcher
+    # have a coherent label space. Prefer names from the resolved data config
+    # when available; fall back to generic "class_N" so the dicts are always
+    # present with the correct num_labels shape.
+    data_names = config.get("data", {}).get("names") or model_cfg.get("names")
+    if isinstance(data_names, dict) and len(data_names) == num_classes:
+        id2label = {int(k): str(v) for k, v in data_names.items()}
+    else:
+        id2label = {i: f"class_{i}" for i in range(num_classes)}
+    hf_kwargs.setdefault("id2label", id2label)
+    hf_kwargs.setdefault("label2id", {v: k for k, v in id2label.items()})
 
     if arch in HF_MODEL_REGISTRY:
         # Fast path: explicit registry lookup

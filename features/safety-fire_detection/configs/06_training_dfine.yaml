@@ -33,6 +33,7 @@ data:
     test: null
 
 augmentation:
+  normalize: false      # HF DFineImageProcessor has do_normalize=False — feed [0,1] inputs
   mosaic: false         # not supported for DETR-family models
   mixup: false
   contrast: 0.4         # GPU luma-contrast; fire/smoke are inherently low-contrast

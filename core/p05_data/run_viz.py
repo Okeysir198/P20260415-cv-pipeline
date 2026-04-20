@@ -26,7 +26,7 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -183,11 +183,16 @@ def generate_dataset_stats(
     splits: List[str],
     out_dir: Path,
     dpi: int = 120,
+    subset_indices: Optional[Dict[str, List[int]]] = None,
 ) -> None:
     """Generate dataset_stats.png: split sizes, class distribution, bbox stats.
 
     Reads only label .txt files — no image loading — so it's fast even on large splits.
     Output: out_dir/dataset_stats.png
+
+    When ``subset_indices[split]`` is provided, stats reflect only those indices
+    (mirrors the run's active ``data.subset.*`` filtering). Splits without an
+    entry (or ``None``) use the full split.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -203,12 +208,18 @@ def generate_dataset_stats(
             logger.warning("Stats: skipping split %s — %s", split, e)
             continue
 
+        idx_list = (subset_indices or {}).get(split)
+        if idx_list is None:
+            img_paths = ds.img_paths
+        else:
+            img_paths = [ds.img_paths[i] for i in idx_list]
+
         class_counts: dict = {}
         bbox_areas: List[float] = []
         labels_per_image: List[int] = []
         n_empty = 0
 
-        for img_path in ds.img_paths:
+        for img_path in img_paths:
             labels = ds._load_label(img_path)
             n = len(labels)
             labels_per_image.append(n)
@@ -220,7 +231,7 @@ def generate_dataset_stats(
                 bbox_areas.append(float(row[3]) * float(row[4]) * 100.0)  # % of image area
 
         stats[split] = {
-            "n_images": len(ds),
+            "n_images": len(img_paths),
             "class_counts": class_counts,
             "bbox_areas": bbox_areas,
             "labels_per_image": labels_per_image,

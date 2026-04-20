@@ -37,6 +37,26 @@ _LABEL_PALETTE = [
 ]
 
 
+def _subset_indices(dataset: Any) -> Optional[List[int]]:
+    """Return ``list(dataset.indices)`` if dataset is a torch Subset, else None."""
+    return list(dataset.indices) if hasattr(dataset, "indices") else None
+
+
+def _run_splits_and_subsets(trainer: Any) -> Dict[str, Optional[List[int]]]:
+    """Return ``{split: subset_indices or None}`` for splits actually used in the run.
+
+    Only includes splits for which the trainer has built a loader. Test is
+    excluded (no test loader exists during training) so data_preview only
+    reflects train+val — matching what the run actually consumes.
+    """
+    out: Dict[str, Optional[List[int]]] = {}
+    if getattr(trainer, "train_loader", None) is not None:
+        out["train"] = _subset_indices(trainer.train_loader.dataset)
+    if getattr(trainer, "val_loader", None) is not None:
+        out["val"] = _subset_indices(trainer.val_loader.dataset)
+    return out
+
+
 def _draw_gt_boxes(image: np.ndarray, targets: np.ndarray, class_names: dict, thickness: int = 2, text_scale: float = 0.5) -> np.ndarray:
     """Draw normalized CXCYWH GT boxes on image. Returns annotated copy."""
     vis = image.copy()
@@ -702,7 +722,16 @@ class DatasetStatsLogger(Callback):
             if _load_cached_stats(out_dir):
                 logger.info("DatasetStatsLogger: cache hit — skipping recompute (%s)", out_dir)
                 return
-            generate_dataset_stats(self.data_config, self.base_dir, class_names, self.splits, out_dir, self.dpi)
+            # Restrict stats to splits the run actually uses (train+val, with
+            # data.subset.* applied) so data_preview mirrors the run's data.
+            run_splits = _run_splits_and_subsets(trainer)
+            active_splits = [s for s in self.splits if s in run_splits]
+            subset_map = {s: run_splits[s] for s in active_splits}
+            generate_dataset_stats(
+                self.data_config, self.base_dir, class_names,
+                active_splits, out_dir, self.dpi,
+                subset_indices=subset_map,
+            )
             stats_path = out_dir / "dataset_stats.png"
             wb_cb = next((c for c in trainer.callback_runner.callbacks if isinstance(c, WandBLogger)), None)
             if wb_cb is not None and wb_cb._enabled:
@@ -744,7 +773,14 @@ class DataLabelGridLogger(Callback):
         from core.p05_data.detection_dataset import YOLOXDataset
         class_names = {int(k): str(v) for k, v in self.data_config.get("names", {}).items()}
 
+        # Restrict to splits the run actually uses so samples reflect the
+        # data.subset.* filtering rather than the full split on disk.
+        run_splits = _run_splits_and_subsets(trainer)
+
         for split in self.splits:
+            if split not in run_splits:
+                logger.info("DataLabelGridLogger: skip split %s (not used by this run)", split)
+                continue
             try:
                 ds = YOLOXDataset(
                     data_config=self.data_config,
@@ -756,13 +792,15 @@ class DataLabelGridLogger(Callback):
                 logger.warning("DataLabelGridLogger: skip split %s — %s", split, e)
                 continue
 
-            n = len(ds)
+            subset = run_splits[split]
+            pool = list(range(len(ds))) if subset is None else list(subset)
+            n = len(pool)
             if n == 0:
                 logger.warning("DataLabelGridLogger: split %s is empty, skipping", split)
                 continue
 
             k = min(self.num_samples, n)
-            indices = sorted(random.sample(range(n), k))
+            indices = sorted(random.sample(pool, k))
 
             annotated = []
             for idx in indices:
@@ -843,10 +881,16 @@ class AugLabelGridLogger(Callback):
         if self.aug_config.get("mosaic", False):
             aug_variants.append(("mosaic", self.aug_config))
 
+        run_splits = _run_splits_and_subsets(trainer)
+
         for split in self.splits:
             if split != "train":
                 logger.info("AugLabelGridLogger: skip split %s (no augmentation)", split)
                 continue
+            if split not in run_splits:
+                logger.info("AugLabelGridLogger: skip split %s (not used by this run)", split)
+                continue
+            subset = run_splits[split]
 
             for label, aug_cfg in aug_variants:
                 transforms = build_transforms(
@@ -862,12 +906,13 @@ class AugLabelGridLogger(Callback):
                     logger.warning("AugLabelGridLogger: skip %s/%s — %s", split, label, e)
                     continue
 
-                n = len(ds)
+                pool = list(range(len(ds))) if subset is None else list(subset)
+                n = len(pool)
                 if n == 0:
                     continue
 
                 k = min(self.num_samples, n)
-                indices = sorted(random.sample(range(n), k))
+                indices = sorted(random.sample(pool, k))
 
                 annotated = []
                 for i in indices:

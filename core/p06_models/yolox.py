@@ -117,10 +117,17 @@ class _OfficialYOLOXAdapter(DetectionModel):
         custom ``num_classes`` head) when ``strict=False``.
         """
         has_model_prefix = any(k.startswith("_model.") for k in state_dict)
-        target = self if has_model_prefix else self._model
+        if has_model_prefix:
+            # Adapter-saved checkpoint (trainer saves self.state_dict() which
+            # naturally prefixes self._model keys). Load on self via the
+            # nn.Module base to avoid re-entering this override.
+            if not strict:
+                state_dict = _filter_shape_mismatched(state_dict, self)
+            return nn.Module.load_state_dict(self, state_dict, strict=strict)
+        # Raw upstream Megvii checkpoint — load directly into self._model.
         if not strict:
-            state_dict = _filter_shape_mismatched(state_dict, target)
-        return target.load_state_dict(state_dict, strict=strict)
+            state_dict = _filter_shape_mismatched(state_dict, self._model)
+        return self._model.load_state_dict(state_dict, strict=strict)
 
     def forward_with_loss(
         self, images: torch.Tensor, targets: List[torch.Tensor]

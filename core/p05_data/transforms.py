@@ -666,7 +666,12 @@ def build_transforms(
     # Always applied (both train and eval)
     transforms.append(v2.Resize(size=list(input_size), antialias=True))
     transforms.append(v2.ToDtype(torch.float32, scale=True))
-    transforms.append(v2.Normalize(mean=mean, std=std))
+    # HF detection processors (D-FINE, RT-DETRv2) expect [0, 1] rescaled
+    # inputs with do_normalize=False — ImageNet normalize degrades their
+    # pretrained-feature distribution. Also YOLOX Megvii weights expect
+    # [0, 255] raw. Respect `augmentation.normalize` to opt out.
+    if config.get("normalize", True):
+        transforms.append(v2.Normalize(mean=mean, std=std))
 
     return DetectionTransform(transforms, canvas_size=input_size)
 
@@ -748,6 +753,7 @@ class GpuDetectionTransform:
         mean: Sequence[float],
         std: Sequence[float],
         input_size: Tuple[int, int],
+        normalize: bool = True,
     ) -> None:
         self.degrees = degrees
         self.translate = translate
@@ -760,6 +766,7 @@ class GpuDetectionTransform:
         self.contrast = contrast
         self.flip_h_p = flip_h_p
         self.flip_v_p = flip_v_p
+        self.normalize = normalize
         self._mean = torch.tensor(list(mean), dtype=torch.float32).view(1, -1, 1, 1)
         self._std = torch.tensor(list(std), dtype=torch.float32).view(1, -1, 1, 1)
         self.input_size = input_size  # (H, W)
@@ -904,9 +911,10 @@ class GpuDetectionTransform:
                         t[:, 2] = 1.0 - t[:, 2]  # cy_new = 1 - cy_old
                         targets[i] = t
 
-        mean = self._mean.to(device)
-        std = self._std.to(device)
-        images = (images - mean) / std
+        if self.normalize:
+            mean = self._mean.to(device)
+            std = self._std.to(device)
+            images = (images - mean) / std
 
         return images, targets
 
@@ -1147,4 +1155,5 @@ def build_gpu_transforms(
         mean=mean,
         std=std,
         input_size=input_size,
+        normalize=config.get("normalize", True),
     )

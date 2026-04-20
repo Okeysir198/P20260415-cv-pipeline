@@ -576,17 +576,23 @@ class DetectionTrainer:
         """
         logger.info("Starting training with config: %s", self.config_path)
 
-        # Build components
-        self.model = self._build_model()
+        # Build components — but skip if load_checkpoint already built them
+        # during resume. Unconditional rebuild here would reload the
+        # pretrained weights and overwrite the checkpoint's restored state.
+        if self.model is None:
+            self.model = self._build_model()
 
-        # Apply layer freezing before optimizer (frozen params excluded)
-        freeze_list = self._train_cfg.get("freeze", [])
-        if freeze_list:
-            self._freeze_layers(freeze_list)
+            # Apply layer freezing before optimizer (frozen params excluded)
+            freeze_list = self._train_cfg.get("freeze", [])
+            if freeze_list:
+                self._freeze_layers(freeze_list)
 
-        self.optimizer = self._build_optimizer()
-        self.scheduler = self._build_scheduler()
-        self.loss_fn = self._build_loss()
+        if self.optimizer is None:
+            self.optimizer = self._build_optimizer()
+        if self.scheduler is None:
+            self.scheduler = self._build_scheduler()
+        if self.loss_fn is None:
+            self.loss_fn = self._build_loss()
 
         # Data loaders must come before callbacks so _loaded_data_cfg is available
         self.train_loader, self.val_loader = self._build_dataloaders()
@@ -1165,16 +1171,28 @@ class DetectionTrainer:
         if "ema_state_dict" in checkpoint and self.ema is not None:
             self.ema.load_state_dict(checkpoint["ema_state_dict"])
 
-        # Restore RNG states for exact reproducibility
+        # Restore RNG states for exact reproducibility (best-effort — set_rng_state
+        # requires ByteTensor on CPU, and load-time dtype can drift after
+        # `map_location=device` round-trips through CUDA).
         import random as _random
         rng_states = checkpoint.get("rng_states")
         if rng_states:
-            _random.setstate(rng_states["python"])
-            np.random.set_state(rng_states["numpy"])
-            torch.random.set_rng_state(rng_states["torch_cpu"])
-            if "torch_cuda" in rng_states:
-                torch.cuda.set_rng_state_all(rng_states["torch_cuda"])
-            logger.info("Restored RNG states for reproducibility.")
+            try:
+                _random.setstate(rng_states["python"])
+                np.random.set_state(rng_states["numpy"])
+                torch_cpu = rng_states["torch_cpu"]
+                if hasattr(torch_cpu, "to"):
+                    torch_cpu = torch_cpu.to(dtype=torch.uint8, device="cpu")
+                torch.random.set_rng_state(torch_cpu)
+                if "torch_cuda" in rng_states:
+                    cuda_states = [
+                        s.to(dtype=torch.uint8, device="cpu") if hasattr(s, "to") else s
+                        for s in rng_states["torch_cuda"]
+                    ]
+                    torch.cuda.set_rng_state_all(cuda_states)
+                logger.info("Restored RNG states for reproducibility.")
+            except (TypeError, RuntimeError) as e:
+                logger.warning("Could not restore RNG states (%s) — continuing with current RNG.", e)
 
         # Restore callback states (best metric tracking, early stopping counter)
         cb_states = checkpoint.get("callback_states", {})
