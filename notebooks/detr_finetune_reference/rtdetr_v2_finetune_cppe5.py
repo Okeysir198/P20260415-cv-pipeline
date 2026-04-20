@@ -468,6 +468,13 @@ from pprint import pprint
 metrics = trainer.evaluate(eval_dataset=test_dataset, metric_key_prefix="eval")
 pprint(metrics)
 
+# Save the best checkpoint (loaded via load_best_model_at_end=True) to a
+# stable `best/` subdir so the inference block below can reload it locally.
+_BEST_DIR = _RUN_DIR / "best"
+trainer.save_model(str(_BEST_DIR))
+image_processor.save_pretrained(str(_BEST_DIR))
+print(f"Best model saved to: {_BEST_DIR}")
+
 # If you have set `push_to_hub` to `True` in the `training_args`, and you're authenticated with your Hugging Face token, the training checkpoints are pushed to the
 # Hugging Face Hub. Upon training completion, push the final model to the Hub as well by calling the [push_to_hub()](https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.Trainer.push_to_hub) method.
 
@@ -492,7 +499,7 @@ image = Image.open(requests.get(url, stream=True).raw)
 
 from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
-model_repo = "<your-name-on-hf>/rtdetr-v2-r50-cppe5-finetune"
+model_repo = str(_BEST_DIR)  # local path to the best checkpoint saved above
 
 image_processor = AutoImageProcessor.from_pretrained(model_repo)
 model = AutoModelForObjectDetection.from_pretrained(model_repo)

@@ -106,7 +106,7 @@ No training-behavior-affecting changes. Original notebooks are preserved under
 
 ## Results log
 
-| Date | Script | Dataset | Subset | Epochs | Final mAP50 | Notes |
-|---|---|---|---|---|---|---|
-| — | `rtdetr_v2_finetune_cppe5.py` | CPPE-5 | full (1k) | 40 | TBD | expected ≈ 0.34 per qubvel |
-| — | `dfine_finetune_cppe5.py` | CPPE-5 | full (1k) | 30 | TBD | expected ≈ 0.33 per qubvel |
+| Date | Script | Dataset | Subset | Epochs | val mAP | val mAP50 | test mAP | test mAP50 | Wall time | GPU | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-04-20 | `rtdetr_v2_finetune_cppe5.py` | CPPE-5 | full (1k) | 40 | **0.3231** (ep19, best) / 0.3014 (ep40) | 0.6133 / 0.6068 | **0.5054** | 0.7631 | ~10m 33s | RTX 5090 | ~0.04 below qubvel's published 0.34 val mAP but within tolerance; plateaued around ep19–20; test set well above val (29 vs 150 imgs). |
+| — | `dfine_finetune_cppe5.py` | CPPE-5 | full (1k) | 30 | TBD | TBD | TBD | TBD | TBD | — | expected ≈ 0.33 per qubvel |
