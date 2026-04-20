@@ -11,13 +11,48 @@ Deps pinned in notebooks/detr_finetune_reference/pyproject.toml (installed by
 scripts/setup-notebook-venv.sh).
 
 Self-contained: all checkpoints, tensorboard logs, and eval artefacts are
-written under `notebooks/detr_finetune_reference/runs/rtdetr_v2_r50_cppe5/`
+written under `notebooks/detr_finetune_reference/runs/rtdetr_v2_r50_cppe5_seed{SEED}/`
 regardless of the invoking cwd (resolved via `__file__`).
+
+Determinism: CUBLAS_WORKSPACE_CONFIG is set before any torch import, then
+`set_seed(SEED)` is called *before* `from_pretrained` so the class-head
+reinit (6× decoder `class_embed`, `enc_score_head`, `denoising_class_embed`)
+is seeded consistently. cuDNN is set deterministic + non-benchmark, and
+`torch.use_deterministic_algorithms(True, warn_only=True)` locks the rest
+(warn-only so the run doesn't crash on the ~1-2 non-deterministic CUDA
+kernels in deformable attention). TrainingArguments pins `seed` +
+`data_seed` so the DataLoader sampler is reproducible too. Override via
+`--seed N` or SEED env var.
 """
+import argparse
+import os
+
+# CUBLAS_WORKSPACE_CONFIG must be set *before* any torch import (used by
+# torch.use_deterministic_algorithms). Parse seed first so env is stable.
+_argp = argparse.ArgumentParser(add_help=False)
+_argp.add_argument("--seed", type=int, default=int(os.environ.get("SEED", 42)))
+_args, _ = _argp.parse_known_args()
+SEED = _args.seed
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 from pathlib import Path
 
+import torch
+from transformers import set_seed
+
+set_seed(SEED)  # seeds python/numpy/torch *before* any from_pretrained reinit
+
+# cuDNN + CUBLAS determinism. `warn_only=True` rather than strict so RT-DETRv2
+# won't crash on the ~1-2 CUDA ops (deformable attention, multi-scale grid
+# sample) that lack deterministic kernels — those still vary run-to-run, but
+# the vast majority of the training graph is locked. Trades ~last digit of
+# reproducibility for not crashing the run.
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+torch.use_deterministic_algorithms(True, warn_only=True)
+
 _HERE = Path(__file__).resolve().parent  # notebooks/detr_finetune_reference/
-_RUN_DIR = _HERE / "runs" / "rtdetr_v2_r50_cppe5"
+_RUN_DIR = _HERE / "runs" / f"rtdetr_v2_r50_cppe5_seed{SEED}"
 
 # For training
 # To get started, we'll define global constants, namely the model checkpoint and image size. Feel free to select other pretrained checkpoint available on the [hub](https://huggingface.co/PekingU).
@@ -443,6 +478,11 @@ training_args = TrainingArguments(
     remove_unused_columns=False,
     eval_do_concat_batches=False,
     report_to="tensorboard",  # or "wandb"
+    # Determinism: cuDNN/CUBLAS/deterministic-algorithms already set above.
+    # `seed` seeds HF Trainer's internal RNG (dataloader shuffle, etc.);
+    # `data_seed` pins the DataLoader sampler independently.
+    seed=SEED,
+    data_seed=SEED,
 )
 
 # Finally, bring everything together, and call [train()](https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.Trainer.train):
