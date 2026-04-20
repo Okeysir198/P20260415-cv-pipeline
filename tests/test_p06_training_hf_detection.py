@@ -109,6 +109,46 @@ def test_hf_detection_one_epoch():
     print(f"    test_map={test_metrics.get('test_map', 'n/a')}")
 
 
+def test_hf_ema_enabled_one_epoch():
+    """EMA callback runs: shadow weights updated + saved at end of training."""
+    import os
+    os.environ.setdefault("WANDB_MODE", "disabled")
+
+    from core.p06_training.hf_trainer import train_with_hf
+
+    ema_out = OUT_DIR.parent / "08_training_hf_ema"
+    ema_out.mkdir(parents=True, exist_ok=True)
+
+    train_with_hf(
+        config_path=TRAIN_CFG,
+        overrides={
+            "model": {"arch": "rtdetr-r18", "pretrained": "PekingU/rtdetr_v2_r18vd",
+                       "input_size": [480, 480]},
+            "data": {"batch_size": 4, "num_workers": 2, "subset": {"train": 0.5, "val": 0.5}},
+            "augmentation": {"normalize": False, "mosaic": False, "library": "albumentations", "fliplr": 0.5},
+            "training": {
+                "backend": "hf", "epochs": 1, "bf16": True, "amp": False,
+                "optimizer": "adamw", "lr": 1e-4, "weight_decay": 1e-4,
+                "scheduler": "cosine", "warmup_steps": 10, "max_grad_norm": 0.1,
+                "patience": 0,
+                "ema": True, "ema_warmup_steps": 5,   # short warmup so 10 steps hit decay
+                "val_viz": {"enabled": False}, "train_viz": {"enabled": False},
+                "aug_viz": {"enabled": False}, "data_viz": {"enabled": False},
+            },
+            "checkpoint": {"save_best": True, "metric": "val/mAP50", "mode": "max"},
+            "logging": {"save_dir": str(ema_out), "wandb_project": None},
+            "seed": 42,
+        },
+    )
+
+    ema_bin = ema_out / "ema_model.bin"
+    assert ema_bin.exists(), f"ema_model.bin not written to {ema_out}"
+    import torch
+    sd = torch.load(str(ema_bin), map_location="cpu", weights_only=True)
+    assert isinstance(sd, dict) and len(sd) > 0
+    print(f"    EMA ckpt keys={len(sd)}  size={ema_bin.stat().st_size/1e6:.1f}MB")
+
+
 def test_hf_backend_rejects_unsupported_task():
     """Config validator hard-fails when HF backend is asked to train a task
     it doesn't support yet (e.g. a pose model)."""
@@ -145,6 +185,7 @@ if __name__ == "__main__":
             ("reject_unsupported_task", test_hf_backend_rejects_unsupported_task),
             ("reject_fp16_on_detection", test_hf_backend_rejects_fp16_on_detection),
             ("hf_detection_one_epoch", test_hf_detection_one_epoch),
+            ("hf_ema_enabled_one_epoch", test_hf_ema_enabled_one_epoch),
         ],
         title="HF Trainer Detection Backend",
     )

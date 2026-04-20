@@ -1,0 +1,107 @@
+# Shared template — HF Trainer backend for detection (DETR-family)
+#
+# Copy into a feature's configs/ and change the three commented lines to
+# reference the feature's own 05_data.yaml. Everything else is the default
+# recipe that reproduced qubvel's CPPE-5 RT-DETRv2 baseline (test mAP 0.559,
+# within 0.0006 of the reference notebook). Override per-feature as needed.
+#
+# Quick start (from repo root):
+#     uv run core/p06_training/train.py \
+#         --config features/<feature>/configs/06_training.yaml
+#
+# Switching archs:
+#     --override model.arch=rtdetr-r18 model.pretrained=PekingU/rtdetr_v2_r18vd
+#     --override model.arch=dfine-m    model.pretrained=ustc-community/dfine-medium-obj365
+#
+# Run artefacts land under logging.save_dir (or the default `features/<f>/runs/<ts>_06_training/`)
+# in HF-Trainer-standard layout: checkpoint-*/, runs/<ts>_<host>/ (tensorboard),
+# trainer_state.json, plus our lineage files (05_data.yaml, config_resolved.yaml).
+
+model:
+  arch: rtdetr-r50                       # rtdetr-r18 / rtdetr-r50 / dfine-s / dfine-m / dfine-large
+  pretrained: PekingU/rtdetr_v2_r50vd    # any HF Hub ForObjectDetection checkpoint
+  # num_classes: <N>                     # REQUIRED — match the feature's 05_data.yaml
+  # input_size: [H, W]                   # 480x480 matches qubvel; 640x640 works for tiny objects
+
+data:
+  dataset_config: 05_data.yaml           # REQUIRED — relative to this config file
+  batch_size: 16                         # reference Bundle B (bs=8 for larger archs on <24GB)
+  num_workers: 2
+  prefetch_factor: 2
+  pin_memory: true
+  subset:                                # quick-iteration overrides; null = full split
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  # Use Albumentations — ~2x faster per CPU worker than torchvision v2 for
+  # DETR aug sets, mirrors qubvel's reference recipe exactly.
+  library: albumentations
+  normalize: false                       # HF detection processors expect [0,1] raw
+  mosaic: false                          # DETR-family doesn't support mosaic
+  mixup: false
+  # Probability-gated transforms (Albumentations `p=` semantics). Magnitudes
+  # default to qubvel's reference values when only `_p` is set.
+  perspective_p: 0.1                     # A.Perspective(p=0.1)
+  fliplr: 0.5                            # A.HorizontalFlip(p=0.5)
+  brightness_contrast_p: 0.5             # A.RandomBrightnessContrast(p=0.5)
+  hsv_p: 0.1                             # A.HueSaturationValue(p=0.1)
+  min_bbox_area: 25                      # qubvel's A.BboxParams(min_area=25)
+  # Affine disabled (qubvel's notebook doesn't use RandomAffine)
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
+
+training:
+  backend: hf                            # routes through core/p06_training/hf_trainer.py
+  epochs: 40
+  optimizer: adamw
+  lr: 1.0e-4                             # Bundle B linear-scaling value (bs=16)
+  weight_decay: 1.0e-4                   # DETR canonical
+  warmup_steps: 300                      # qubvel pins steps (NOT epochs) for DETR
+  scheduler: cosine
+  max_grad_norm: 0.1                     # DETR canonical aggressive clip
+  bf16: true                             # RTX 5090 / A100+ tensor cores
+  amp: false                             # fp16 overflows DETR decoder — validator enforces this
+  # EMA (optional, +1-2% mAP on detection) — uses our ModelEMA via HF Trainer callback
+  ema: false
+  ema_decay: 0.9998
+  ema_warmup_steps: 2000
+  patience: 0                            # 0 disables HF EarlyStoppingCallback
+
+  # Viz callbacks run through the HF-Trainer bridge (core/p06_training/hf_trainer.py).
+  # dataset_stats/data_labels are once-at-start; val_predictions runs per epoch.
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 2
+  train_viz:
+    enabled: false                       # per-epoch train preds usually not worth it
+
+loss:
+  type: detr                             # HF model's internal forward_with_loss
+
+logging:
+  # save_dir: runs/<your_run_name>       # optional — resolves relative to this config
+  # wandb_project: <project_name>        # optional — auto-detect, else report_to=tensorboard only
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50                      # HF prefixes with eval_ → eval_map_50
+  mode: max
+  save_interval: 1
+
+seed: 42

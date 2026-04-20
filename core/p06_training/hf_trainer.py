@@ -232,6 +232,74 @@ class _HFVizBridge(TrainerCallback):
         return control
 
 
+class EMACallback(TrainerCallback):
+    """HF TrainerCallback wrapping our `ModelEMA` for the HF backend.
+
+    Maintains a shadow copy of model params, updated after each optimizer step
+    with an exponential decay schedule. Before each evaluation, swaps the live
+    model's params with the EMA's — Trainer runs eval against the averaged
+    weights (typically +1-2% mAP on detection) — then swaps back so training
+    continues from the raw params. Snapshots the EMA weights to
+    `<output_dir>/ema_model.bin` at end of training.
+
+    Activates when `training.ema: true` is set in the config. Uses our
+    in-repo `ModelEMA` (`core/p06_training/trainer.py:ModelEMA`) so behaviour
+    matches the pytorch backend exactly (same decay + warmup curve).
+    """
+
+    def __init__(self, decay: float = 0.9998, warmup_steps: int = 2000):
+        self._decay = decay
+        self._warmup_steps = warmup_steps
+        self._ema = None
+        self._backup_sd = None
+
+    def on_train_begin(self, args, state, control, model=None, **kwargs):
+        from core.p06_training.trainer import ModelEMA
+        if model is None:
+            return control
+        self._ema = ModelEMA(model, decay=self._decay, warmup_steps=self._warmup_steps)
+        logger.info("EMA enabled (decay=%s, warmup_steps=%s)",
+                    self._decay, self._warmup_steps)
+        return control
+
+    def on_optimizer_step(self, args, state, control, model=None, **kwargs):
+        """Updated once per real gradient step (accounting for grad accumulation)."""
+        if self._ema is not None and model is not None:
+            self._ema.update(model)
+        return control
+
+    def on_evaluate(self, args, state, control, model=None, **kwargs):
+        """No-op hook — swap happens in the pair of prediction hooks below.
+        Kept for symmetry / future extension.
+        """
+        return control
+
+    def on_prediction_step(self, args, state, control, **kwargs):
+        return control
+
+    # HF Trainer 5.x fires `on_pre_evaluate` before evaluation starts and
+    # `on_evaluate` after. We swap weights into/out-of the live model around
+    # evaluation so the test-set number reflects EMA.
+    def on_pre_evaluate(self, args, state, control, model=None, **kwargs):
+        if self._ema is not None and model is not None:
+            self._backup_sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            model.load_state_dict(self._ema.ema_model.state_dict(), strict=False)
+        return control
+
+    def on_evaluate_end(self, args, state, control, model=None, **kwargs):
+        if self._backup_sd is not None and model is not None:
+            model.load_state_dict(self._backup_sd, strict=False)
+            self._backup_sd = None
+        return control
+
+    def on_train_end(self, args, state, control, model=None, **kwargs):
+        if self._ema is not None:
+            out_path = Path(args.output_dir) / "ema_model.bin"
+            torch.save(self._ema.ema_model.state_dict(), out_path)
+            logger.info("EMA weights saved to %s", out_path)
+        return control
+
+
 class _DetectionTrainer(Trainer):
     """HF Trainer subclass that saves via the wrapped HF model's own
     `save_pretrained(..., safe_serialization=False)`.
@@ -588,12 +656,6 @@ def _validate_hf_backend_config(config: dict, output_format: str) -> None:
         )
 
     # 2) Features the HF backend doesn't (yet) implement
-    if train_cfg.get("ema", False):
-        soft_warnings.append(
-            "training.ema=True is ignored on the HF backend. "
-            "Use training.backend='pytorch' if EMA is required; "
-            "otherwise leave ema=False and rely on load_best_model_at_end."
-        )
     if train_cfg.get("gpu_augment", False):
         soft_warnings.append(
             "training.gpu_augment=True is ignored on the HF backend "
@@ -926,6 +988,14 @@ def _build_callbacks(
     patience = train_cfg.get("patience", 0)
     if patience > 0:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=patience))
+
+    # EMA — HF-native TrainerCallback that wraps our ModelEMA. Activates when
+    # `training.ema: true`. Same decay defaults as the pytorch backend.
+    if train_cfg.get("ema", False):
+        callbacks.append(EMACallback(
+            decay=train_cfg.get("ema_decay", 0.9998),
+            warmup_steps=train_cfg.get("ema_warmup_steps", 2000),
+        ))
 
     # Viz callbacks wired through the bridge. Detection only (the other tasks
     # don't have DETR-family visualisation code yet).
