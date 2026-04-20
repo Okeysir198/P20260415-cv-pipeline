@@ -101,12 +101,14 @@ args, Phase 2 plans, and per-arch history live in
 [`CLAUDE.md`](./CLAUDE.md) — this file is deliberately setup-oriented to
 avoid duplicating that reference.
 
-Quick headline from the latest seed=42 Bundle B runs on parallel GPUs:
+Quick headline from the latest seed=42 Bundle B runs on parallel GPUs,
+plus qubvel's originally-published numbers from the upstream `.ipynb`:
 
-| Axis | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` |
-|---|---|---|
-| `train_runtime` | 617.1 s | 615.1 s |
-| Test mAP | 0.5464 | **0.5577** |
-| Test mAP₅₀ | 0.8043 | 0.8285 |
+| Axis | qubvel published | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` |
+|---|---|---|---|
+| `train_runtime` | — | 617.1 s | 615.1 s |
+| Test mAP | 0.5789 | 0.5464 | **0.5577** |
+| Test mAP₅₀ | 0.8674 | 0.8043 | 0.8285 |
 
-See `CLAUDE.md` → *Head-to-head* for per-class breakdown + Δ.
+See `CLAUDE.md` → *Head-to-head* for per-class breakdown + Δ + notes on
+qubvel's test-set variance (single run, ±0.03 σ on 29-image test).

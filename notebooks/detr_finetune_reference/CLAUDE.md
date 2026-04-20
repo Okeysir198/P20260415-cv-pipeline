@@ -124,20 +124,26 @@ Both runs launched simultaneously on different GPUs of the same box; same
 The only difference is the training loop: qubvel's notebook Trainer call
 vs `core/p06_training/train.py --backend hf`.
 
-| Axis | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` | Δ (ours − ref) |
-|---|---|---|---|
-| Pipeline | qubvel's HF notebook (runnable `.py`) | `core/p06_training/hf_trainer.py` | |
-| GPU | 1 | 0 | |
-| `train_runtime` | 617.1 s | 615.1 s | −2.0 s |
-| Best val mAP @ ep | 0.3655 @ 13 | 0.3510 @ 18 | −0.0145 |
-| **Test mAP** | 0.5464 | **0.5577** | **+0.0113** |
-| Test mAP₅₀ | 0.8043 | 0.8285 | +0.0242 |
-| Test mAP₇₅ | 0.6316 | 0.5847 | −0.0469 |
-| Coverall | 0.6146 | 0.5470 | −0.068 |
-| Face_Shield | 0.6652 | 0.6256 | −0.040 |
-| **Gloves** | 0.4645 | **0.5346** | **+0.070** |
-| **Goggles** | 0.4125 | **0.5343** | **+0.122** |
-| Mask | 0.5751 | 0.5471 | −0.028 |
+| Axis | qubvel published¹ | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` | Δ (ours − ref) |
+|---|---|---|---|---|
+| Pipeline | upstream notebook | our `.py` port of same | `core/p06_training/hf_trainer.py` | |
+| GPU | — | 1 | 0 | |
+| `train_runtime` | — (not reported) | 617.1 s | 615.1 s | −2.0 s |
+| Best val mAP @ ep | — | 0.3655 @ 13 | 0.3510 @ 18 | −0.0145 |
+| **Test mAP** | **0.5789** | 0.5464 | **0.5577** | **+0.0113** |
+| Test mAP₅₀ | 0.8674 | 0.8043 | 0.8285 | +0.0242 |
+| Test mAP₇₅ | 0.6689 | 0.6316 | 0.5847 | −0.0469 |
+| Coverall | 0.6130 | 0.6146 | 0.5470 | −0.068 |
+| Face_Shield | 0.7165 | 0.6652 | 0.6256 | −0.040 |
+| Gloves | 0.5180 | 0.4645 | **0.5346** | **+0.070** |
+| Goggles | 0.5202 | 0.4125 | **0.5343** | **+0.122** |
+| Mask | 0.5269 | 0.5751 | 0.5471 | −0.028 |
+
+¹ Numbers transcribed from `reference_rtdetr_v2/RT_DETR_v2_finetune_on_a_custom_dataset.ipynb`
+(the output cell of the final `pprint(metrics)` after
+`trainer.evaluate(test_dataset)`). Qubvel published a single run with no
+seed variance info; his recipe was 40 epochs, bs=16, lr=1e-4, cosine,
+WD=1e-4, bf16 — i.e. Bundle B minus explicit determinism.
 
 **Bottom line**: the in-repo pipeline matches reference wall clock within
 2s (0.3% faster), edges ahead on test mAP by +0.011, and is more balanced
