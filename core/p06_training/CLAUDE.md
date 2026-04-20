@@ -37,7 +37,7 @@ on features it doesn't implement yet. See `_validate_hf_backend_config`
 | `augmentation.library: albumentations` | ✓ | fast CPU aug backend with probability-gated transforms |
 | `checkpoint.metric: val/mAP50` | ✓ | auto-translated to HF's `eval_map_50` |
 | `checkpoint.save_best: true` | ✓ | uses HF's `load_best_model_at_end` |
-| Viz callbacks | ✓ via bridge | `_HFVizBridge` wraps our four loggers so `data_preview/` + `val_predictions/` both work |
+| Viz callbacks | ✓ native | `hf_callbacks.py` — four first-class `TrainerCallback` subclasses mirroring the pytorch-backend loggers. No proxy-trainer hack. |
 | Final test-set eval | ✓ auto | writes `<output_dir>/test_results.json` when a test split is present |
 
 If a task / config combo isn't supported, `_validate_hf_backend_config` fails
@@ -48,7 +48,8 @@ fast at the top of `train_with_hf` rather than silently degrading.
 | File | Purpose |
 |---|---|
 | `trainer.py` | `DetectionTrainer` — main training loop (pytorch backend). Auto-detects HF vs YOLOX model path, per-component LR groups, EMA, gradient clipping, callback dispatch. |
-| `hf_trainer.py` | `train_with_hf`, `_DetectionTrainer` (Trainer subclass with shared-weight-safe `_save`), `EMACallback`, `_HFVizBridge` (runs our callbacks inside HF), detection collator + real mAP `compute_metrics` (torchmetrics-based). Config validator enforces hard incompatibilities up-front. |
+| `hf_trainer.py` | `train_with_hf`, `_DetectionTrainer` (Trainer subclass with shared-weight-safe `_save`), `EMACallback`, detection collator + real mAP `compute_metrics` (torchmetrics-based). Config validator enforces hard incompatibilities up-front. |
+| `hf_callbacks.py` | Native `TrainerCallback` subclasses — `HFDatasetStatsCallback`, `HFDataLabelGridCallback`, `HFAugLabelGridCallback`, `HFValPredictionCallback` — that run the same viz outputs as the pytorch backend's `callbacks.py` counterparts but consume HF's documented hook kwargs (`model`, `eval_dataloader`, `state.log_history`) rather than a proxy trainer object. |
 | `train.py` | CLI entry point — `auto_select_gpu`, determinism knobs (CUBLAS env var + `torch.use_deterministic_algorithms(True, warn_only=True)`), 3-warning filter for known-harmless PyTorch messages, dispatches to backend. |
 | `callbacks.py` | `Callback` base class (pytorch backend only), `CheckpointSaver`, `EarlyStopping`, `WandBLogger`, `ValPredictionLogger`, `DatasetStatsLogger`, `DataLabelGridLogger`, `AugLabelGridLogger`, `CallbackRunner`. Also `_run_splits_and_subsets(trainer)` — now iterates train/val/test so the HF bridge's stub test-loader shows up in data_preview. |
 | `losses.py` | `DetectionLoss` ABC, `YOLOXLoss` (SimOTA), `FocalLoss`, `IoULoss`, `_DETRPassthroughLoss`, registry + `build_loss()`. |
@@ -127,13 +128,13 @@ Gotchas
 - **`resume_from_checkpoint=<path>` on HF backend**: supported, but note
   the checkpoint must have been saved by our `_DetectionTrainer._save`
   (wrapper-prefixed state dict `hf_model.*`) — not a bare `hf_model.save_pretrained`.
-- **Viz callbacks on HF backend are via an attribute-proxy adapter**,
-  not native `TrainerCallback` subclasses. Risk: future HF Trainer API
-  changes might break the proxy surface (`trainer.model`, `trainer.device`,
-  `trainer.train_loader`, `trainer.val_loader`, `trainer._model_cfg`,
-  `trainer._loaded_data_cfg`, `trainer._decode_predictions`,
-  `trainer.callback_runner.get_callback`). If that happens, rewrite each
-  viz callback as a native `TrainerCallback` subclass.
+- **Viz callbacks on HF backend are native `TrainerCallback` subclasses**
+  (`core/p06_training/hf_callbacks.py`). They share rendering helpers
+  (`_draw_gt_boxes`, `_save_image_grid`, `annotate_gt_pred`) with the
+  pytorch-backend loggers but consume HF's documented kwargs (`model`,
+  `eval_dataloader`, `state.log_history`) directly — no proxy-trainer
+  attribute surface. Earlier bridge-adapter design dropped as of the
+  native-callback migration.
 - **Detection `compute_metrics` requires `eval_do_concat_batches=False`** —
   set automatically for detection in `_config_to_training_args`. Classifier/
   segmenter paths keep the default.

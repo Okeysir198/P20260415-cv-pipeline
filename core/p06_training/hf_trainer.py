@@ -34,8 +34,6 @@ if _PROJECT_ROOT not in sys.path:
 from types import SimpleNamespace
 
 import os as _os
-from types import SimpleNamespace as _NS
-
 from transformers import (
     EarlyStoppingCallback,
     Trainer,
@@ -44,192 +42,12 @@ from transformers import (
 )
 from transformers.image_transforms import center_to_corners_format
 
-from core.p06_training.callbacks import (
-    AugLabelGridLogger,
-    DataLabelGridLogger,
-    DatasetStatsLogger,
-    ValPredictionLogger,
+from core.p06_training.hf_callbacks import (
+    HFAugLabelGridCallback,
+    HFDataLabelGridCallback,
+    HFDatasetStatsCallback,
+    HFValPredictionCallback,
 )
-
-
-class _HFVizBridge(TrainerCallback):
-    """Adapter that runs our internal viz callbacks inside HF Trainer.
-
-    Our callbacks (`DatasetStatsLogger`, `DataLabelGridLogger`,
-    `AugLabelGridLogger`, `ValPredictionLogger`) were written against the
-    custom pytorch trainer's attribute surface (`trainer.model`,
-    `trainer.train_loader`, `trainer._model_cfg`, `trainer._loaded_data_cfg`,
-    `trainer._decode_predictions`). HF Trainer has a different interface.
-
-    Rather than porting four callbacks, this bridge builds a tiny "proxy
-    trainer" per-hook with exactly the attributes our callbacks consume, then
-    dispatches HF's `on_train_begin` / `on_epoch_end` to our callbacks'
-    `on_train_start` / `on_epoch_end`.
-    """
-
-    def __init__(
-        self,
-        inner_callbacks,
-        model,
-        data_config,
-        training_config,
-        input_size,
-        base_dir: Optional[str] = None,
-    ):
-        self._inner = inner_callbacks
-        self._model = model
-        self._data_cfg = data_config
-        self._train_cfg = training_config
-        self._model_cfg = {"input_size": list(input_size)}
-        self._base_dir = base_dir
-        # Pre-build eager stub loaders so `_run_splits_and_subsets` reports
-        # both splits as active at `on_train_begin`. HF Trainer's eval
-        # dataloader is built lazily (only on first `.evaluate()`), so at
-        # on_train_begin time it's None. `DatasetStatsLogger` / `DataLabelGrid`
-        # / `AugLabelGrid` callbacks use `_run_splits_and_subsets` to decide
-        # which splits to include — with val missing, val stats/grids never
-        # get generated. The stubs have `.dataset` pointing at a freshly
-        # constructed `YOLOXDataset` (disk reads same as the real loader);
-        # we overwrite them later with the real dataloaders when HF passes
-        # them via kwargs.
-        self._train_loader = self._build_stub_loader("train")
-        self._val_loader = self._build_stub_loader("val")
-        self._test_loader = self._build_stub_loader("test")
-
-    def _build_stub_loader(self, split: str):
-        try:
-            from core.p05_data.detection_dataset import YOLOXDataset
-        except Exception:  # pragma: no cover
-            return None
-        try:
-            ds = YOLOXDataset(
-                data_config=self._data_cfg,
-                split=split,
-                transforms=None,
-                base_dir=self._base_dir or "",
-            )
-        except Exception as e:  # pragma: no cover
-            logger.info("Viz bridge: skip %s stub loader — %s", split, e)
-            return None
-        return _NS(dataset=ds)
-
-    def _build_proxy(self, train_loader=None, eval_loader=None):
-        ft = _NS()
-        ft.model = self._model
-        params = list(self._model.parameters())
-        ft.device = params[0].device if params else torch.device("cpu")
-        ft.train_loader = train_loader or self._train_loader
-        ft.val_loader = eval_loader or self._val_loader
-        ft.test_loader = self._test_loader  # HF Trainer doesn't pass a test loader; our stub covers it
-        ft._model_cfg = self._model_cfg
-        ft._data_cfg = self._train_cfg.get("data", {})
-        ft._loaded_data_cfg = self._data_cfg
-        ft.config = self._train_cfg
-        # Stub so `trainer.callback_runner.callbacks` iteration AND
-        # `trainer.callback_runner.get_callback(SomeCallbackCls)` lookups in our
-        # internal callbacks (used for cross-ref'ing `WandBLogger`) return
-        # empty / None instead of raising AttributeError. HF Trainer handles
-        # wandb itself, so there's no in-bridge WandBLogger to return.
-        ft.callback_runner = _NS(callbacks=[], get_callback=lambda _cls: None)
-        ft._decode_predictions = self._make_decoder()
-        return ft
-
-    def _make_decoder(self):
-        """Replicate `DetectionTrainer._decode_predictions` for our wrapper."""
-        model = self._model
-        input_h, input_w = self._model_cfg["input_size"]
-
-        def decode(predictions, conf_threshold: float = 0.01):
-            target_sizes = torch.tensor(
-                [[input_h, input_w]] * predictions.shape[0],
-                device=predictions.device,
-            )
-            if hasattr(model, "postprocess"):
-                return model.postprocess(predictions, conf_threshold, target_sizes)
-            # Classification/seg paths aren't reached here since this bridge
-            # is wired for detection only.
-            raise RuntimeError(f"No postprocess method on {type(model).__name__}")
-
-        return decode
-
-    def on_train_begin(self, args, state, control, **kwargs):
-        train_loader = kwargs.get("train_dataloader")
-        eval_loader = kwargs.get("eval_dataloader")
-        if train_loader is not None:
-            self._train_loader = train_loader
-        if eval_loader is not None:
-            self._val_loader = eval_loader
-        proxy = self._build_proxy(train_loader, eval_loader)
-        for cb in self._inner:
-            fn = getattr(cb, "on_train_start", None)
-            if fn is None:
-                continue
-            # ValPredictionLogger needs a dataloader at on_train_start to
-            # sample its fixed-index pool; HF Trainer can't guarantee the
-            # eval_dataloader is built at on_train_begin. Defer it to the
-            # first on_epoch_end (where the loader is definitely live).
-            needs_loader = isinstance(cb, ValPredictionLogger)
-            if needs_loader and (
-                (cb.split == "val" and proxy.val_loader is None)
-                or (cb.split == "train" and proxy.train_loader is None)
-            ):
-                continue
-            try:
-                fn(proxy)
-            except Exception as e:  # pragma: no cover
-                logger.warning("%s.on_train_start failed: %s", type(cb).__name__, e)
-        return control
-
-    def on_epoch_end(self, args, state, control, **kwargs):
-        train_loader = kwargs.get("train_dataloader") or self._train_loader
-        eval_loader = kwargs.get("eval_dataloader") or self._val_loader
-        # Remember them for later hooks (HF 5.x doesn't always pass both).
-        if train_loader is not None:
-            self._train_loader = train_loader
-        if eval_loader is not None:
-            self._val_loader = eval_loader
-        proxy = self._build_proxy(train_loader, eval_loader)
-
-        # Lazy first-call init for ValPredictionLogger (see on_train_begin).
-        for cb in self._inner:
-            if isinstance(cb, ValPredictionLogger) and cb._sample_indices is None:
-                loader_ok = (
-                    (cb.split == "val" and proxy.val_loader is not None)
-                    or (cb.split == "train" and proxy.train_loader is not None)
-                )
-                if loader_ok:
-                    try:
-                        cb.on_train_start(proxy)
-                    except Exception as e:  # pragma: no cover
-                        logger.warning(
-                            "%s.on_train_start (lazy) failed: %s", type(cb).__name__, e,
-                        )
-        # HF state.epoch is a float like 1.0/2.0/… right after the epoch completes.
-        epoch_idx = int(round(state.epoch or 0.0)) - 1  # our callbacks expect 0-based
-
-        # Metrics: pull the latest eval log line if any (has eval_map etc).
-        metrics = {}
-        if state.log_history:
-            for entry in reversed(state.log_history):
-                if any(k.startswith("eval_") for k in entry):
-                    metrics = {
-                        k.replace("eval_", "val/"): v
-                        for k, v in entry.items()
-                        if isinstance(v, (int, float))
-                    }
-                    # Mirror mAP50 under our in-repo key for callback compat.
-                    if "eval_map_50" in entry:
-                        metrics["val/mAP50"] = entry["eval_map_50"]
-                    break
-
-        for cb in self._inner:
-            fn = getattr(cb, "on_epoch_end", None)
-            if fn is not None:
-                try:
-                    fn(proxy, epoch_idx, metrics)
-                except Exception as e:  # pragma: no cover
-                    logger.warning("%s.on_epoch_end failed: %s", type(cb).__name__, e)
-        return control
 
 
 class EMACallback(TrainerCallback):
@@ -974,8 +792,8 @@ def _build_callbacks(
     Always adds:
     - `EarlyStoppingCallback` if `training.patience > 0`.
 
-    Adds for detection tasks via the `_HFVizBridge` adapter (so our internal
-    viz callbacks run on HF Trainer):
+    Adds for detection tasks via native HF TrainerCallback subclasses
+    (`core/p06_training/hf_callbacks.py`):
     - `DatasetStatsLogger` (always on)
     - `DataLabelGridLogger` (if `training.data_viz.enabled`)
     - `AugLabelGridLogger`  (if `training.aug_viz.enabled`)
@@ -997,25 +815,24 @@ def _build_callbacks(
             warmup_steps=train_cfg.get("ema_warmup_steps", 2000),
         ))
 
-    # Viz callbacks wired through the bridge. Detection only (the other tasks
-    # don't have DETR-family visualisation code yet).
-    if output_format != "detr" or model is None or data_config is None or save_dir is None:
+    # Viz callbacks — native HF TrainerCallback subclasses
+    # (core/p06_training/hf_callbacks.py). Detection only for now.
+    if output_format != "detr" or data_config is None or save_dir is None:
         return callbacks
 
-    inner: list = []
     splits = train_cfg.get("data_viz", {}).get("splits", ["train", "val"])
     input_size = tuple(data_config.get("input_size", (640, 640)))
 
     # DatasetStatsLogger — always on, matching custom-trainer policy.
-    inner.append(DatasetStatsLogger(
+    data_viz = train_cfg.get("data_viz", {})
+    callbacks.append(HFDatasetStatsCallback(
         save_dir=save_dir, data_config=data_config, base_dir=base_dir or "",
         splits=splits,
-        dpi=train_cfg.get("data_viz", {}).get("dpi", 120),
+        dpi=data_viz.get("dpi", 120),
     ))
 
-    data_viz = train_cfg.get("data_viz", {})
     if data_viz.get("enabled", False):
-        inner.append(DataLabelGridLogger(
+        callbacks.append(HFDataLabelGridCallback(
             save_dir=save_dir, splits=splits,
             data_config=data_config, base_dir=base_dir or "",
             num_samples=data_viz.get("num_samples", 16),
@@ -1027,12 +844,13 @@ def _build_callbacks(
 
     aug_viz = train_cfg.get("aug_viz", {})
     if aug_viz.get("enabled", False):
-        inner.append(AugLabelGridLogger(
+        callbacks.append(HFAugLabelGridCallback(
             save_dir=save_dir,
             splits=aug_viz.get("splits", ["train"]),
             data_config=data_config,
             aug_config=config.get("augmentation", {}),
             base_dir=base_dir or "",
+            input_size=input_size,
             num_samples=aug_viz.get("num_samples", 16),
             grid_cols=aug_viz.get("grid_cols", 4),
             thickness=aug_viz.get("thickness", 2),
@@ -1042,31 +860,19 @@ def _build_callbacks(
 
     val_viz = train_cfg.get("val_viz", {})
     if val_viz.get("enabled", False):
-        inner.append(ValPredictionLogger(
-            save_dir=save_dir, split="val",
+        class_names = {int(k): str(v) for k, v in data_config.get("names", {}).items()}
+        callbacks.append(HFValPredictionCallback(
+            save_dir=save_dir, class_names=class_names, input_size=input_size,
             num_samples=val_viz.get("num_samples", 12),
             conf_threshold=val_viz.get("conf_threshold", 0.05),
             grid_cols=val_viz.get("grid_cols", 2),
         ))
 
-    train_viz = train_cfg.get("train_viz", {})
-    if train_viz.get("enabled", False):
-        inner.append(ValPredictionLogger(
-            save_dir=save_dir, split="train",
-            num_samples=train_viz.get("num_samples", 12),
-            conf_threshold=train_viz.get("conf_threshold", 0.05),
-            grid_cols=train_viz.get("grid_cols", 2),
-        ))
+    # train_viz would run the same viz on the train_dataloader — not wired
+    # in the native HF callback path (HFValPredictionCallback reads HF's
+    # eval_dataloader specifically). Add a `split="train"` variant here if
+    # per-epoch train-set predictions become important for a future feature.
 
-    if inner:
-        callbacks.append(_HFVizBridge(
-            inner_callbacks=inner,
-            model=model,
-            data_config=data_config,
-            training_config=config,
-            input_size=input_size,
-            base_dir=base_dir,
-        ))
     return callbacks
 
 

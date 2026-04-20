@@ -45,6 +45,7 @@ CORE_TESTS = [
     "test_p06_model_registry.py",
     "test_p06_model_variants.py",
     "test_p06_training.py",
+    "test_p06_training_hf_detection.py",
     "test_p06_training_features.py",
     "test_p06_classification_training.py",
     "test_p06_segmentation_metrics.py",
