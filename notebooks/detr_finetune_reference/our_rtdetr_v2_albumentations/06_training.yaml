@@ -6,10 +6,10 @@
 #
 # Usage (from repo root):
 #   CUDA_VISIBLE_DEVICES=1 .venv/bin/python core/p06_training/train.py \
-#     --config notebooks/detr_finetune_reference/our_pipeline/06_training.yaml
+#     --config notebooks/detr_finetune_reference/our_rtdetr_v2_albumentations/06_training.yaml
 #
 # All artefacts land in
-#   notebooks/detr_finetune_reference/our_pipeline/runs/<ts>_<step>/
+#   notebooks/detr_finetune_reference/our_rtdetr_v2_albumentations/runs/<ts>_<step>/
 # (HF-Trainer-standard: checkpoint-*/, runs/<ts>_<host>/ tensorboard, trainer_state.json)
 
 model:
@@ -92,7 +92,7 @@ loss:
 
 logging:
   wandb_project: smart-camera
-  run_name: cppe5_rtdetr_r50_our_pipeline
+  run_name: cppe5_rtdetr_r50_our_rtdetr_v2_albumentations
   # Pin save_dir so this config stays self-contained under
   # notebooks/detr_finetune_reference/. Without this, `generate_run_dir`
   # falls back to `features/<run_name>/runs/...` (a ghost feature folder)
@@ -100,7 +100,7 @@ logging:
   # to this config file (see `_config_to_training_args`). HF Trainer puts
   # its usual `checkpoint-N/` + tensorboard `runs/` + `trainer_state.json`
   # inside this dir.
-  save_dir: runs/rtdetr_v2_r50_cppe5_seed42_our_pipeline
+  save_dir: runs/rtdetr_v2_r50_cppe5_seed42_our_rtdetr_v2_albumentations
 
 checkpoint:
   save_best: true
