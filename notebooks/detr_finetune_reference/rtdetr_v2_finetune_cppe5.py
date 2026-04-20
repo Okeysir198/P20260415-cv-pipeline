@@ -31,8 +31,11 @@ import os
 # torch.use_deterministic_algorithms). Parse seed first so env is stable.
 _argp = argparse.ArgumentParser(add_help=False)
 _argp.add_argument("--seed", type=int, default=int(os.environ.get("SEED", 42)))
+_argp.add_argument("--tag", type=str, default=os.environ.get("RUN_TAG", ""),
+                   help="optional suffix on the run dir, e.g. 'cosine_wd_bf16'")
 _args, _ = _argp.parse_known_args()
 SEED = _args.seed
+TAG = _args.tag
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 from pathlib import Path
@@ -52,7 +55,7 @@ torch.backends.cudnn.benchmark = False
 torch.use_deterministic_algorithms(True, warn_only=True)
 
 _HERE = Path(__file__).resolve().parent  # notebooks/detr_finetune_reference/
-_RUN_DIR = _HERE / "runs" / f"rtdetr_v2_r50_cppe5_seed{SEED}"
+_RUN_DIR = _HERE / "runs" / (f"rtdetr_v2_r50_cppe5_seed{SEED}" + (f"_{TAG}" if TAG else ""))
 
 # For training
 # To get started, we'll define global constants, namely the model checkpoint and image size. Feel free to select other pretrained checkpoint available on the [hub](https://huggingface.co/PekingU).
@@ -478,6 +481,16 @@ training_args = TrainingArguments(
     remove_unused_columns=False,
     eval_do_concat_batches=False,
     report_to="tensorboard",  # or "wandb"
+    # Bundle A + bf16 tuning (qubvel's recipe keeps linear/no-wd/fp32 defaults).
+    # - cosine anneals LR faster after the ep19 val-mAP peak, letting the
+    #   post-peak epochs keep improving instead of drifting on a too-hot LR.
+    # - weight_decay=1e-4 is the DETR canonical value; curbs class-head overfit
+    #   on the 850-sample CPPE-5 train split.
+    # - bf16 uses RTX 5090 tensor cores; ~1.5x faster, neutral numerically for
+    #   DETR-family models.
+    lr_scheduler_type="cosine",
+    weight_decay=1e-4,
+    bf16=True,
     # Determinism: cuDNN/CUBLAS/deterministic-algorithms already set above.
     # `seed` seeds HF Trainer's internal RNG (dataloader shuffle, etc.);
     # `data_seed` pins the DataLoader sampler independently.
