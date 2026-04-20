@@ -15,7 +15,6 @@ vs the arch.
 ├── pyproject.toml                  pinned deps (uv-managed; albumentations==1.4.6, ...)
 ├── .gitignore                      excludes runs/ and .venv/ everywhere beneath
 ├── data_loader.py                  shared — HF cppe-5 ↔ YOLO bridge + --dump-cppe5 CLI
-├── run_inference.py                shared — GT-vs-pred side-by-side PNG grids
 │
 ├── reference_rtdetr_v2/            qubvel's RT-DETRv2 reference
 │   ├── finetune.py                 RT-DETRv2-R50 on CPPE-5 (CLI: --seed, --tag, --aug)

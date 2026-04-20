@@ -18,7 +18,6 @@ notebooks/detr_finetune_reference/
 ├── pyproject.toml                  pinned deps (uv-managed — albumentations 1.4.6 etc.)
 ├── uv.lock
 ├── data_loader.py                  shared — HF `cppe-5` ↔ YOLO bridge + --dump-cppe5 CLI
-├── run_inference.py                shared — GT-vs-pred side-by-side PNG grids
 │
 ├── reference_rtdetr_v2/            qubvel's RT-DETRv2 reference (runnable .py + .ipynb + runs/)
 │   ├── finetune.py                 RT-DETRv2-R50 fine-tune (CLI: --seed, --tag, --aug)
