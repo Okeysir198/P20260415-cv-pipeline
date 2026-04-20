@@ -1,0 +1,27 @@
+# CPPE-5 for YOLOX-M training with torchvision v2 backend — 640² variant.
+# Same dataset as the albumentations sibling (`../our_yolox/`); only
+# input_size differs (640² vs 480²) to match YOLOX's production recipe
+# and give small-object classes (Goggles) more pixels to work with.
+dataset_name: "cppe5"
+path: "../../../dataset_store/training_ready/cppe5"
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+names:
+  0: Coverall
+  1: Face_Shield
+  2: Gloves
+  3: Goggles
+  4: Mask
+num_classes: 5
+
+# YOLOX production recipe — bigger than DETR siblings' 480² so Mosaic's
+# 4-image canvas keeps individual tiles at reasonable resolution.
+input_size: [640, 640]
+
+mean: [0.485, 0.456, 0.406]
+std:  [0.229, 0.224, 0.225]
+
+auto_label:
+  class_rules: []

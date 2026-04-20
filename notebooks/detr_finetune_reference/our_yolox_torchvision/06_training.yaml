@@ -1,0 +1,120 @@
+# YOLOX-M (official Megvii impl) on CPPE-5 with the **full production
+# augmentation recipe** — torchvision v2 backend + Mosaic + MixUp +
+# strong affine + 640² input. Sibling to ../our_yolox/ (albumentations,
+# 480², no Mosaic) which serves as the aug-ablated baseline.
+#
+# Usage (from repo root):
+#   CUDA_VISIBLE_DEVICES=1 .venv-yolox-official/bin/python \
+#     core/p06_training/train.py \
+#     --config notebooks/detr_finetune_reference/our_yolox_torchvision/06_training.yaml
+#
+# Artefacts: runs/seed42/{best.pth, last.pth, val_predictions/, ...}
+
+model:
+  arch: yolox-m
+  impl: official
+  pretrained: ../../../pretrained/yolox_m.pth
+  num_classes: 5
+  input_size: [640, 640]
+  depth: 0.67
+  width: 0.75
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 16                 # RTX 5090 fits 640² bs=16 for YOLOX-M comfortably
+  num_workers: 4                 # Mosaic does 4 disk reads/sample — bump workers
+  prefetch_factor: 4             # Mosaic-specific: smooth out the I/O spikes
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision           # REQUIRED for Mosaic/MixUp — dataset-level
+                                 # ops not implemented by the Albu backend.
+  normalize: false               # YOLOX Megvii weights: raw pixel inputs.
+  mosaic: true                   # THE missing lever in ../our_yolox/
+  mixup: true                    # Secondary regularizer, standard YOLOX recipe
+
+  # Legacy path: no `_p` gates set → single always-applied ColorJitter
+  # with hsv_h/hsv_s/hsv_v magnitudes. Matches Megvii's training loop
+  # (YOLOX uses HSV every step, not probability-gated).
+  hsv_h: 0.015                   # Megvii default
+  hsv_s: 0.5                     # Megvii default (stronger than DETR configs)
+  hsv_v: 0.4                     # Megvii default
+
+  fliplr: 0.5
+  flipud: 0.0                    # YOLOX never flips vertically
+
+  # YOLOX production affine ranges — much wider than the albumentations
+  # sibling because Mosaic does most of the context/scale variety and
+  # affine is the fine-grained per-image jitter.
+  scale: [0.1, 2.0]              # YOLOX-M default
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: pytorch
+  epochs: 100                    # 2× the albumentations baseline (50 ep)
+  optimizer: sgd
+  lr: 0.0025                     # Megvii scaling: 0.01 × bs/64 at bs=16
+  momentum: 0.9
+  weight_decay: 0.0005
+  warmup_epochs: 5               # Standard YOLOX warmup
+  scheduler: cosine
+  patience: 40
+  val_full_interval: 0           # Full val every epoch — 150 imgs is cheap
+  val_subset_fraction: 1.0
+  amp: true                      # YOLOX is AMP-safe
+  grad_clip: 35.0
+  ema: true
+  ema_decay: 0.9998
+  gpu_augment: false             # Keep parallel to ../our_yolox/ (fair compare)
+
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.25
+    grid_cols: 2
+    gt_color_rgb: [160, 32, 240]
+    pred_color_rgb: [0, 200, 0]
+    gt_thickness: 2
+    pred_thickness: 1
+    text_scale: 0.4
+    dpi: 150
+  train_viz:
+    enabled: false
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+  aug_viz:
+    enabled: true                # Critical — verify Mosaic is actually running
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+loss:
+  type: yolox
+
+logging:
+  wandb_project: smart-camera
+  run_name: cppe5_yolox_m_official_tv_mosaic
+  save_dir: runs/seed42
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 20              # Reduce checkpoint churn (5 ckpts over 100 ep)
+
+seed: 42
