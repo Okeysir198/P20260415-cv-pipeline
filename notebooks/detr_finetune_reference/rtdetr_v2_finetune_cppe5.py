@@ -33,9 +33,13 @@ _argp = argparse.ArgumentParser(add_help=False)
 _argp.add_argument("--seed", type=int, default=int(os.environ.get("SEED", 42)))
 _argp.add_argument("--tag", type=str, default=os.environ.get("RUN_TAG", ""),
                    help="optional suffix on the run dir, e.g. 'cosine_wd_bf16'")
+_argp.add_argument("--aug", choices=["basic", "strong"],
+                   default=os.environ.get("AUG", "basic"),
+                   help="'basic' = qubvel's reference aug; 'strong' = +HSV/CLAHE/crop for rare classes")
 _args, _ = _argp.parse_known_args()
 SEED = _args.seed
 TAG = _args.tag
+AUG = _args.aug
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 from pathlib import Path
@@ -171,13 +175,29 @@ image_processor = AutoImageProcessor.from_pretrained(
 
 import albumentations as A
 
-train_augmentation_and_transform = A.Compose(
-    [
+# AUG: "basic" mirrors qubvel's notebook exactly. "strong" layers on moderate
+# color/contrast jitter + CLAHE + safe random crop — targeted at the rare
+# classes (Goggles, Face_Shield) which are often occluded or under varied
+# lighting in CPPE-5. Crop is low probability and `BBoxSafeRandomCrop` so
+# we don't accidentally throw away small objects.
+if AUG == "strong":
+    _train_transforms = [
+        A.BBoxSafeRandomCrop(erosion_rate=0.2, p=0.3),
+        A.Perspective(p=0.1),
+        A.HorizontalFlip(p=0.5),
+        A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.5),
+        A.HueSaturationValue(hue_shift_limit=15, sat_shift_limit=25, val_shift_limit=15, p=0.3),
+        A.CLAHE(clip_limit=2.0, tile_grid_size=(8, 8), p=0.2),
+    ]
+else:  # "basic" = qubvel's reference augment
+    _train_transforms = [
         A.Perspective(p=0.1),
         A.HorizontalFlip(p=0.5),
         A.RandomBrightnessContrast(p=0.5),
         A.HueSaturationValue(p=0.1),
-    ],
+    ]
+train_augmentation_and_transform = A.Compose(
+    _train_transforms,
     bbox_params=A.BboxParams(format="coco", label_fields=["category"], clip=True, min_area=25, min_width=1, min_height=1),
 )
 
