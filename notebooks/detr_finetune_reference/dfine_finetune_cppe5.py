@@ -7,9 +7,18 @@ Upstream: https://github.com/qubvel/transformers-notebooks
 Run in the isolated notebook env:
     .venv-notebook/bin/python notebooks/detr_finetune_reference/dfine_finetune_cppe5.py
 
-Deps pinned in notebooks/detr_finetune_reference/requirements.txt (installed by
+Deps pinned in notebooks/detr_finetune_reference/pyproject.toml (installed by
 scripts/setup-notebook-venv.sh).
+
+Self-contained: all checkpoints, tensorboard logs, and eval artefacts are
+written under `notebooks/detr_finetune_reference/runs/dfine_large_cppe5/`
+regardless of the invoking cwd (resolved via `__file__`).
 """
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent  # notebooks/detr_finetune_reference/
+_RUN_DIR = _HERE / "runs" / "dfine_large_cppe5"
+
 # For training
 # To get started, we'll define global constants, namely the model checkpoint and image size. Feel free to select other pretrained checkpoint available on the [hub](https://huggingface.co/PekingU).
 
@@ -418,7 +427,7 @@ model = AutoModelForObjectDetection.from_pretrained(
 from transformers import TrainingArguments
 
 training_args = TrainingArguments(
-    output_dir="d-fine-m-cppe5-finetune-2",
+    output_dir=str(_RUN_DIR),
     num_train_epochs=30,
     max_grad_norm=0.1,
     learning_rate=5e-5,
@@ -462,7 +471,7 @@ pprint(metrics)
 # If you have set `push_to_hub` to `True` in the `training_args`, and you're authenticated with your Hugging Face token, the training checkpoints are pushed to the
 # Hugging Face Hub. Upon training completion, push the final model to the Hub as well by calling the [push_to_hub()](https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.Trainer.push_to_hub) method.
 
-trainer.push_to_hub()
+# trainer.push_to_hub()  # skipped — HF Hub push not needed for local reproduction
 
 # These results can be further improved by adjusting the hyperparameters in [TrainingArguments](https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.TrainingArguments). Give it a go!
 
