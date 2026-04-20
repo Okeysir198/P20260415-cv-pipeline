@@ -1,40 +1,29 @@
 #!/usr/bin/env python
-"""D-FINE fine-tuning on CPPE-5 — direct port of qubvel's reference notebook.
+"""RT-DETRv2 fine-tuning on CPPE-5 — direct port of qubvel's reference notebook.
 
-Source: notebooks/detr_finetune_reference/reference/DFine_finetune_on_a_custom_dataset.ipynb
+Source: notebooks/detr_finetune_reference/reference_rtdetr_v2/RT_DETR_v2_finetune_on_a_custom_dataset.ipynb
 Upstream: https://github.com/qubvel/transformers-notebooks
 
 Run in the isolated notebook env:
-    .venv-notebook/bin/python notebooks/detr_finetune_reference/dfine_finetune_cppe5.py
+    .venv-notebook/bin/python notebooks/detr_finetune_reference/reference_rtdetr_v2/finetune.py
 
 Deps pinned in notebooks/detr_finetune_reference/pyproject.toml (installed by
 scripts/setup-notebook-venv.sh).
 
 Self-contained: all checkpoints, tensorboard logs, and eval artefacts are
-written under `notebooks/detr_finetune_reference/runs/dfine_large_cppe5_seed{SEED}{_TAG}/`
+written under
+`notebooks/detr_finetune_reference/reference_rtdetr_v2/runs/rtdetr_v2_r50_cppe5_seed{SEED}/`
 regardless of the invoking cwd (resolved via `__file__`).
 
-Determinism: mirrors the RT-DETRv2 reference script. CUBLAS_WORKSPACE_CONFIG
-is set before any torch import, then `set_seed(SEED)` is called *before*
-`from_pretrained` so the class-head reinit is seeded consistently. cuDNN is
-set deterministic + non-benchmark, and `torch.use_deterministic_algorithms(
-True, warn_only=True)` locks the rest (warn-only so the run doesn't crash
-on the ~1-2 non-deterministic CUDA kernels in deformable attention).
-TrainingArguments pins `seed` + `data_seed` so the DataLoader sampler is
-reproducible too. Override via `--seed N` or SEED env var.
-
-Hyperparameter deltas from qubvel's notebook (applied here because
-`dfine-large-coco` is ~3× the parameter count of rtdetr_v2_r50 and the same
-lr=5e-5 is too hot for its backbone — val mAP plateaued at ep3 ≈ 0.20 in
-the unfixed naïve port):
-    learning_rate      = 2e-5   (was 5e-5, halved for the larger backbone)
-    warmup_steps       = 500    (was 300, gentler rampup for large model)
-    lr_scheduler_type  = "cosine"     (was default linear)
-    weight_decay       = 1e-4         (was default 0; DETR canonical)
-    bf16               = True         (RTX 5090 tensor cores)
-    # per_device_train_batch_size=8 kept — dfine-large + matcher aux outputs
-    # don't leave comfortable headroom for bs=16 on a single GPU.
-    # num_train_epochs=30 kept (qubvel's number).
+Determinism: CUBLAS_WORKSPACE_CONFIG is set before any torch import, then
+`set_seed(SEED)` is called *before* `from_pretrained` so the class-head
+reinit (6× decoder `class_embed`, `enc_score_head`, `denoising_class_embed`)
+is seeded consistently. cuDNN is set deterministic + non-benchmark, and
+`torch.use_deterministic_algorithms(True, warn_only=True)` locks the rest
+(warn-only so the run doesn't crash on the ~1-2 non-deterministic CUDA
+kernels in deformable attention). TrainingArguments pins `seed` +
+`data_seed` so the DataLoader sampler is reproducible too. Override via
+`--seed N` or SEED env var.
 """
 import argparse
 import os
@@ -44,7 +33,7 @@ import os
 _argp = argparse.ArgumentParser(add_help=False)
 _argp.add_argument("--seed", type=int, default=int(os.environ.get("SEED", 42)))
 _argp.add_argument("--tag", type=str, default=os.environ.get("RUN_TAG", ""),
-                   help="optional suffix on the run dir, e.g. 'lr2e5_warmup500_cosine_wd_bf16'")
+                   help="optional suffix on the run dir, e.g. 'cosine_wd_bf16'")
 _argp.add_argument("--aug", choices=["basic", "strong"],
                    default=os.environ.get("AUG", "basic"),
                    help="'basic' = qubvel's reference aug; 'strong' = +HSV/CLAHE/crop for rare classes")
@@ -61,25 +50,27 @@ from transformers import set_seed
 
 set_seed(SEED)  # seeds python/numpy/torch *before* any from_pretrained reinit
 
-# cuDNN + CUBLAS determinism. `warn_only=True` rather than strict so D-FINE
+# cuDNN + CUBLAS determinism. `warn_only=True` rather than strict so RT-DETRv2
 # won't crash on the ~1-2 CUDA ops (deformable attention, multi-scale grid
-# sample) that lack deterministic kernels.
+# sample) that lack deterministic kernels — those still vary run-to-run, but
+# the vast majority of the training graph is locked. Trades ~last digit of
+# reproducibility for not crashing the run.
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 torch.use_deterministic_algorithms(True, warn_only=True)
 
-_HERE = Path(__file__).resolve().parent  # notebooks/detr_finetune_reference/
-_RUN_DIR = _HERE / "runs" / (f"dfine_large_cppe5_seed{SEED}" + (f"_{TAG}" if TAG else ""))
+_HERE = Path(__file__).resolve().parent  # notebooks/detr_finetune_reference/reference_rtdetr_v2/
+_RUN_DIR = _HERE / "runs" / (f"rtdetr_v2_r50_cppe5_seed{SEED}" + (f"_{TAG}" if TAG else ""))
 
 # For training
 # To get started, we'll define global constants, namely the model checkpoint and image size. Feel free to select other pretrained checkpoint available on the [hub](https://huggingface.co/PekingU).
 
-checkpoint = "ustc-community/dfine-large-coco"
+checkpoint = "PekingU/rtdetr_v2_r50vd"
 image_size = 480
 
 # ## Load dataset
 # 
-# Next we'll load the dataset on which we'd like to fine-tune D-Fine.
+# Next we'll load the dataset on which we'd like to fine-tune RT-DETRv2.
 # 
 # In case of a custom object detection dataset, I'd recommend the guide [here](https://huggingface.co/docs/datasets/image_dataset#object-detection). Here we load an existing dataset from the hub, namely [CPPE-5](https://huggingface.co/datasets/cppe-5) which contains images with annotations identifying medical personal protective equipment (PPE) in the context of the COVID-19 pandemic.
 # 
@@ -111,8 +102,8 @@ print("dataset:", dataset)
 #   - `bbox`: the object's bounding box (in the [COCO format](https://albumentations.ai/docs/getting_started/bounding_boxes_augmentation/#coco) )
 #   - `category`: the object's category, with possible values including `Coverall (0)`, `Face_Shield (1)`, `Gloves (2)`, `Goggles (3)` and `Mask (4)`
 # 
-# You may notice that the `bbox` field follows the COCO format, which is the format that the D-Fine model expects.
-# However, the grouping of the fields inside `objects` differs from the annotation format D-Fine requires. You will
+# You may notice that the `bbox` field follows the COCO format, which is the format that the RT-DETRv2 model expects.
+# However, the grouping of the fields inside `objects` differs from the annotation format RT-DETRv2 requires. You will
 # need to apply some preprocessing transformations before using this data for training.
 # 
 # To get an even better understanding of the data, visualize an example in the dataset.
@@ -154,7 +145,7 @@ for i in range(len(annotations["id"])):
 
 # To finetune a model, you must preprocess the data you plan to use to match precisely the approach used for the pre-trained model.
 # [AutoImageProcessor](https://huggingface.co/docs/transformers/main/en/model_doc/auto#transformers.AutoImageProcessor) takes care of processing image data to create `pixel_values`, `pixel_mask`, and
-# `labels` that a D-Fine model can train with. The image processor has some attributes that you won't have to worry about:
+# `labels` that a DETR model can train with. The image processor has some attributes that you won't have to worry about:
 # 
 # - `image_mean = [0.485, 0.456, 0.406 ]`
 # - `image_std = [0.229, 0.224, 0.225]`
@@ -175,7 +166,7 @@ image_processor = AutoImageProcessor.from_pretrained(
 
 # Before passing the images to the `image_processor`, apply two preprocessing transformations to the dataset:
 # - Augmenting images
-# - Reformatting annotations to meet D-Fine expectations
+# - Reformatting annotations to meet RT-DETRv2 expectations
 # 
 # First, to make sure the model does not overfit on the training data, you can apply image augmentation with any data augmentation library. Here we use [Albumentations](https://albumentations.ai/docs/).
 # This library ensures that transformations affect the image and update the bounding boxes accordingly.
@@ -186,8 +177,10 @@ image_processor = AutoImageProcessor.from_pretrained(
 import albumentations as A
 
 # AUG: "basic" mirrors qubvel's notebook exactly. "strong" layers on moderate
-# color/contrast jitter + CLAHE + safe random crop — kept identical to the
-# RT-DETRv2 script so the two references can be compared apples-to-apples.
+# color/contrast jitter + CLAHE + safe random crop — targeted at the rare
+# classes (Goggles, Face_Shield) which are often occluded or under varied
+# lighting in CPPE-5. Crop is low probability and `BBoxSafeRandomCrop` so
+# we don't accidentally throw away small objects.
 if AUG == "strong":
     _train_transforms = [
         A.BBoxSafeRandomCrop(erosion_rate=0.2, p=0.3),
@@ -494,20 +487,11 @@ from transformers import TrainingArguments
 
 training_args = TrainingArguments(
     output_dir=str(_RUN_DIR),
-    num_train_epochs=30,               # qubvel's number — kept
+    num_train_epochs=40,
     max_grad_norm=0.1,
-    # D-FINE-specific hyperparameter deltas vs qubvel's notebook:
-    # - dfine-large-coco is ~3× the parameter count of rtdetr_v2_r50; the
-    #   same lr=5e-5 that works for RT-DETRv2 is too hot for D-FINE's
-    #   backbone — the naïve port peaked at val mAP ≈ 0.20 by ep3 and
-    #   plateaued for the next 27 epochs (test mAP = 0.2617 vs qubvel's
-    #   0.4485).
-    # - Halving the LR + lengthening warmup lets the large backbone
-    #   actually converge.
-    learning_rate=2e-5,                # was 5e-5 (halved for large backbone)
-    warmup_steps=500,                  # was 300 (gentler rampup)
-    per_device_train_batch_size=8,     # kept — dfine-large + matcher aux
-                                       # outputs don't leave bs=16 headroom
+    learning_rate=1e-4,            # Bundle B: 2x qubvel's 5e-5 (linear scaling with 2x batch)
+    warmup_steps=300,              # keep in steps (bs=16 → covers more epochs but safer at higher LR)
+    per_device_train_batch_size=16,  # Bundle B: 2x qubvel's 8; RTX 5090 has VRAM headroom
     dataloader_num_workers=2,
     metric_for_best_model="eval_map",
     greater_is_better=True,
@@ -518,13 +502,13 @@ training_args = TrainingArguments(
     remove_unused_columns=False,
     eval_do_concat_batches=False,
     report_to="tensorboard",  # or "wandb"
-    # Bundle A regularization (shared with the RT-DETRv2 recipe):
-    # - cosine anneals LR past the warmup peak, avoiding drift under a
-    #   still-hot linear decay.
-    # - weight_decay=1e-4 is the DETR canonical value (HF Trainer default
-    #   is 0); curbs class-head overfit on the 850-sample CPPE-5 train.
-    # - bf16 uses RTX 5090 tensor cores; ~1.5× faster, neutral numerically
-    #   for DETR-family models.
+    # Bundle A + bf16 tuning (qubvel's recipe keeps linear/no-wd/fp32 defaults).
+    # - cosine anneals LR faster after the ep19 val-mAP peak, letting the
+    #   post-peak epochs keep improving instead of drifting on a too-hot LR.
+    # - weight_decay=1e-4 is the DETR canonical value; curbs class-head overfit
+    #   on the 850-sample CPPE-5 train split.
+    # - bf16 uses RTX 5090 tensor cores; ~1.5x faster, neutral numerically for
+    #   DETR-family models.
     lr_scheduler_type="cosine",
     weight_decay=1e-4,
     bf16=True,

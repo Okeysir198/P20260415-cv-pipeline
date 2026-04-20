@@ -37,6 +37,6 @@ echo
 echo "Done. Launch notebooks with:"
 echo "  $VENV_DIR/bin/jupyter lab notebooks/detr_finetune_reference/"
 echo
-echo "Or run a single notebook headless:"
-echo "  $VENV_DIR/bin/jupyter nbconvert --to notebook --execute \\"
-echo "    notebooks/detr_finetune_reference/reference/RT_DETR_v2_finetune_on_a_custom_dataset.ipynb"
+echo "Or run a reference script directly:"
+echo "  $PYTHON notebooks/detr_finetune_reference/reference_rtdetr_v2/finetune.py --seed 42"
+echo "  $PYTHON notebooks/detr_finetune_reference/reference_dfine/finetune.py --seed 42"

@@ -225,7 +225,7 @@ def _build_detection_compute_metrics(image_processor, input_size, id2label=None)
     """Real `compute_metrics` for HF Trainer, detection task.
 
     Mirrors qubvel's reference `MAPEvaluator`
-    (`notebooks/detr_finetune_reference/rtdetr_v2_finetune_cppe5.py`):
+    (`notebooks/detr_finetune_reference/reference_rtdetr_v2/finetune.py`):
     post-process each batch via `image_processor.post_process_object_detection`
     to get xyxy-pixel predictions, convert normalized-cxcywh targets to
     xyxy-pixel, then accumulate in `torchmetrics.MeanAveragePrecision`.

@@ -17,7 +17,7 @@ test-set mAP gets diffed against the reference run in
 |---|---|
 | `our_rtdetr_v2_albumentations/` *(this)* | — |
 | `our_rtdetr_v2_torchvision/` | Same config, `augmentation.library: torchvision` — measures the overhead of our legacy aug pipeline vs Albumentations. |
-| `our_dfine/` | Swap `model.arch: dfine-large` + dfine-specific hyperparams (lr=2e-5, warmup=500). Compare vs reference's `dfine_finetune_cppe5.py`. |
+| `our_dfine/` | Swap `model.arch: dfine-large` + dfine-specific hyperparams (lr=2e-5, warmup=500). Compare vs `../reference_dfine/finetune.py`. |
 | `our_yolox/` | Swap to YOLOX-M. Compare vs reference's YOLOX runs. |
 
 Each folder has its own `05_data.yaml` (shared schema; only the dataset

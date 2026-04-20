@@ -11,25 +11,45 @@ vs the arch.
 ```
 .
 ├── CLAUDE.md                       (this file — Claude-facing notes)
-├── README.md                       (human-facing setup + usage)
+├── README.md                       (human-facing overview + navigation)
 ├── pyproject.toml                  pinned deps (uv-managed; albumentations==1.4.6, ...)
-├── .gitignore                      excludes runs/, inference/, .venv/
-├── rtdetr_v2_finetune_cppe5.py     RT-DETRv2 fine-tune on CPPE-5 (runnable; now
-│                                   deterministic + CLI-configurable, see below)
-├── dfine_finetune_cppe5.py         D-FINE fine-tune on CPPE-5 (runnable; not
-│                                   yet re-tuned — see "D-FINE status" below)
-├── rtdetr_v2_inference.py          RT-DETRv2 single-image inference
-├── dfine_inference.py              D-FINE single-image inference
-├── run_inference.py                GT-vs-pred side-by-side on N train + N val
-│                                   samples from the best checkpoint; writes
-│                                   PNGs under inference/{train,val}/
-├── data_loader.py                  YOLO → HF Dataset bridge (for Phase 2 —
-│                                   swapping CPPE-5 for our features)
-├── runs/                           (gitignored) per-run output dirs, one per
-│                                   `{seed,tag}` combo
-├── inference/                      (gitignored) GT-vs-pred PNGs
-└── reference/                      Untouched original .ipynb files
+├── .gitignore                      excludes runs/ and .venv/ everywhere beneath
+├── data_loader.py                  shared — HF cppe-5 ↔ YOLO bridge + --dump-cppe5 CLI
+├── run_inference.py                shared — GT-vs-pred side-by-side PNG grids
+│
+├── reference_rtdetr_v2/            qubvel's RT-DETRv2 reference
+│   ├── finetune.py                 RT-DETRv2-R50 on CPPE-5 (CLI: --seed, --tag, --aug)
+│   ├── inference.py                single-image inference
+│   ├── RT_DETR_v2_finetune_on_a_custom_dataset.ipynb   (upstream original)
+│   ├── RT_DETR_v2_inference.ipynb                       (upstream original)
+│   ├── README.md
+│   └── runs/                       (gitignored) training outputs
+│
+├── reference_dfine/                qubvel's D-FINE reference
+│   ├── finetune.py                 D-FINE-large on CPPE-5 (lr=2e-5 fix applied)
+│   ├── inference.py
+│   ├── DFine_finetune_on_a_custom_dataset.ipynb        (upstream original)
+│   ├── DFine_inference.ipynb
+│   ├── README.md
+│   └── runs/                       (gitignored)
+│
+├── our_rtdetr_v2_albumentations/   OUR pipeline, RT-DETRv2, Albumentations aug — DONE
+│   ├── 05_data.yaml / 06_training.yaml / README.md
+│   └── runs/                       (gitignored)
+│
+├── our_rtdetr_v2_torchvision/      OUR pipeline, RT-DETRv2, torchvision v2 aug — PLACEHOLDER
+├── our_dfine/                      OUR pipeline, D-FINE, HF backend — PLACEHOLDER
+└── our_yolox/                      OUR pipeline, YOLOX-M, pytorch backend — PLACEHOLDER
 ```
+
+Two-kind folder convention:
+- `reference_<arch>/` holds the **upstream baseline** — qubvel's notebook
+  as runnable Python, next to its original `.ipynb`, with training outputs
+  under the folder's own `runs/`.
+- `our_<arch>[_<aug>]/` holds the **same experiment run through our
+  pipeline** (`core/p06_training/train.py --backend hf`) for
+  apples-to-apples comparison. Each is self-contained: config YAMLs,
+  README with setup + expected numbers, and its own `runs/`.
 
 ## Venv
 
@@ -50,7 +70,12 @@ so `utils/` imports work from `data_loader.py`.
 
 Invocation pattern (from repo root):
 ```bash
-.venv-notebook/bin/python notebooks/detr_finetune_reference/rtdetr_v2_finetune_cppe5.py
+# Reference (qubvel's pipeline)
+.venv-notebook/bin/python notebooks/detr_finetune_reference/reference_rtdetr_v2/finetune.py --seed 42
+
+# Our in-repo pipeline (same recipe, our trainer)
+CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
+  --config notebooks/detr_finetune_reference/our_rtdetr_v2_albumentations/06_training.yaml
 ```
 Do NOT `uv run` from the repo root — that uses the main `.venv/` and will
 fail on the albumentations pin. If running `uv` against the reference project
@@ -139,7 +164,7 @@ bs=8 recipe**.
 
 ### D-FINE status — **NOT reproduced**
 
-`dfine_finetune_cppe5.py` still uses qubvel's recipe (lr=5e-5, bs=8); val
+`reference_dfine/finetune.py` applies the lr=2e-5 fix over qubvel's recipe; val
 mAP plateaus at ep3 ≈ 0.20 and never climbs — **the same LR that works for
 rtdetr_v2_r50 is too hot for dfine-large's ~3x-larger backbone**. Test
 mAP = 0.2617 vs qubvel's 0.4485. Fix (not yet applied):
@@ -209,12 +234,12 @@ All downstream code (Albumentations pipeline, `CPPE5Dataset` class,
   Feature-dir lookup uses the map in `load_class_names()`; add new features
   there when extending beyond fire_detection / ppe-helmet / etc.
 
-## CLI for `rtdetr_v2_finetune_cppe5.py`
+## CLI for `reference_rtdetr_v2/finetune.py`
 
 The script now takes three flags (all optional, override via env var too):
 
 ```bash
-.venv-notebook/bin/python notebooks/detr_finetune_reference/rtdetr_v2_finetune_cppe5.py \
+.venv-notebook/bin/python notebooks/detr_finetune_reference/reference_rtdetr_v2/finetune.py \
     --seed 42                          # SEED env var; default 42
     --tag bs16_lr1e4_cosine_wd_bf16    # RUN_TAG env var; default empty
     --aug basic|strong                 # AUG env var; default "basic" (qubvel)
