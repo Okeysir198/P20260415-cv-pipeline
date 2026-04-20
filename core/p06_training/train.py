@@ -48,6 +48,26 @@ import torch  # noqa: E402
 # raise; warn-only lets the run proceed while locking the rest of the graph.
 torch.use_deterministic_algorithms(True, warn_only=True)
 
+# Silence two harmless warnings that each fire once per CUDA op selection /
+# eval batch and bloat training logs without signaling anything actionable.
+# Neither hides real errors — both are narrow, specific messages.
+import warnings as _warnings
+_warnings.filterwarnings(
+    "ignore",
+    message=r".*grid_sampler_2d_backward_cuda does not have a deterministic.*",
+    category=UserWarning,
+)
+_warnings.filterwarnings(
+    "ignore",
+    message=r".*Memory Efficient attention defaults to a non-deterministic.*",
+    category=UserWarning,
+)
+_warnings.filterwarnings(
+    "ignore",
+    message=r".*Encountered more than 100 detections in a single image.*",
+    category=UserWarning,
+)
+
 from utils.config import load_config, parse_overrides  # noqa: E402
 
 

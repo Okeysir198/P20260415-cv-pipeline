@@ -471,6 +471,8 @@ def train_with_hf(
     output_format = getattr(model, "output_format", "yolox")
     logger.info("Training with HF Trainer: output_format=%s", output_format)
 
+    _validate_hf_backend_config(config, output_format)
+
     # Build datasets based on task type
     train_dataset, eval_dataset, data_collator = _build_datasets(
         data_config, config, output_format, base_dir,
@@ -528,7 +530,7 @@ def train_with_hf(
     # Train
     result = trainer.train(resume_from_checkpoint=resume_from)
 
-    # Save final model
+    # Save final model (load_best_model_at_end=True means this is the best ckpt)
     trainer.save_model()
 
     summary = {
@@ -536,8 +538,128 @@ def train_with_hf(
         "total_epochs": int(result.metrics.get("epoch", 0)),
         "metrics": result.metrics,
     }
+
+    # Final test-set eval, matching the reference notebook's
+    # `trainer.evaluate(eval_dataset=test_dataset, metric_key_prefix="eval")`
+    # call. Only attempted for tasks that have a functioning eval path on
+    # the HF backend (detection / classification / segmentation) and when a
+    # `test` split is actually present on disk.
+    test_dataset = _try_build_test_dataset(data_config, config, output_format, base_dir)
+    if test_dataset is not None:
+        logger.info("Running final test-set evaluation on best checkpoint...")
+        try:
+            test_metrics = trainer.evaluate(eval_dataset=test_dataset, metric_key_prefix="test")
+            summary["test_metrics"] = test_metrics
+            # Also write test_results.json next to HF's all_results.json for lineage.
+            import json as _json
+            test_json = Path(training_args.output_dir) / "test_results.json"
+            with open(test_json, "w") as f:
+                _json.dump(test_metrics, f, indent=2, sort_keys=True)
+            logger.info("Test metrics written to %s", test_json)
+        except Exception as e:  # pragma: no cover — don't fail the whole run on test eval issues
+            logger.warning("Test-set evaluation failed (training still succeeded): %s", e)
+    else:
+        logger.info("No test split available — skipping test-set evaluation.")
+
     logger.info("HF Trainer complete: %s", summary)
     return summary
+
+
+_SUPPORTED_HF_TASKS = {"detr", "classification", "segmentation"}
+
+
+def _validate_hf_backend_config(config: dict, output_format: str) -> None:
+    """Fail fast on config combos the HF backend can't honour, rather than
+    silently downgrading features and surprising the user at training time.
+
+    Keeps this short on purpose — only hard incompatibilities go here, not
+    style lint (different feature / different taste).
+    """
+    train_cfg = config.get("training", {})
+    hard_errors: list = []
+    soft_warnings: list = []
+
+    # 1) Supported task types
+    if output_format not in _SUPPORTED_HF_TASKS:
+        hard_errors.append(
+            f"training.backend='hf' does not yet support output_format="
+            f"'{output_format}'. Supported: {sorted(_SUPPORTED_HF_TASKS)}. "
+            f"Use training.backend='pytorch' for this task."
+        )
+
+    # 2) Features the HF backend doesn't (yet) implement
+    if train_cfg.get("ema", False):
+        soft_warnings.append(
+            "training.ema=True is ignored on the HF backend. "
+            "Use training.backend='pytorch' if EMA is required; "
+            "otherwise leave ema=False and rely on load_best_model_at_end."
+        )
+    if train_cfg.get("gpu_augment", False):
+        soft_warnings.append(
+            "training.gpu_augment=True is ignored on the HF backend "
+            "(HF Trainer uses its own DataLoader; GPU augmentation runs "
+            "only on the pytorch backend). Aug runs on CPU; set "
+            "augmentation.library='albumentations' for ~2x throughput."
+        )
+
+    # 3) Detection-specific sanity
+    if output_format == "detr":
+        if train_cfg.get("amp", False) and not train_cfg.get("bf16", False):
+            hard_errors.append(
+                "Detection: training.amp=True (fp16) overflows the DETR "
+                "decoder. Use training.bf16=True (RTX 5090/A100+) or "
+                "training.amp=False."
+            )
+        aug_cfg = config.get("augmentation", {})
+        if aug_cfg.get("mosaic", False):
+            soft_warnings.append(
+                "augmentation.mosaic=True on a DETR-family model — mosaic "
+                "is designed for anchor-based detectors; DETR-family models "
+                "do not benefit from it and it often hurts."
+            )
+
+    for w in soft_warnings:
+        logger.warning("[hf_trainer config] %s", w)
+    if hard_errors:
+        raise ValueError(
+            "HF Trainer config validation failed:\n  - "
+            + "\n  - ".join(hard_errors)
+        )
+
+
+def _try_build_test_dataset(data_config, config, output_format, base_dir):
+    """Build the test-split dataset only if one exists on disk. Returns None
+    if the split doesn't exist or the task doesn't yet support HF-Trainer eval.
+
+    Delegates split resolution to `YOLOXDataset` itself (same codepath as the
+    train/val loaders) rather than reinventing it — catches `FileNotFoundError`
+    cleanly when a dataset has no test split.
+    """
+    if output_format != "detr":
+        # Classification / segmentation test-dataset construction mirrors
+        # `_build_datasets`; add parallel branches here when those backends
+        # grow an end-of-training test eval need.
+        return None
+
+    from core.p05_data.detection_dataset import YOLOXDataset
+    from core.p05_data.transforms import build_transforms
+
+    input_size = tuple(data_config["input_size"])
+    aug_config = config.get("augmentation", {})
+    eval_transforms = build_transforms(
+        config=aug_config, is_train=False, input_size=input_size,
+        mean=data_config.get("mean"), std=data_config.get("std"),
+    )
+    try:
+        return YOLOXDataset(
+            data_config, split="test", transforms=eval_transforms, base_dir=base_dir,
+        )
+    except FileNotFoundError:
+        logger.info("No test split on disk — skipping test-set evaluation.")
+        return None
+    except Exception as e:  # pragma: no cover
+        logger.info("Could not build test dataset (%s) — skipping.", e)
+        return None
 
 
 def _build_datasets(
