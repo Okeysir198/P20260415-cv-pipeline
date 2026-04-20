@@ -1,0 +1,99 @@
+# D-FINE-large on CPPE-5, via our in-repo pipeline + HF Trainer backend
+# + torchvision v2 CPU augmentation (NOT Albumentations).
+#
+# Companion to our_dfine_albumentations/06_training.yaml — the ONLY semantic
+# difference is `augmentation.library: torchvision`. Same model, same
+# hyperparameters, same dataset. Used to measure torchvision v2 aug overhead
+# vs the Albumentations fast path for D-FINE — mirrors the
+# our_rtdetr_v2_albumentations vs our_rtdetr_v2_torchvision experiment.
+#
+# Usage (from repo root):
+#   CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
+#     --config notebooks/detr_finetune_reference/our_dfine_torchvision/06_training.yaml
+#
+# Artefacts land in
+#   notebooks/detr_finetune_reference/our_dfine_torchvision/runs/seed42/
+
+model:
+  arch: dfine-large
+  pretrained: ustc-community/dfine-large-coco
+  num_classes: 5
+  input_size: [480, 480]
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 8                  # qubvel's per_device_train_batch_size
+  num_workers: 2                 # qubvel's dataloader_num_workers
+  prefetch_factor: 2
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision           # the slow path — what we're benchmarking
+  normalize: false               # HF DFineImageProcessor handles it; feed [0,1]
+  mosaic: false                  # DETR family doesn't support mosaic
+  mixup: false
+  # Same probability-gated transforms as the albumentations variant.
+  # `build_transforms` honours these in both backends.
+  perspective_p: 0.1
+  fliplr: 0.5
+  brightness_contrast_p: 0.5
+  hsv_p: 0.1
+  # Affine — qubvel doesn't use any. Pin to no-op.
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
+
+training:
+  backend: hf
+  epochs: 30                     # qubvel's num_train_epochs
+  optimizer: adamw
+  lr: 0.00005                    # qubvel's learning_rate=5e-5
+  weight_decay: 0.0              # qubvel's default (not set)
+  warmup_steps: 300              # qubvel's warmup_steps
+  scheduler: linear              # qubvel's default (not set)
+  max_grad_norm: 0.1             # qubvel's max_grad_norm
+  bf16: false                    # matches our_dfine_albumentations — D-FINE's
+                                 # distribution-focused loss stalls at val≈0.15
+                                 # under bf16 (unlike RT-DETRv2 which is neutral).
+  amp: false                     # D-FINE decoder overflows in fp16
+  gpu_augment: false             # HF Trainer uses its own DataLoader
+  ema: false                     # reference doesn't use EMA
+
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 2
+  train_viz:
+    enabled: false
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  run_name: cppe5_our_dfine_torchvision_fp32
+  save_dir: runs/seed42
+  report_to: tensorboard
+
+checkpoint:
+  save_best: true
+  metric: eval_map
+  mode: max
+  save_interval: 1
+
+seed: 42

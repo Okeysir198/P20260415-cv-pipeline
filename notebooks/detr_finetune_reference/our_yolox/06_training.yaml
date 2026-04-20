@@ -1,0 +1,132 @@
+# YOLOX-M (official Megvii impl) on CPPE-5 via our in-repo pipeline +
+# pytorch backend + Albumentations CPU augmentation.
+#
+# Three axes that differ from the DETR-family siblings:
+#   1. `model.impl: official` — requires the separate `.venv-yolox-official/`
+#      venv. Do NOT run via `uv run` (main `.venv/` has the custom YOLOX
+#      impl + incompatible transformers pin). Use `.venv-yolox-official/bin/python`.
+#   2. `training.backend: pytorch` — the HF Trainer backend's config
+#      validator rejects output_format='yolox'.
+#   3. `augmentation.library: albumentations` WITHOUT Mosaic/MixUp —
+#      those are dataset-level ops that only the torchvision v2 backend
+#      implements. This is an aug-parity apples-to-apples run with the
+#      DETR siblings; expect mAP below "YOLOX with Mosaic" as a result.
+#
+# Usage (from repo root):
+#   CUDA_VISIBLE_DEVICES=1 .venv-yolox-official/bin/python \
+#     core/p06_training/train.py \
+#     --config notebooks/detr_finetune_reference/our_yolox/06_training.yaml
+#
+# Artefacts land in
+#   notebooks/detr_finetune_reference/our_yolox/runs/seed42/
+# (custom pytorch trainer layout: best.pth, last.pth, ema.pth, data_preview/,
+#  val_predictions/, trainer_state stored in runs/ tensorboard).
+
+model:
+  arch: yolox-m
+  impl: official                 # Megvii yolox package via _OfficialYOLOXAdapter
+  pretrained: ../../../pretrained/yolox_m.pth
+  num_classes: 5
+  input_size: [480, 480]
+  depth: 0.67                    # yolox-m canonical
+  width: 0.75
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 16
+  num_workers: 2
+  prefetch_factor: 2
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: albumentations        # matches DETR siblings; Mosaic/MixUp not supported
+  normalize: false               # YOLOX Megvii weights expect raw [0, 255] input —
+                                 # do NOT divide by 255 and do NOT apply ImageNet stats.
+  mosaic: false                  # Albumentations backend can't do this (dataset-level);
+                                 # leave false to keep the config honest.
+  mixup: false
+  # Probability-gated CPU transforms Albumentations backend DOES support.
+  # Values mirror the YOLOX production recipe (small geometric, moderate color).
+  perspective_p: 0.0             # YOLOX doesn't use perspective in the official recipe
+  fliplr: 0.5
+  brightness_contrast_p: 0.5
+  hsv_p: 0.5                     # YOLOX uses stronger HSV than DETR-family
+  hsv_h: 0.015
+  hsv_s: 0.4
+  hsv_v: 0.3
+  # Mild affine — YOLOX production uses scale=[0.1, 2.0] under Mosaic; without
+  # Mosaic we stay milder to avoid producing empty crops on 480² CPPE-5.
+  scale: [0.9, 1.1]
+  degrees: 5.0
+  translate: 0.05
+  shear: 1.0
+
+training:
+  backend: pytorch
+  epochs: 50                     # CPPE-5 is 850 train imgs; 50 ep is plenty
+  optimizer: sgd
+  # Megvii's scaling rule: basic_lr × bs / 64  →  0.01 × 16/64 = 0.0025.
+  # Matches the `features/safety-fire_detection/` YOLOX-M overfit fix.
+  lr: 0.0025
+  momentum: 0.9
+  weight_decay: 0.0005
+  warmup_epochs: 3
+  scheduler: cosine
+  patience: 30
+  val_full_interval: 0           # full val every epoch (29-image test = free)
+  val_subset_fraction: 1.0
+  amp: true                      # YOLOX is AMP-safe (unlike DETR)
+  grad_clip: 35.0
+  ema: true
+  ema_decay: 0.9998
+  gpu_augment: false             # Albumentations stays on CPU — no GPU aug path
+
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.25
+    grid_cols: 2
+    gt_color_rgb: [160, 32, 240]
+    pred_color_rgb: [0, 200, 0]
+    gt_thickness: 2
+    pred_thickness: 1
+    text_scale: 0.4
+    dpi: 150
+  train_viz:
+    enabled: false
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+loss:
+  type: yolox
+
+logging:
+  wandb_project: smart-camera
+  run_name: cppe5_yolox_m_official_albu
+  save_dir: runs/seed42
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 10
+
+seed: 42

@@ -25,7 +25,7 @@ See "Two bugs fixed" below.
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
-  --config notebooks/detr_finetune_reference/our_dfine/06_training.yaml
+  --config notebooks/detr_finetune_reference/our_dfine_albumentations/06_training.yaml
 ```
 
 Outputs land in `runs/seed42/` next to this README.

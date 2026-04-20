@@ -1,0 +1,30 @@
+# CPPE-5 as a "feature" for our in-repo pipeline — YOLOX variant.
+# Dataset dumped by `data_loader.py::dump_cppe5_to_yolo()` into the usual
+# dataset_store layout (850 train / 150 val / 29 test, qubvel seed=1337).
+dataset_name: "cppe5"
+path: "../../../dataset_store/training_ready/cppe5"
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+names:
+  0: Coverall
+  1: Face_Shield
+  2: Gloves
+  3: Goggles
+  4: Mask
+num_classes: 5
+
+# Match the DETR sibling folders (480²) for apples-to-apples comparison of
+# converged mAP. Production YOLOX training on larger datasets typically
+# uses 640² — switch via --override if you want that.
+input_size: [480, 480]
+
+# ImageNet mean/std unused by YOLOX (augmentation.normalize: false in
+# 06_training.yaml); kept for schema completeness.
+mean: [0.485, 0.456, 0.406]
+std:  [0.229, 0.224, 0.225]
+
+# Required by p02 annotation QA (empty — we're not running QA on CPPE-5)
+auto_label:
+  class_rules: []

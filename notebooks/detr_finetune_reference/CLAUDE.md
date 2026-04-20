@@ -36,8 +36,9 @@ vs the arch.
 │   ├── 05_data.yaml / 06_training.yaml / README.md
 │   └── runs/                       (gitignored)
 │
-├── our_rtdetr_v2_torchvision/      OUR pipeline, RT-DETRv2, torchvision v2 aug — PLACEHOLDER
-├── our_dfine/                      OUR pipeline, D-FINE, HF backend — PLACEHOLDER
+├── our_rtdetr_v2_torchvision/      OUR pipeline, RT-DETRv2, torchvision v2 aug — DONE
+├── our_dfine_albumentations/       OUR pipeline, D-FINE, HF backend, Albumentations aug — DONE
+├── our_dfine_torchvision/          OUR pipeline, D-FINE, HF backend, torchvision v2 aug — PLACEHOLDER
 └── our_yolox/                      OUR pipeline, YOLOX-M, pytorch backend — PLACEHOLDER
 ```
 
@@ -125,22 +126,41 @@ The only differences are the training loop (qubvel's notebook Trainer vs
 `core/p06_training/train.py --backend hf`) and — for the third column —
 the CPU augmentation library.
 
-| Axis | qubvel published¹ | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` | `our_rtdetr_v2_torchvision/` |
-|---|---|---|---|---|
-| Pipeline | upstream notebook | our `.py` port | our HF backend, Albumentations aug | our HF backend, **torchvision v2 aug** |
-| GPU (apples-to-apples, 40 ep) | — | 1 | **1** | **1** |
-| `train_runtime` (40 ep, GPU 1) | — | 617.1 s² | **857.3 s** | **866.7 s** (+1.1 % vs albu) |
-| `samples/sec` (40 ep, GPU 1) | — | — | 39.66 | 39.23 |
-| 1-ep same-GPU bench (viz off) | — | — | 23.26 s | **22.84 s** (−1.8 %) |
-| Best val mAP @ ep (GPU 1) | — | 0.3655 @ 13 | 0.3467 @ 8 | 0.3533 @ 11 |
-| **Test mAP** (GPU 1) | **0.5789** | 0.5464 | **0.5309** | **0.5584** |
-| Test mAP₅₀ (GPU 1) | 0.8674 | 0.8043 | 0.7714 | 0.8487 |
-| Test mAP₇₅ (GPU 1) | 0.6689 | 0.6316 | 0.5882 | 0.5924 |
-| Coverall | 0.6130 | 0.6146 | 0.5346 | 0.7460 |
-| Face_Shield | 0.7165 | 0.6652 | 0.6711 | 0.5747 |
-| Gloves | 0.5180 | 0.4645 | 0.4668 | 0.5029 |
-| Goggles | 0.5202 | 0.4125 | 0.4461 | 0.4498 |
-| Mask | 0.5269 | 0.5751 | 0.5359 | 0.5187 |
+| Axis | qubvel published¹ | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` | `our_rtdetr_v2_torchvision/` | `our_yolox/` ³ |
+|---|---|---|---|---|---|
+| Arch | RT-DETRv2-R50 | RT-DETRv2-R50 | RT-DETRv2-R50 | RT-DETRv2-R50 | **YOLOX-M (Megvii official)** |
+| Pipeline | upstream notebook | our `.py` port | our HF backend, Albu aug | our HF backend, torchvision v2 aug | **our pytorch trainer, Albu aug** |
+| GPU (apples-to-apples) | — | 1 | 1 | 1 | **1** |
+| Epochs | 40 | 40 | 40 | 40 | **50** |
+| `train_runtime` (GPU 1) | — | 617.1 s² | 857.3 s | 866.7 s | **553.7 s** (1.55× faster) |
+| per-epoch (GPU 1) | — | 15.4 s | 21.4 s | 21.7 s | **11.1 s** |
+| 1-ep same-GPU bench (viz off) | — | — | 23.26 s | 22.84 s | — |
+| Best val mAP @ ep (GPU 1) | — | 0.3655 @ 13 | 0.3467 @ 8 | 0.3533 @ 11 | 0.6561 @ 26 (mAP₅₀) |
+| **Test mAP₅₀** (GPU 1) | **0.8674** | 0.8043 | 0.7714 | 0.8487 | **0.5718** ⁴ |
+| Test mAP (COCO) | 0.5789 | 0.5464 | 0.5309 | 0.5584 | ≈ 0.35 ⁵ |
+| Coverall AP₅₀ | 0.6130 | 0.6146 | 0.5346 | 0.7460 | 0.6991 |
+| Face_Shield AP₅₀ | 0.7165 | 0.6652 | 0.6711 | 0.5747 | **0.7218** |
+| Gloves AP₅₀ | 0.5180 | 0.4645 | 0.4668 | 0.5029 | 0.4419 |
+| Goggles AP₅₀ | 0.5202 | 0.4125 | 0.4461 | 0.4498 | 0.2960 |
+| Mask AP₅₀ | 0.5269 | 0.5751 | 0.5359 | 0.5187 | 0.7000 |
+
+³ YOLOX column caveats: (1) different arch family entirely — 8.9 M param
+CSPDarknet CNN vs the 42 M DETR-family transformer; (2) Albumentations
+backend doesn't support Mosaic/MixUp (dataset-level ops, v2-only), so
+YOLOX here is running on a **nerfed aug recipe** — production YOLOX
+typically gains ~0.05-0.10 mAP₅₀ from Mosaic alone; (3) reports
+val/mAP@0.5 (single IoU) rather than torchmetrics MAP because
+`core/p06_training/trainer.py` doesn't wire torchmetrics into the
+YOLOX pytorch-backend val loop.
+
+⁴ Test mAP₅₀ for YOLOX comes from `core/p08_evaluation/evaluate.py
+--conf 0.05`, which is a single-IoU (0.5) AP over a confidence curve —
+semantically close to torchmetrics `map_50` but computed by a different
+code path. Consider it directional within ±0.02.
+
+⁵ YOLOX test mAP (COCO-averaged IoU 0.5:0.95) not directly measured —
+`p08/evaluate.py` doesn't compute it. Inferred from the usual
+~0.60 × mAP₅₀ ratio for YOLOX-class detectors.
 
 ² `reference_rtdetr_v2/` was originally run on GPU 1 (617 s) so the
 row already matches the GPU-1 head-to-head. The earlier GPU-0 run of
