@@ -24,18 +24,13 @@ on the ~1-2 non-deterministic CUDA kernels in deformable attention).
 TrainingArguments pins `seed` + `data_seed` so the DataLoader sampler is
 reproducible too. Override via `--seed N` or SEED env var.
 
-Hyperparameter deltas from qubvel's notebook (applied here because
-`dfine-large-coco` is ~3× the parameter count of rtdetr_v2_r50 and the same
-lr=5e-5 is too hot for its backbone — val mAP plateaued at ep3 ≈ 0.20 in
-the unfixed naïve port):
-    learning_rate      = 2e-5   (was 5e-5, halved for the larger backbone)
-    warmup_steps       = 500    (was 300, gentler rampup for large model)
-    lr_scheduler_type  = "cosine"     (was default linear)
-    weight_decay       = 1e-4         (was default 0; DETR canonical)
-    bf16               = True         (RTX 5090 tensor cores)
-    # per_device_train_batch_size=8 kept — dfine-large + matcher aux outputs
-    # don't leave comfortable headroom for bs=16 on a single GPU.
-    # num_train_epochs=30 kept (qubvel's number).
+Hyperparameters match qubvel's notebook byte-for-byte (lr=5e-5, warmup=300,
+linear scheduler, weight_decay=0, no bf16). Only addition over the notebook
+is early `set_seed(SEED)` + cuDNN deterministic flags for reproducibility —
+these do not change the optimization math. An earlier "fix" (lr=2e-5, cosine,
+WD=1e-4, bf16) plateaued val mAP at 0.22 / test 0.37, worse than qubvel's
+0.4485; reverted on the assumption the naïve recipe in the notebook output
+(which achieved 0.4485) is the correct target.
 """
 import argparse
 import os
@@ -495,20 +490,11 @@ from transformers import TrainingArguments
 
 training_args = TrainingArguments(
     output_dir=str(_RUN_DIR),
-    num_train_epochs=30,               # qubvel's number — kept
+    num_train_epochs=30,
     max_grad_norm=0.1,
-    # D-FINE-specific hyperparameter deltas vs qubvel's notebook:
-    # - dfine-large-coco is ~3× the parameter count of rtdetr_v2_r50; the
-    #   same lr=5e-5 that works for RT-DETRv2 is too hot for D-FINE's
-    #   backbone — the naïve port peaked at val mAP ≈ 0.20 by ep3 and
-    #   plateaued for the next 27 epochs (test mAP = 0.2617 vs qubvel's
-    #   0.4485).
-    # - Halving the LR + lengthening warmup lets the large backbone
-    #   actually converge.
-    learning_rate=2e-5,                # was 5e-5 (halved for large backbone)
-    warmup_steps=500,                  # was 300 (gentler rampup)
-    per_device_train_batch_size=8,     # kept — dfine-large + matcher aux
-                                       # outputs don't leave bs=16 headroom
+    learning_rate=5e-5,
+    warmup_steps=300,
+    per_device_train_batch_size=8,
     dataloader_num_workers=2,
     metric_for_best_model="eval_map",
     greater_is_better=True,
@@ -518,20 +504,7 @@ training_args = TrainingArguments(
     save_total_limit=2,
     remove_unused_columns=False,
     eval_do_concat_batches=False,
-    report_to="tensorboard",  # or "wandb"
-    # Bundle A regularization (shared with the RT-DETRv2 recipe):
-    # - cosine anneals LR past the warmup peak, avoiding drift under a
-    #   still-hot linear decay.
-    # - weight_decay=1e-4 is the DETR canonical value (HF Trainer default
-    #   is 0); curbs class-head overfit on the 850-sample CPPE-5 train.
-    # - bf16 uses RTX 5090 tensor cores; ~1.5× faster, neutral numerically
-    #   for DETR-family models.
-    lr_scheduler_type="cosine",
-    weight_decay=1e-4,
-    bf16=True,
-    # Determinism: cuDNN/CUBLAS/deterministic-algorithms already set above.
-    # `seed` seeds HF Trainer's internal RNG (dataloader shuffle, etc.);
-    # `data_seed` pins the DataLoader sampler independently.
+    report_to="tensorboard",
     seed=SEED,
     data_seed=SEED,
 )

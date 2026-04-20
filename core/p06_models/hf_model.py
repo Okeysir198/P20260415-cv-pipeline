@@ -31,6 +31,8 @@ HF_MODEL_REGISTRY: Dict[str, Tuple[Any, Any, str]] = {
     "dfine-s": (DFineForObjectDetection, DFineConfig, "ustc-community/dfine_s_coco"),
     "dfine-n": (DFineForObjectDetection, DFineConfig, "ustc-community/dfine_n_coco"),
     "dfine-m": (DFineForObjectDetection, DFineConfig, "ustc-community/dfine_m_coco"),
+    "dfine-l": (DFineForObjectDetection, DFineConfig, "ustc-community/dfine-large-coco"),
+    "dfine-large": (DFineForObjectDetection, DFineConfig, "ustc-community/dfine-large-coco"),
     "rtdetr": (RTDetrV2ForObjectDetection, RTDetrV2Config, "PekingU/rtdetr_v2_r18vd"),
     "rtdetr-r18": (RTDetrV2ForObjectDetection, RTDetrV2Config, "PekingU/rtdetr_v2_r18vd"),
     "rtdetr-r50": (RTDetrV2ForObjectDetection, RTDetrV2Config, "PekingU/rtdetr_v2_r50vd"),

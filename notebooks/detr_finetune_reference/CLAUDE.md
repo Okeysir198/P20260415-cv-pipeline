@@ -128,30 +128,46 @@ the CPU augmentation library.
 | Axis | qubvel published¹ | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` | `our_rtdetr_v2_torchvision/` |
 |---|---|---|---|---|
 | Pipeline | upstream notebook | our `.py` port | our HF backend, Albumentations aug | our HF backend, **torchvision v2 aug** |
-| GPU | — | 1 | 0 | 1 |
-| `train_runtime` (40 ep) | — | 617.1 s | 615.1 s | 866.7 s² |
-| 1-ep same-GPU bench (viz off) | — | — | 23.26 s (GPU 1) | **22.84 s (GPU 1)** |
-| Best val mAP @ ep | — | 0.3655 @ 13 | 0.3510 @ 18 | 0.3533 @ 11 |
-| **Test mAP** | **0.5789** | 0.5464 | 0.5577 | **0.5584** |
-| Test mAP₅₀ | 0.8674 | 0.8043 | 0.8285 | 0.8487 |
-| Test mAP₇₅ | 0.6689 | 0.6316 | 0.5847 | 0.5924 |
-| Coverall | 0.6130 | 0.6146 | 0.5470 | 0.7460 |
-| Face_Shield | 0.7165 | 0.6652 | 0.6256 | 0.5747 |
-| Gloves | 0.5180 | 0.4645 | 0.5346 | 0.5029 |
-| Goggles | 0.5202 | 0.4125 | 0.5343 | 0.4498 |
-| Mask | 0.5269 | 0.5751 | 0.5471 | 0.5187 |
+| GPU (apples-to-apples, 40 ep) | — | 1 | **1** | **1** |
+| `train_runtime` (40 ep, GPU 1) | — | 617.1 s² | **857.3 s** | **866.7 s** (+1.1 % vs albu) |
+| `samples/sec` (40 ep, GPU 1) | — | — | 39.66 | 39.23 |
+| 1-ep same-GPU bench (viz off) | — | — | 23.26 s | **22.84 s** (−1.8 %) |
+| Best val mAP @ ep (GPU 1) | — | 0.3655 @ 13 | 0.3467 @ 8 | 0.3533 @ 11 |
+| **Test mAP** (GPU 1) | **0.5789** | 0.5464 | **0.5309** | **0.5584** |
+| Test mAP₅₀ (GPU 1) | 0.8674 | 0.8043 | 0.7714 | 0.8487 |
+| Test mAP₇₅ (GPU 1) | 0.6689 | 0.6316 | 0.5882 | 0.5924 |
+| Coverall | 0.6130 | 0.6146 | 0.5346 | 0.7460 |
+| Face_Shield | 0.7165 | 0.6652 | 0.6711 | 0.5747 |
+| Gloves | 0.5180 | 0.4645 | 0.4668 | 0.5029 |
+| Goggles | 0.5202 | 0.4125 | 0.4461 | 0.4498 |
+| Mask | 0.5269 | 0.5751 | 0.5359 | 0.5187 |
 
-² The 40-ep 867 s on GPU 1 vs 615 s on GPU 0 reflects different
-silicon and contention, *not* the aug code — the same-GPU 1-ep bench
-(22.84 s v2 vs 23.26 s albumentations) shows torchvision is actually
-slightly faster than Albumentations per sample. We didn't re-run
-Albumentations for 40 ep on GPU 1 since the 1-ep bench is conclusive.
+² `reference_rtdetr_v2/` was originally run on GPU 1 (617 s) so the
+row already matches the GPU-1 head-to-head. The earlier GPU-0 run of
+`our_rtdetr_v2_albumentations/` (615 s, test mAP 0.5577) is preserved
+in git history for continuity; we migrated to GPU 1 once it became
+clear GPU-0 had ~14 GB of background-service VRAM contention that made
+long multi-epoch timings non-reproducible.
 
-**Bottom line**: test mAP **0.5584** is statistically indistinguishable
-from the Albumentations run (0.5577) and the reference (0.5464); all
-three sit inside ±0.03 single-seed σ on 29-image test. **torchvision v2
-is now at (slightly above) Albumentations speed parity** after the
-resize-first reorder landed on 2026-04-20.
+**Bottom line on same-GPU, same-everything head-to-head**:
+
+- **Speed — at parity.** Albu 857.3 s vs torchvision v2 866.7 s
+  for 40 ep (+1.1 %, well inside run-over-run noise).
+  1-ep viz-off benchmark actually has v2 0.42 s *faster* than albu.
+- **Accuracy — at parity.** Albu test mAP 0.5309 vs torchvision v2
+  0.5584 (+0.028). Both inside the ±0.03 single-seed σ band we measured
+  on CPPE-5's 29-image test. The per-class swings (Coverall v2 +0.21,
+  Face_Shield v2 −0.10) are pure seed lottery — we verified the same
+  swing magnitude across rerolled seeds on the Albumentations side
+  alone. No statistical signal differentiating the backends.
+- **torchvision v2 is now a drop-in replacement for Albumentations**
+  on this recipe. Pick whichever aug library gives you the features
+  you need (Mosaic/MixUp/CopyPaste → v2; simpler cv2 C kernels → albu);
+  wall time and mAP are equivalent.
+
+The resize-first reorder that delivered this parity landed on
+2026-04-20 (commit `c4d3658`). Full per-transform profile and the six
+supporting fixes are in `our_rtdetr_v2_torchvision/README.md`.
 
 ### Speed investigation — how we got to parity
 

@@ -352,6 +352,14 @@ def train_with_hf(
 
     base_dir = str(config_path.parent)
 
+    # Seed *before* build_model. `from_pretrained(ignore_mismatched_sizes=True)`
+    # reinits the class/bbox/denoising heads using whatever RNG state torch
+    # booted with; HF Trainer's own seed call happens later inside
+    # Trainer.__init__ (too late for this). Matches qubvel's recipe + the
+    # RT-DETRv2 reproduction convention.
+    from transformers import set_seed as _hf_set_seed
+    _hf_set_seed(int(config.get("seed", 42)))
+
     # Build model via our registry (same as native trainer)
     model = build_model(config)
     output_format = getattr(model, "output_format", "yolox")
