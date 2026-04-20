@@ -45,15 +45,18 @@ def _subset_indices(dataset: Any) -> Optional[List[int]]:
 def _run_splits_and_subsets(trainer: Any) -> Dict[str, Optional[List[int]]]:
     """Return ``{split: subset_indices or None}`` for splits actually used in the run.
 
-    Only includes splits for which the trainer has built a loader. Test is
-    excluded (no test loader exists during training) so data_preview only
-    reflects train+val — matching what the run actually consumes.
+    The custom pytorch trainer sets ``trainer.train_loader`` and
+    ``trainer.val_loader`` (never a test loader during training), so this
+    returns train+val only in that path. The HF-Trainer viz bridge also
+    supplies a ``test_loader`` stub so test stats/grids are included — the
+    reference notebook treats CPPE-5 as 850/150/29 train/val/test, and we
+    mirror that here when the third loader is present.
     """
     out: Dict[str, Optional[List[int]]] = {}
-    if getattr(trainer, "train_loader", None) is not None:
-        out["train"] = _subset_indices(trainer.train_loader.dataset)
-    if getattr(trainer, "val_loader", None) is not None:
-        out["val"] = _subset_indices(trainer.val_loader.dataset)
+    for split in ("train", "val", "test"):
+        loader = getattr(trainer, f"{split}_loader", None)
+        if loader is not None:
+            out[split] = _subset_indices(loader.dataset)
     return out
 
 

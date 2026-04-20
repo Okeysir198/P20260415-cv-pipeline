@@ -17,17 +17,36 @@ Usage:
 import argparse
 import importlib
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+# `CUBLAS_WORKSPACE_CONFIG` must be set before torch touches cuBLAS. Gates
+# deterministic matmul reductions when combined with
+# `torch.use_deterministic_algorithms(True, ...)` below.
+# HF Trainer has `TrainingArguments(full_determinism=True)` which would do
+# this too, but it forces strict `use_deterministic_algorithms(True)` which
+# crashes RT-DETRv2 on its non-deterministic deformable-attention kernels,
+# so we do our own warn-only variant here and let HF's `seed`/`data_seed`
+# handle the Python/NumPy/Torch RNG seeding.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 # Pick the idle GPU before any torch cuda init. Respects an explicit
 # CUDA_VISIBLE_DEVICES if the user set one. Safe to call before `import
 # torch` (auto_select_gpu uses only subprocess + env vars).
 from utils.device import auto_select_gpu  # noqa: E402
 auto_select_gpu()
+
+import torch  # noqa: E402
+
+# Deterministic matmul / conv algorithm selection. `warn_only=True` because
+# RT-DETRv2's multi-scale deformable attention and the memory-efficient
+# attention backward lack deterministic CUDA kernels — strict mode would
+# raise; warn-only lets the run proceed while locking the rest of the graph.
+torch.use_deterministic_algorithms(True, warn_only=True)
 
 from utils.config import load_config, parse_overrides  # noqa: E402
 

@@ -43,6 +43,14 @@ dependencies = [
     "optuna>=4.8",
     "plotly>=6.6",
     "kaleido>=1.2",
+    # --- Metrics (HF Trainer detection compute_metrics uses MeanAveragePrecision) ---
+    "torchmetrics>=1.4",
+    "pycocotools>=2.0",
+    # --- Albumentations (optional per-transform-probability augmentation backend,
+    # matches qubvel's reference notebook pipeline; ~2x faster than torchvision v2
+    # per-sample CPU aug for detection. Selected via `augmentation.library: albumentations`
+    # in a training config.) ---
+    "albumentations>=1.4.6",
     # --- Logging ---
     "wandb>=0.25",
     # --- Demo UI ---
@@ -58,6 +66,7 @@ dependencies = [
     "dvc>=3.67",
     "playwright>=1.58",
     "pytest-playwright>=0.7",
+    "tensorboard>=2.20.0",
 ]
 
 [project.scripts]

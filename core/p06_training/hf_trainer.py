@@ -31,11 +31,247 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from types import SimpleNamespace
+
+import os as _os
+from types import SimpleNamespace as _NS
+
 from transformers import (
     EarlyStoppingCallback,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
 )
+from transformers.image_transforms import center_to_corners_format
+
+from core.p06_training.callbacks import (
+    AugLabelGridLogger,
+    DataLabelGridLogger,
+    DatasetStatsLogger,
+    ValPredictionLogger,
+)
+
+
+class _HFVizBridge(TrainerCallback):
+    """Adapter that runs our internal viz callbacks inside HF Trainer.
+
+    Our callbacks (`DatasetStatsLogger`, `DataLabelGridLogger`,
+    `AugLabelGridLogger`, `ValPredictionLogger`) were written against the
+    custom pytorch trainer's attribute surface (`trainer.model`,
+    `trainer.train_loader`, `trainer._model_cfg`, `trainer._loaded_data_cfg`,
+    `trainer._decode_predictions`). HF Trainer has a different interface.
+
+    Rather than porting four callbacks, this bridge builds a tiny "proxy
+    trainer" per-hook with exactly the attributes our callbacks consume, then
+    dispatches HF's `on_train_begin` / `on_epoch_end` to our callbacks'
+    `on_train_start` / `on_epoch_end`.
+    """
+
+    def __init__(
+        self,
+        inner_callbacks,
+        model,
+        data_config,
+        training_config,
+        input_size,
+        base_dir: Optional[str] = None,
+    ):
+        self._inner = inner_callbacks
+        self._model = model
+        self._data_cfg = data_config
+        self._train_cfg = training_config
+        self._model_cfg = {"input_size": list(input_size)}
+        self._base_dir = base_dir
+        # Pre-build eager stub loaders so `_run_splits_and_subsets` reports
+        # both splits as active at `on_train_begin`. HF Trainer's eval
+        # dataloader is built lazily (only on first `.evaluate()`), so at
+        # on_train_begin time it's None. `DatasetStatsLogger` / `DataLabelGrid`
+        # / `AugLabelGrid` callbacks use `_run_splits_and_subsets` to decide
+        # which splits to include — with val missing, val stats/grids never
+        # get generated. The stubs have `.dataset` pointing at a freshly
+        # constructed `YOLOXDataset` (disk reads same as the real loader);
+        # we overwrite them later with the real dataloaders when HF passes
+        # them via kwargs.
+        self._train_loader = self._build_stub_loader("train")
+        self._val_loader = self._build_stub_loader("val")
+        self._test_loader = self._build_stub_loader("test")
+
+    def _build_stub_loader(self, split: str):
+        try:
+            from core.p05_data.detection_dataset import YOLOXDataset
+        except Exception:  # pragma: no cover
+            return None
+        try:
+            ds = YOLOXDataset(
+                data_config=self._data_cfg,
+                split=split,
+                transforms=None,
+                base_dir=self._base_dir or "",
+            )
+        except Exception as e:  # pragma: no cover
+            logger.info("Viz bridge: skip %s stub loader — %s", split, e)
+            return None
+        return _NS(dataset=ds)
+
+    def _build_proxy(self, train_loader=None, eval_loader=None):
+        ft = _NS()
+        ft.model = self._model
+        params = list(self._model.parameters())
+        ft.device = params[0].device if params else torch.device("cpu")
+        ft.train_loader = train_loader or self._train_loader
+        ft.val_loader = eval_loader or self._val_loader
+        ft.test_loader = self._test_loader  # HF Trainer doesn't pass a test loader; our stub covers it
+        ft._model_cfg = self._model_cfg
+        ft._data_cfg = self._train_cfg.get("data", {})
+        ft._loaded_data_cfg = self._data_cfg
+        ft.config = self._train_cfg
+        # Stub so `trainer.callback_runner.callbacks` iteration AND
+        # `trainer.callback_runner.get_callback(SomeCallbackCls)` lookups in our
+        # internal callbacks (used for cross-ref'ing `WandBLogger`) return
+        # empty / None instead of raising AttributeError. HF Trainer handles
+        # wandb itself, so there's no in-bridge WandBLogger to return.
+        ft.callback_runner = _NS(callbacks=[], get_callback=lambda _cls: None)
+        ft._decode_predictions = self._make_decoder()
+        return ft
+
+    def _make_decoder(self):
+        """Replicate `DetectionTrainer._decode_predictions` for our wrapper."""
+        model = self._model
+        input_h, input_w = self._model_cfg["input_size"]
+
+        def decode(predictions, conf_threshold: float = 0.01):
+            target_sizes = torch.tensor(
+                [[input_h, input_w]] * predictions.shape[0],
+                device=predictions.device,
+            )
+            if hasattr(model, "postprocess"):
+                return model.postprocess(predictions, conf_threshold, target_sizes)
+            # Classification/seg paths aren't reached here since this bridge
+            # is wired for detection only.
+            raise RuntimeError(f"No postprocess method on {type(model).__name__}")
+
+        return decode
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        train_loader = kwargs.get("train_dataloader")
+        eval_loader = kwargs.get("eval_dataloader")
+        if train_loader is not None:
+            self._train_loader = train_loader
+        if eval_loader is not None:
+            self._val_loader = eval_loader
+        proxy = self._build_proxy(train_loader, eval_loader)
+        for cb in self._inner:
+            fn = getattr(cb, "on_train_start", None)
+            if fn is None:
+                continue
+            # ValPredictionLogger needs a dataloader at on_train_start to
+            # sample its fixed-index pool; HF Trainer can't guarantee the
+            # eval_dataloader is built at on_train_begin. Defer it to the
+            # first on_epoch_end (where the loader is definitely live).
+            needs_loader = isinstance(cb, ValPredictionLogger)
+            if needs_loader and (
+                (cb.split == "val" and proxy.val_loader is None)
+                or (cb.split == "train" and proxy.train_loader is None)
+            ):
+                continue
+            try:
+                fn(proxy)
+            except Exception as e:  # pragma: no cover
+                logger.warning("%s.on_train_start failed: %s", type(cb).__name__, e)
+        return control
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        train_loader = kwargs.get("train_dataloader") or self._train_loader
+        eval_loader = kwargs.get("eval_dataloader") or self._val_loader
+        # Remember them for later hooks (HF 5.x doesn't always pass both).
+        if train_loader is not None:
+            self._train_loader = train_loader
+        if eval_loader is not None:
+            self._val_loader = eval_loader
+        proxy = self._build_proxy(train_loader, eval_loader)
+
+        # Lazy first-call init for ValPredictionLogger (see on_train_begin).
+        for cb in self._inner:
+            if isinstance(cb, ValPredictionLogger) and cb._sample_indices is None:
+                loader_ok = (
+                    (cb.split == "val" and proxy.val_loader is not None)
+                    or (cb.split == "train" and proxy.train_loader is not None)
+                )
+                if loader_ok:
+                    try:
+                        cb.on_train_start(proxy)
+                    except Exception as e:  # pragma: no cover
+                        logger.warning(
+                            "%s.on_train_start (lazy) failed: %s", type(cb).__name__, e,
+                        )
+        # HF state.epoch is a float like 1.0/2.0/… right after the epoch completes.
+        epoch_idx = int(round(state.epoch or 0.0)) - 1  # our callbacks expect 0-based
+
+        # Metrics: pull the latest eval log line if any (has eval_map etc).
+        metrics = {}
+        if state.log_history:
+            for entry in reversed(state.log_history):
+                if any(k.startswith("eval_") for k in entry):
+                    metrics = {
+                        k.replace("eval_", "val/"): v
+                        for k, v in entry.items()
+                        if isinstance(v, (int, float))
+                    }
+                    # Mirror mAP50 under our in-repo key for callback compat.
+                    if "eval_map_50" in entry:
+                        metrics["val/mAP50"] = entry["eval_map_50"]
+                    break
+
+        for cb in self._inner:
+            fn = getattr(cb, "on_epoch_end", None)
+            if fn is not None:
+                try:
+                    fn(proxy, epoch_idx, metrics)
+                except Exception as e:  # pragma: no cover
+                    logger.warning("%s.on_epoch_end failed: %s", type(cb).__name__, e)
+        return control
+
+
+class _DetectionTrainer(Trainer):
+    """HF Trainer subclass that saves via the wrapped HF model's own
+    `save_pretrained(..., safe_serialization=False)`.
+
+    RT-DETRv2 / D-FINE share the decoder `class_embed` + `bbox_embed`
+    modules across decoder layers (same `nn.Module` instances referenced
+    multiple times). When HF Trainer's default `_save` flattens
+    `HFDetectionModel.state_dict()` and passes it to
+    `safetensors.torch.save_file`, safetensors rejects the duplicate tensor
+    aliases with a `shared tensors` `RuntimeError`. In transformers 5.x the
+    `save_safetensors=False` TrainingArguments knob was removed, so we
+    override `_save` directly instead.
+    """
+
+    def _save(self, output_dir=None, state_dict=None):
+        import torch  # local import — trainer.py set up determinism already
+        output_dir = output_dir or self.args.output_dir
+        _os.makedirs(output_dir, exist_ok=True)
+        model = self.model
+
+        # Save the *wrapper's* state_dict (keys prefixed with `hf_model.`) via
+        # plain torch.save so HF Trainer's `_load_best_model` can reload into
+        # the same wrapper without a prefix mismatch. safetensors can't handle
+        # RT-DETRv2's shared class_embed / bbox_embed tensors, and the newer
+        # transformers removed the `save_safetensors=False` arg, so we go
+        # directly to torch.save — which handles aliased tensors fine.
+        if state_dict is None:
+            state_dict = model.state_dict()
+        torch.save(state_dict, _os.path.join(output_dir, "pytorch_model.bin"))
+
+        # Also dump the inner model config + processor for standalone
+        # inference (same directory layout as `save_pretrained`).
+        inner = getattr(model, "hf_model", None)
+        if inner is not None and hasattr(inner, "config"):
+            inner.config.save_pretrained(output_dir)
+        processor = getattr(model, "processor", None)
+        if processor is not None and hasattr(processor, "save_pretrained"):
+            processor.save_pretrained(output_dir)
+
+        torch.save(self.args, _os.path.join(output_dir, "training_args.bin"))
 
 from core.p06_models import build_model
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
@@ -49,6 +285,145 @@ _OPTIM_MAP = {
     "adam": "adamw_torch",
     "adamw": "adamw_torch",
 }
+
+
+def _maybe_subset(dataset, fraction_or_count, seed: int):
+    """Wrap `dataset` in `torch.utils.data.Subset` if caller requested a
+    subset. `fraction_or_count` can be None (no subset), a float in (0, 1]
+    (fraction), or an int (absolute sample count). Uses a deterministic
+    shuffle so multi-seed runs on the same subset see the same images.
+    """
+    if fraction_or_count is None:
+        return dataset
+    n = len(dataset)
+    if isinstance(fraction_or_count, float):
+        k = max(1, int(round(n * fraction_or_count)))
+    else:
+        k = int(fraction_or_count)
+    if k >= n:
+        return dataset
+    import numpy as _np
+    import torch.utils.data as _td
+    rng = _np.random.default_rng(seed)
+    indices = sorted(rng.choice(n, size=k, replace=False).tolist())
+    return _td.Subset(dataset, indices)
+
+
+def _hf_detection_collate(batch):
+    """Collate `YOLOXDataset.__getitem__` tuples into HF DETR batch dict.
+
+    YOLOXDataset returns `(image, targets_Nx5, path)` where `targets` is
+    ``[class_id, cx_norm, cy_norm, w_norm, h_norm]`` (already 0-1 normalized
+    cxcywh — canonical internal format, see `core/p05_data/transforms.py`).
+    HF DETR `forward(pixel_values, labels)` wants `labels` as a list of per-image
+    dicts `{"class_labels": LongTensor[N], "boxes": FloatTensor[N, 4]}` where
+    boxes are also normalized cxcywh. So the conversion is just a column split.
+    """
+    images = torch.stack([sample[0] for sample in batch])
+    labels = []
+    for _, targets, _ in batch:
+        if targets.numel() == 0:
+            labels.append({
+                "class_labels": torch.zeros(0, dtype=torch.long),
+                "boxes": torch.zeros(0, 4, dtype=torch.float32),
+            })
+        else:
+            labels.append({
+                "class_labels": targets[:, 0].long(),
+                "boxes": targets[:, 1:5].float(),
+            })
+    return {"pixel_values": images, "labels": labels}
+
+
+def _build_detection_compute_metrics(image_processor, input_size, id2label=None):
+    """Real `compute_metrics` for HF Trainer, detection task.
+
+    Mirrors qubvel's reference `MAPEvaluator`
+    (`notebooks/detr_finetune_reference/rtdetr_v2_finetune_cppe5.py`):
+    post-process each batch via `image_processor.post_process_object_detection`
+    to get xyxy-pixel predictions, convert normalized-cxcywh targets to
+    xyxy-pixel, then accumulate in `torchmetrics.MeanAveragePrecision`.
+
+    Returns both scalar metrics (`map`, `map_50`, `map_75`, `map_small`, ...)
+    and per-class metrics (`map_<classname>`, `mar_100_<classname>`) when
+    ``id2label`` is supplied — matches the reference MAPEvaluator output
+    shape so ``trainer_state.json`` has the same fields as qubvel's.
+
+    This path requires `eval_do_concat_batches=False` in `TrainingArguments`
+    (detection labels are variable-length per image; concat would crash).
+    """
+    from torchmetrics.detection import MeanAveragePrecision
+
+    H_in, W_in = int(input_size[0]), int(input_size[1])
+
+    def compute_metrics(eval_pred):
+        evaluator = MeanAveragePrecision(box_format="xyxy", class_metrics=True)
+        predictions, label_ids = eval_pred.predictions, eval_pred.label_ids
+
+        for batch_pred, batch_labels in zip(predictions, label_ids):
+            # HF wraps `ModelOutput(loss, logits, pred_boxes, ...)` into a tuple
+            # per-batch when `eval_do_concat_batches=False`. Index 0 is loss,
+            # index 1 = logits (B, Q, C), index 2 = pred_boxes (B, Q, 4) in
+            # normalized cxcywh — same convention as qubvel's notebook.
+            batch_logits = torch.as_tensor(batch_pred[1])
+            batch_boxes = torch.as_tensor(batch_pred[2])
+            batch_size = batch_logits.shape[0]
+            target_sizes = torch.tensor([[H_in, W_in]] * batch_size)
+
+            hf_output = SimpleNamespace(logits=batch_logits, pred_boxes=batch_boxes)
+            preds = image_processor.post_process_object_detection(
+                hf_output, threshold=0.0, target_sizes=target_sizes,
+            )
+            # torchmetrics expects {"boxes","scores","labels"} cpu tensors
+            preds = [{k: v.detach().cpu() for k, v in p.items()} for p in preds]
+
+            targets = []
+            scale = torch.tensor([W_in, H_in, W_in, H_in], dtype=torch.float32)
+            for lbl in batch_labels:
+                boxes_norm = torch.as_tensor(lbl["boxes"], dtype=torch.float32)
+                cls = torch.as_tensor(lbl["class_labels"], dtype=torch.long)
+                if boxes_norm.numel() == 0:
+                    targets.append({
+                        "boxes": torch.zeros(0, 4, dtype=torch.float32),
+                        "labels": torch.zeros(0, dtype=torch.long),
+                    })
+                    continue
+                boxes_xyxy = center_to_corners_format(boxes_norm) * scale
+                targets.append({"boxes": boxes_xyxy, "labels": cls})
+
+            evaluator.update(preds, targets)
+
+        raw = evaluator.compute()
+        classes = raw.get("classes")  # LongTensor of present class ids
+
+        out: Dict[str, float] = {}
+        for metric_name, value in raw.items():
+            if metric_name == "classes":
+                continue
+            if isinstance(value, torch.Tensor):
+                if value.ndim == 0:
+                    # Scalar metric — e.g. map, map_50, map_75, map_small,
+                    # mar_100, etc. Keep under its original torchmetrics key.
+                    out[metric_name] = float(value.item())
+                elif value.ndim == 1:
+                    # Per-class vector — unpack to `<metric>_<classname>`.
+                    # The `classes` tensor says which class id each entry
+                    # corresponds to (only classes seen in eval show up).
+                    ids = classes.tolist() if classes is not None else list(range(value.numel()))
+                    for cid, v in zip(ids, value.tolist()):
+                        class_name = (id2label.get(int(cid), str(int(cid)))
+                                       if id2label else str(int(cid)))
+                        out[f"{metric_name}_{class_name}"] = float(v)
+            else:
+                out[metric_name] = float(value)
+
+        # Mirror `mAP50` under our in-repo convention key so configs using
+        # `metric: val/mAP50` still resolve correctly (HF prefixes with eval_).
+        if "map_50" in out:
+            out["mAP50"] = out["map_50"]
+        return out
+
+    return compute_metrics
 
 
 def train_with_hf(
@@ -71,12 +446,8 @@ def train_with_hf(
     if overrides:
         config = merge_configs(config, overrides)
 
-    # Build model via our registry (same as native trainer)
-    model = build_model(config)
-    output_format = getattr(model, "output_format", "yolox")
-    logger.info("Training with HF Trainer: output_format=%s", output_format)
-
-    # Resolve data config
+    # Resolve data config first so `names` can be forwarded into the model's
+    # id2label/label2id via `build_hf_model` (which reads `config.data.names`).
     data_cfg = config.get("data", {})
     dataset_config_path = data_cfg.get("dataset_config")
     if dataset_config_path:
@@ -86,7 +457,19 @@ def train_with_hf(
     else:
         data_config = data_cfg
 
+    # Merge resolved data names into training config's data section so the model
+    # sees them. The custom pytorch trainer does this implicitly via its own
+    # resolution path (`_loaded_data_cfg`); the HF backend needs it done
+    # explicitly here because `build_model` only sees the training config.
+    if "names" in data_config and "names" not in config.get("data", {}):
+        config.setdefault("data", {})["names"] = data_config["names"]
+
     base_dir = str(config_path.parent)
+
+    # Build model via our registry (same as native trainer)
+    model = build_model(config)
+    output_format = getattr(model, "output_format", "yolox")
+    logger.info("Training with HF Trainer: output_format=%s", output_format)
 
     # Build datasets based on task type
     train_dataset, eval_dataset, data_collator = _build_datasets(
@@ -97,13 +480,39 @@ def train_with_hf(
     training_args = _config_to_training_args(config, output_format, config_path)
 
     # Build compute_metrics based on task
-    compute_metrics = _build_compute_metrics(output_format, config)
+    if output_format == "detr":
+        # Detection needs the image_processor for post_process_object_detection,
+        # the input_size to know the target coord space, and id2label so
+        # per-class mAP entries in trainer_state.json get human-readable keys
+        # (e.g. `map_Coverall` instead of `map_0`) — matches the reference's
+        # MAPEvaluator output shape.
+        input_size = tuple(data_config["input_size"])
+        id2label = None
+        hf_inner = getattr(model, "hf_model", None)
+        if hf_inner is not None and getattr(hf_inner, "config", None) is not None:
+            id2label = getattr(hf_inner.config, "id2label", None)
+        compute_metrics = _build_detection_compute_metrics(
+            image_processor=model.processor,
+            input_size=input_size,
+            id2label=id2label,
+        )
+    else:
+        compute_metrics = _build_compute_metrics(output_format, config)
 
-    # Build callbacks
-    callbacks = _build_callbacks(config)
+    # Build callbacks (incl. viz-bridge for detection)
+    callbacks = _build_callbacks(
+        config,
+        output_format=output_format,
+        model=model,
+        data_config=data_config,
+        base_dir=base_dir,
+        save_dir=training_args.output_dir,
+    )
 
-    # Create HF Trainer
-    trainer = Trainer(
+    # Create HF Trainer. Detection uses a subclass that avoids safetensors'
+    # shared-weights error; other tasks use the vanilla Trainer.
+    TrainerClass = _DetectionTrainer if output_format == "detr" else Trainer
+    trainer = TrainerClass(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
@@ -201,7 +610,7 @@ def _build_datasets(
         return train_dataset, eval_dataset, segmentation_collate_fn
 
     else:
-        from core.p05_data.detection_dataset import YOLOXDataset, collate_fn
+        from core.p05_data.detection_dataset import YOLOXDataset
         from core.p05_data.transforms import build_transforms
 
         input_size = tuple(data_config["input_size"])
@@ -222,7 +631,20 @@ def _build_datasets(
         eval_dataset = YOLOXDataset(
             data_config, split="val", transforms=eval_transforms, base_dir=base_dir,
         )
-        return train_dataset, eval_dataset, collate_fn
+        # Respect `data.subset.{train,val}` the same way our custom pytorch
+        # trainer does (via `torch.utils.data.Subset`). The HF path bypasses
+        # `build_dataloader` where that wrapping normally happens, so we
+        # replicate it here. Accepts int (N samples) or float in (0, 1].
+        subset_cfg = training_config.get("data", {}).get("subset", {}) or {}
+        seed = int(training_config.get("seed", 42))
+        train_dataset = _maybe_subset(train_dataset, subset_cfg.get("train"), seed)
+        eval_dataset = _maybe_subset(eval_dataset, subset_cfg.get("val"), seed)
+        # HF Trainer calls `model(**batch)` expecting `pixel_values` + `labels`
+        # where labels is a list[dict] per-image in HF DETR format. YOLOXDataset
+        # returns (image, targets_normalized_cxcywh, path); our HF DETR labels
+        # are also normalized cxcywh so we just split the class col off and
+        # hand it through — no pixel-scale dance like the custom pytorch trainer.
+        return train_dataset, eval_dataset, _hf_detection_collate
 
 
 def _config_to_training_args(
@@ -260,10 +682,18 @@ def _config_to_training_args(
     # Convert our metric names to HF's eval_ prefix format
     hf_metric = ckpt_metric.replace("val/", "eval_")
 
-    # Warmup: convert epochs to steps
+    # Warmup: prefer explicit warmup_steps (what the reference notebook pins),
+    # fall back to warmup_epochs for legacy feature configs.
+    warmup_steps = train_cfg.get("warmup_steps")
     warmup_epochs = train_cfg.get("warmup_epochs", 0)
     epochs = train_cfg.get("epochs", 100)
-    warmup_ratio = warmup_epochs / epochs if epochs > 0 else 0.0
+    warmup_ratio = 0.0 if warmup_steps else (warmup_epochs / epochs if epochs > 0 else 0.0)
+
+    # lr scheduler: pass through from config (cosine/linear/...). HF Trainer
+    # defaults to "linear"; keep that behaviour when config doesn't specify.
+    lr_scheduler_type = train_cfg.get("scheduler", "linear")
+    # For non-detection tasks we keep the current concat-batch behaviour.
+    eval_do_concat_batches = output_format != "detr"
 
     return TrainingArguments(
         output_dir=save_dir,
@@ -273,21 +703,28 @@ def _config_to_training_args(
         per_device_train_batch_size=data_cfg.get("batch_size", 16),
         per_device_eval_batch_size=data_cfg.get("batch_size", 16),
         optim=optim_name,
+        warmup_steps=warmup_steps or 0,
         warmup_ratio=warmup_ratio,
-        fp16=train_cfg.get("amp", True),
-        max_grad_norm=train_cfg.get("grad_clip", 35.0),
+        lr_scheduler_type=lr_scheduler_type,
+        fp16=train_cfg.get("amp", False),
+        bf16=train_cfg.get("bf16", False),
+        max_grad_norm=train_cfg.get("max_grad_norm", train_cfg.get("grad_clip", 35.0)),
         eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=3,
         load_best_model_at_end=ckpt_cfg.get("save_best", False),
         metric_for_best_model=hf_metric if ckpt_cfg.get("save_best", False) else None,
         greater_is_better=ckpt_cfg.get("mode", "max") == "max" if ckpt_cfg.get("save_best", False) else None,
-        report_to="wandb" if log_cfg.get("wandb_project") else "none",
+        report_to=log_cfg.get("report_to") or (
+            ["wandb", "tensorboard"] if log_cfg.get("wandb_project") else "tensorboard"
+        ),
         run_name=log_cfg.get("run_name"),
         seed=config.get("seed", 42),
+        data_seed=config.get("seed", 42),
         dataloader_num_workers=data_cfg.get("num_workers", 4),
         dataloader_pin_memory=data_cfg.get("pin_memory", True),
         remove_unused_columns=False,  # Our datasets return custom dicts
+        eval_do_concat_batches=eval_do_concat_batches,
         logging_steps=10,
     )
 
@@ -340,14 +777,104 @@ def _build_compute_metrics(output_format: str, config: dict):
         return compute_metrics
 
 
-def _build_callbacks(config: dict) -> list:
-    """Build HF Trainer callbacks from our config."""
+def _build_callbacks(
+    config: dict,
+    output_format: str = "yolox",
+    model=None,
+    data_config: Optional[dict] = None,
+    base_dir: Optional[str] = None,
+    save_dir: Optional[str] = None,
+) -> list:
+    """Build HF Trainer callbacks from our config.
+
+    Always adds:
+    - `EarlyStoppingCallback` if `training.patience > 0`.
+
+    Adds for detection tasks via the `_HFVizBridge` adapter (so our internal
+    viz callbacks run on HF Trainer):
+    - `DatasetStatsLogger` (always on)
+    - `DataLabelGridLogger` (if `training.data_viz.enabled`)
+    - `AugLabelGridLogger`  (if `training.aug_viz.enabled`)
+    - `ValPredictionLogger` for val (if `training.val_viz.enabled`)
+    - `ValPredictionLogger` for train (if `training.train_viz.enabled`)
+    """
     callbacks = []
 
-    patience = config.get("training", {}).get("patience", 0)
+    train_cfg = config.get("training", {})
+    patience = train_cfg.get("patience", 0)
     if patience > 0:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=patience))
 
+    # Viz callbacks wired through the bridge. Detection only (the other tasks
+    # don't have DETR-family visualisation code yet).
+    if output_format != "detr" or model is None or data_config is None or save_dir is None:
+        return callbacks
+
+    inner: list = []
+    splits = train_cfg.get("data_viz", {}).get("splits", ["train", "val"])
+    input_size = tuple(data_config.get("input_size", (640, 640)))
+
+    # DatasetStatsLogger — always on, matching custom-trainer policy.
+    inner.append(DatasetStatsLogger(
+        save_dir=save_dir, data_config=data_config, base_dir=base_dir or "",
+        splits=splits,
+        dpi=train_cfg.get("data_viz", {}).get("dpi", 120),
+    ))
+
+    data_viz = train_cfg.get("data_viz", {})
+    if data_viz.get("enabled", False):
+        inner.append(DataLabelGridLogger(
+            save_dir=save_dir, splits=splits,
+            data_config=data_config, base_dir=base_dir or "",
+            num_samples=data_viz.get("num_samples", 16),
+            grid_cols=data_viz.get("grid_cols", 4),
+            thickness=data_viz.get("thickness", 2),
+            text_scale=data_viz.get("text_scale", 0.4),
+            dpi=data_viz.get("dpi", 120),
+        ))
+
+    aug_viz = train_cfg.get("aug_viz", {})
+    if aug_viz.get("enabled", False):
+        inner.append(AugLabelGridLogger(
+            save_dir=save_dir,
+            splits=aug_viz.get("splits", ["train"]),
+            data_config=data_config,
+            aug_config=config.get("augmentation", {}),
+            base_dir=base_dir or "",
+            num_samples=aug_viz.get("num_samples", 16),
+            grid_cols=aug_viz.get("grid_cols", 4),
+            thickness=aug_viz.get("thickness", 2),
+            text_scale=aug_viz.get("text_scale", 0.4),
+            dpi=aug_viz.get("dpi", 120),
+        ))
+
+    val_viz = train_cfg.get("val_viz", {})
+    if val_viz.get("enabled", False):
+        inner.append(ValPredictionLogger(
+            save_dir=save_dir, split="val",
+            num_samples=val_viz.get("num_samples", 12),
+            conf_threshold=val_viz.get("conf_threshold", 0.05),
+            grid_cols=val_viz.get("grid_cols", 2),
+        ))
+
+    train_viz = train_cfg.get("train_viz", {})
+    if train_viz.get("enabled", False):
+        inner.append(ValPredictionLogger(
+            save_dir=save_dir, split="train",
+            num_samples=train_viz.get("num_samples", 12),
+            conf_threshold=train_viz.get("conf_threshold", 0.05),
+            grid_cols=train_viz.get("grid_cols", 2),
+        ))
+
+    if inner:
+        callbacks.append(_HFVizBridge(
+            inner_callbacks=inner,
+            model=model,
+            data_config=data_config,
+            training_config=config,
+            input_size=input_size,
+            base_dir=base_dir,
+        ))
     return callbacks
 
 

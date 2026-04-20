@@ -6,7 +6,7 @@ These modules only adapt I/O format between HF and our trainer.
 
 import logging
 from types import SimpleNamespace
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -50,6 +50,12 @@ class HFDetectionModel(DetectionModel):
     architecture config passes through to HF unchanged.
     """
 
+    # `PreTrainedModel` marker attributes that HF Trainer's post-training
+    # best-checkpoint reload code assumes exist on `self.model`. Our wrapper
+    # is plain nn.Module so we supply them explicitly; otherwise
+    # `_issue_warnings_after_load` raises `AttributeError` on checkpoint reload.
+    _keys_to_ignore_on_save = None
+
     def __init__(self, hf_model: torch.nn.Module, processor: Any) -> None:
         super().__init__()
         self.hf_model = hf_model
@@ -64,13 +70,36 @@ class HFDetectionModel(DetectionModel):
     def strides(self) -> List[int]:
         return [8, 16, 32]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Run inference, return (B, Q, 4+C) with pixel cxcywh + logits."""
-        outputs = self.hf_model(pixel_values=x)
+    def forward(
+        self,
+        pixel_values: torch.Tensor,
+        labels: Optional[List[Dict[str, torch.Tensor]]] = None,
+        **kwargs,
+    ):
+        """Two callers:
+
+        - **Our custom PyTorch trainer** (`labels is None`): returns the legacy
+          concatenated tensor `(B, Q, 4+C)` with pixel cxcywh + logits — same as
+          before; the trainer's postprocess chain depends on this shape.
+        - **HuggingFace `Trainer`** (`labels` supplied as a list of HF-format
+          dicts): delegates straight to `self.hf_model(pixel_values=..., labels=...)`
+          and returns the raw HF `ModelOutput` so HF Trainer can read `.loss`
+          and backprop.
+
+        The collator in `core/p06_training/hf_trainer.py` is responsible for
+        emitting `labels` already in HF format (list of
+        `{"class_labels": LongTensor, "boxes": FloatTensor cxcywh-normalized}`).
+        """
+        if labels is not None:
+            # HF Trainer path — pass through so Trainer.compute_loss finds .loss
+            return self.hf_model(pixel_values=pixel_values, labels=labels, **kwargs)
+
+        # Legacy inference path for the custom trainer.
+        outputs = self.hf_model(pixel_values=pixel_values)
         logits = outputs.logits  # (B, Q, C)
         boxes_norm = outputs.pred_boxes  # (B, Q, 4) normalized cxcywh
 
-        _, _, H, W = x.shape
+        _, _, H, W = pixel_values.shape
         scale = boxes_norm.new_tensor([W, H, W, H]).reshape(1, 1, 4)
         boxes_px = boxes_norm * scale
 

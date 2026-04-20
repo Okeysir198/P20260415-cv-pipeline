@@ -56,11 +56,9 @@ def parse_voc(source_config: Dict, base_dir: Path) -> List[Dict]:
         raise FileNotFoundError(f"Could not find annotation directory in {data_root}")
 
     for xml_path in annotation_dir.glob("*.xml"):
-        objects = _parse_voc_xml(xml_path)
-
-        if not objects:
-            continue
-
+        # Resolve the matching image before parsing so we can use its actual
+        # dimensions for bbox normalization (VOC XML `<size>` is not always
+        # in sync with the image file).
         img_name = xml_path.stem
         img_path = None
         for ext in [".jpg", ".jpeg", ".png", ".bmp"]:
@@ -70,6 +68,11 @@ def parse_voc(source_config: Dict, base_dir: Path) -> List[Dict]:
                 break
 
         if img_path is None:
+            continue
+
+        objects = _parse_voc_xml(xml_path, img_path=img_path)
+
+        if not objects:
             continue
 
         samples.append({
@@ -83,9 +86,13 @@ def parse_voc(source_config: Dict, base_dir: Path) -> List[Dict]:
     return samples
 
 
-def _parse_voc_xml(xml_path: Path) -> List[Dict]:
+def _parse_voc_xml(xml_path: Path, img_path: Path = None) -> List[Dict]:
     """
     Parse Pascal VOC XML annotation file.
+
+    Prefers the actual image file's dimensions over the XML `<size>` metadata
+    when ``img_path`` is provided — matches the robustness principle from the
+    reference DETR notebook pipeline (never trust annotation metadata alone).
 
     Returns:
         List of dicts with 'name' and 'bbox' ([cx, cy, w, h] normalized)
@@ -94,13 +101,18 @@ def _parse_voc_xml(xml_path: Path) -> List[Dict]:
     root = tree.getroot()
 
     size_elem = root.find("size")
+    meta_w, meta_h = 0, 0
     if size_elem is not None:
         w_elem = size_elem.find("width")
         h_elem = size_elem.find("height")
-        img_w = int(w_elem.text) if w_elem is not None and w_elem.text else 0
-        img_h = int(h_elem.text) if h_elem is not None and h_elem.text else 0
+        meta_w = int(w_elem.text) if w_elem is not None and w_elem.text else 0
+        meta_h = int(h_elem.text) if h_elem is not None and h_elem.text else 0
+
+    if img_path is not None:
+        from ._image_dims import actual_image_dims
+        img_w, img_h = actual_image_dims(img_path, fallback_w=meta_w, fallback_h=meta_h)
     else:
-        img_w, img_h = 0, 0
+        img_w, img_h = meta_w, meta_h
 
     objects = []
     for obj in root.findall("object"):

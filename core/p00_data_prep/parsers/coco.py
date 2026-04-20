@@ -107,14 +107,28 @@ def _parse_coco_split(
 
     samples = []
 
+    from ._image_dims import actual_image_dims
+
     for img_id, img_info in image_id_to_info.items():
         anns = image_id_to_anns.get(img_id, [])
 
         if not anns:
             continue
 
-        img_w = img_info.get("width") or 1
-        img_h = img_info.get("height") or 1
+        img_path = img_dir / img_info["file_name"]
+        if not img_path.exists():
+            continue
+
+        # Prefer actual image dims (reads header via PIL, ~O(1) syscall) over
+        # COCO metadata — the latter is wrong in a small fraction of public
+        # datasets and silently produces out-of-range YOLO coords when used
+        # blindly. Matches the "never trust metadata" principle from qubvel's
+        # reference notebook pipeline.
+        img_w, img_h = actual_image_dims(
+            img_path,
+            fallback_w=int(img_info.get("width") or 1),
+            fallback_h=int(img_info.get("height") or 1),
+        )
 
         labels = []
         bboxes = []
@@ -130,10 +144,6 @@ def _parse_coco_split(
                 max(0.0, min(1.0, w / img_w)),
                 max(0.0, min(1.0, h / img_h)),
             ])
-
-        img_path = img_dir / img_info["file_name"]
-        if not img_path.exists():
-            continue
 
         samples.append({
             "filename": img_info["file_name"],
