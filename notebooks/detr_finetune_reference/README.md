@@ -9,7 +9,7 @@ in-repo `DetectionTrainer` pipeline as a known-good baseline.
 ```
 notebooks/detr_finetune_reference/
 ├── README.md                       (this file)
-├── requirements.txt                pinned deps
+├── pyproject.toml                  pinned deps (uv-managed)
 ├── rtdetr_v2_finetune_cppe5.py     RT-DETRv2 fine-tune on CPPE-5 (runnable)
 ├── dfine_finetune_cppe5.py         D-FINE fine-tune on CPPE-5 (runnable)
 ├── rtdetr_v2_inference.py          RT-DETRv2 inference (runnable)
@@ -27,7 +27,15 @@ notebooks/detr_finetune_reference/
 
 ```bash
 bash scripts/setup-notebook-venv.sh
-# creates .venv-notebook/ with albumentations==1.4.6 + torchmetrics + HF transformers (git)
+# creates .venv-notebook/ via `uv sync` against notebooks/detr_finetune_reference/pyproject.toml
+# (albumentations==1.4.6 + torchmetrics + HF transformers git + torch/torchvision cu130)
+```
+
+Or directly with uv from repo root:
+
+```bash
+UV_PROJECT_ENVIRONMENT="$(pwd)/.venv-notebook" \
+  uv sync --project notebooks/detr_finetune_reference --python 3.12
 ```
 
 ## Phase 1 — replicate the reference result on CPPE-5
@@ -72,8 +80,8 @@ The `.py` files are direct ports of the `.ipynb` via `jupyter nbconvert --to scr
 with three mechanical cleanups applied:
 
 1. **Shell installs removed** — `!pip install …` / `get_ipython().system(…)` lines
-   stripped. Deps live in `requirements.txt` and are installed by
-   `scripts/setup-notebook-venv.sh`.
+   stripped. Deps live in `pyproject.toml` and are installed by
+   `scripts/setup-notebook-venv.sh` via `uv sync`.
 2. **Jupyter `display(...)` commented out** — visualization cells don't run in
    plain Python. Training/eval behavior unchanged.
 3. **`datasets` 4.x syntax fix** — the notebook accesses

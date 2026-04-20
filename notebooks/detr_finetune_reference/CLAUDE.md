@@ -12,7 +12,7 @@ vs the arch.
 .
 ├── CLAUDE.md                       (this file — Claude-facing notes)
 ├── README.md                       (human-facing setup + usage)
-├── requirements.txt                pinned deps (albumentations==1.4.6, ...)
+├── pyproject.toml                  pinned deps (uv-managed; albumentations==1.4.6, ...)
 ├── rtdetr_v2_finetune_cppe5.py     RT-DETRv2 fine-tune on CPPE-5 (runnable)
 ├── dfine_finetune_cppe5.py         D-FINE fine-tune on CPPE-5 (runnable)
 ├── rtdetr_v2_inference.py          RT-DETRv2 single-image inference
@@ -25,18 +25,28 @@ vs the arch.
 ## Venv
 
 Always use `.venv-notebook/` (not the main `.venv/`). Pinned separately via
-`scripts/setup-notebook-venv.sh` because:
+`notebooks/detr_finetune_reference/pyproject.toml` + `scripts/setup-notebook-venv.sh`
+because:
 - `albumentations==1.4.6` is qubvel's pin (newer versions deprecate
   `A.BboxParams(min_area=N)` semantics that the notebook relies on).
 - HF transformers from git — same as main venv, but decoupled so notebook env
   can be bumped without touching production training.
 - `jupyterlab + ipykernel` registered as kernel name `detr-reference`.
 
+Setup: `bash scripts/setup-notebook-venv.sh` runs
+`uv sync --project notebooks/detr_finetune_reference` with
+`UV_PROJECT_ENVIRONMENT=$REPO_ROOT/.venv-notebook` so the venv lands at repo
+root (not inside the project dir), then installs `-e <repo>` with `--no-deps`
+so `utils/` imports work from `data_loader.py`.
+
 Invocation pattern (from repo root):
 ```bash
 .venv-notebook/bin/python notebooks/detr_finetune_reference/rtdetr_v2_finetune_cppe5.py
 ```
-Do NOT `uv run` — that uses the main venv and will fail on the albumentations pin.
+Do NOT `uv run` from the repo root — that uses the main `.venv/` and will
+fail on the albumentations pin. If running `uv` against the reference project
+directly, always set `UV_PROJECT_ENVIRONMENT=$REPO_ROOT/.venv-notebook` so uv
+targets the notebook venv and not `notebooks/detr_finetune_reference/.venv`.
 
 ## Conversion gotchas (applied to the `.py` files)
 

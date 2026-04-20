@@ -1,0 +1,47 @@
+# Pinned env for qubvel's RT-DETRv2 + D-FINE fine-tune notebook ports.
+# Kept separate from the main cv-pipeline pyproject because this env pins
+# `albumentations==1.4.6` (qubvel's pin — newer versions changed BboxParams
+# semantics the notebooks rely on).
+#
+# Setup (from repo root):
+#   bash scripts/setup-notebook-venv.sh
+#
+# Or directly with uv (venv goes to repo-root `.venv-notebook/`):
+#   UV_PROJECT_ENVIRONMENT="$(pwd)/.venv-notebook" \
+#     uv sync --project notebooks/detr_finetune_reference --python 3.12
+
+[project]
+name = "detr-finetune-reference"
+version = "0.1.0"
+description = "Pinned DETR-family fine-tune reference env — ports of qubvel's RT-DETRv2 + D-FINE HF notebooks"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+    "transformers @ git+https://github.com/huggingface/transformers.git",
+    "albumentations==1.4.6",
+    "torchmetrics>=1.4",
+    "datasets>=2.21",
+    "pycocotools>=2.0",
+    "timm>=1.0",
+    "jupyterlab>=4.2",
+    "ipykernel>=6.29",
+    "matplotlib>=3.10",
+    "Pillow>=12.1",
+    "wandb>=0.17",
+    "numpy>=1.26",
+    "opencv-python>=4.13",
+    "pyyaml>=6.0",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
