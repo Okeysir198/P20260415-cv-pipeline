@@ -226,18 +226,116 @@ def load_class_names(dataset_name: str) -> Dict[int, str]:
     return {int(k): str(v) for k, v in names.items()}
 
 
+def dump_cppe5_to_yolo(
+    output_root: Optional[Path] = None,
+    split_seed: int = 1337,
+    split_ratio: float = 0.15,
+) -> Dict[str, int]:
+    """Write the HF `cppe-5` dataset to our on-disk YOLO layout.
+
+    Inverse of `load_yolo_as_hf_dataset` for this one specific source. The
+    split matches qubvel's reference notebook (``train_test_split(0.15,
+    seed=1337)`` on the HF ``train`` split to manufacture a ``validation``).
+
+    Output layout (uses ``val`` directory name to match our convention):
+        <output_root>/cppe5/
+            train/{images, labels}/
+            val/{images, labels}/
+            test/{images, labels}/
+
+    Args:
+        output_root: directory that will hold ``cppe5/``. Defaults to
+            ``<repo>/dataset_store/training_ready``.
+        split_seed: RNG seed for the 85/15 train→val split (qubvel: 1337).
+        split_ratio: validation fraction out of HF ``train`` (qubvel: 0.15).
+
+    Returns:
+        ``{"train": N, "val": N, "test": N}`` — sample counts per split.
+    """
+    from datasets import load_dataset
+
+    root = Path(output_root) if output_root else _DEFAULT_DATA_ROOT
+    base = root / "cppe5"
+
+    ds = load_dataset("cppe-5")
+    if "validation" not in ds:
+        split = ds["train"].train_test_split(split_ratio, seed=split_seed)
+        ds["train"] = split["train"]
+        ds["validation"] = split["test"]
+
+    counts: Dict[str, int] = {}
+    for hf_split, disk_split in (("train", "train"), ("validation", "val"), ("test", "test")):
+        split_dir = base / disk_split
+        img_dir = split_dir / "images"
+        lbl_dir = split_dir / "labels"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        lbl_dir.mkdir(parents=True, exist_ok=True)
+
+        n = 0
+        for row in ds[hf_split]:
+            img = row["image"].convert("RGB")
+            # Use actual PIL image dims, NOT row["width"]/row["height"]. The
+            # upstream CPPE-5 HF dataset has a known metadata-mismatch bug
+            # (~6% of validation rows: e.g. image_id=70 claims 300×300 but
+            # the real image is ~2000×1500). The reference notebook avoids
+            # this bug by keeping bboxes in pixel space all the way to
+            # Albumentations (which reads dims from `image.shape`). We do
+            # the same here before normalizing-for-YOLO on disk.
+            w, h = img.size
+            image_id = int(row["image_id"])
+            stem = f"{image_id:06d}"
+
+            img.save(img_dir / f"{stem}.jpg", "JPEG", quality=95)
+
+            lines = []
+            for bbox_coco, cls in zip(row["objects"]["bbox"], row["objects"]["category"]):
+                x, y, bw, bh = bbox_coco  # COCO pixel [x_top_left, y_top_left, w, h]
+                if bw <= 0 or bh <= 0:
+                    continue
+                # Clip to image bounds (matches A.BboxParams(clip=True) in the
+                # reference recipe — handles boxes that poke slightly past the
+                # edge due to annotator rounding without dropping the row).
+                x2 = min(float(w), float(x) + float(bw))
+                y2 = min(float(h), float(y) + float(bh))
+                x1 = max(0.0, float(x))
+                y1 = max(0.0, float(y))
+                bw_c, bh_c = x2 - x1, y2 - y1
+                if bw_c <= 0 or bh_c <= 0:
+                    continue
+                cx = (x1 + bw_c / 2) / w
+                cy = (y1 + bh_c / 2) / h
+                wn = bw_c / w
+                hn = bh_c / h
+                lines.append(f"{int(cls)} {cx:.6f} {cy:.6f} {wn:.6f} {hn:.6f}")
+            (lbl_dir / f"{stem}.txt").write_text("\n".join(lines) + ("\n" if lines else ""))
+            n += 1
+        counts[disk_split] = n
+
+    return counts
+
+
 if __name__ == "__main__":
     import argparse
 
-    p = argparse.ArgumentParser(description="Smoke-test the YOLO → HF Dataset bridge.")
-    p.add_argument("--dataset", default="fire_detection")
+    p = argparse.ArgumentParser(description="YOLO ↔ HF Dataset bridge utilities.")
+    p.add_argument("--dump-cppe5", action="store_true",
+                   help="Download HF cppe-5 and dump to dataset_store/training_ready/cppe5/ in YOLO format.")
+    p.add_argument("--dataset", default="fire_detection",
+                   help="(smoke-test mode) dataset name under training_ready/")
     p.add_argument("--split", default="train")
     p.add_argument("--subset", type=float, default=0.05)
     args = p.parse_args()
 
-    ds = load_yolo_as_hf_dataset(args.dataset, args.split, subset=args.subset)
-    names = load_class_names(args.dataset)
-    print(f"Loaded {len(ds)} {args.split} samples from {args.dataset}")
-    print(f"Class names: {names}")
-    print(f"First row keys: {list(ds[0].keys())}")
-    print(f"First row objects: {ds[0]['objects']}")
+    if args.dump_cppe5:
+        counts = dump_cppe5_to_yolo()
+        dest = _DEFAULT_DATA_ROOT / "cppe5"
+        print(f"\nDumped CPPE-5 → {dest}")
+        for s, n in counts.items():
+            print(f"  {s}: {n} images")
+    else:
+        ds = load_yolo_as_hf_dataset(args.dataset, args.split, subset=args.subset)
+        names = load_class_names(args.dataset)
+        print(f"Loaded {len(ds)} {args.split} samples from {args.dataset}")
+        print(f"Class names: {names}")
+        print(f"First row keys: {list(ds[0].keys())}")
+        print(f"First row objects: {ds[0]['objects']}")
