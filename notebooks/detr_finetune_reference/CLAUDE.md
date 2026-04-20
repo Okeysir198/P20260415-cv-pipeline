@@ -111,21 +111,63 @@ If the user re-converts from `.ipynb` in the future, re-apply:
 
 ## Phase 1: RT-DETRv2 reproduction on CPPE-5 — **DONE**
 
-Qubvel's published number is **test mAP = 0.5789** (single run, no seed
-variance reported). Our path:
+Qubvel's published test mAP = **0.5789** (single run, no seed variance
+reported). Both our reference port (`reference_rtdetr_v2/`) and our
+in-repo pipeline (`our_rtdetr_v2_albumentations/`) land within noise of
+that under Bundle B hyperparameters.
+
+### Head-to-head, seed=42, Bundle B (2026-04-20, parallel GPUs)
+
+Both runs launched simultaneously on different GPUs of the same box; same
+`train_test_split(0.15, seed=1337)` CPPE-5 split; same Bundle B recipe
+(bs=16, lr=1e-4, cosine, WD=1e-4, bf16, 40 ep); same determinism setup.
+The only difference is the training loop: qubvel's notebook Trainer call
+vs `core/p06_training/train.py --backend hf`.
+
+| Axis | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` | Δ (ours − ref) |
+|---|---|---|---|
+| Pipeline | qubvel's HF notebook (runnable `.py`) | `core/p06_training/hf_trainer.py` | |
+| GPU | 1 | 0 | |
+| `train_runtime` | 617.1 s | 615.1 s | −2.0 s |
+| Best val mAP @ ep | 0.3655 @ 13 | 0.3510 @ 18 | −0.0145 |
+| **Test mAP** | 0.5464 | **0.5577** | **+0.0113** |
+| Test mAP₅₀ | 0.8043 | 0.8285 | +0.0242 |
+| Test mAP₇₅ | 0.6316 | 0.5847 | −0.0469 |
+| Coverall | 0.6146 | 0.5470 | −0.068 |
+| Face_Shield | 0.6652 | 0.6256 | −0.040 |
+| **Gloves** | 0.4645 | **0.5346** | **+0.070** |
+| **Goggles** | 0.4125 | **0.5343** | **+0.122** |
+| Mask | 0.5751 | 0.5471 | −0.028 |
+
+**Bottom line**: the in-repo pipeline matches reference wall clock within
+2s (0.3% faster), edges ahead on test mAP by +0.011, and is more balanced
+per class — weakest class is 0.53 here vs 0.41 for the reference run.
+Goggles (historically our worst class) jumps +0.12, likely a seed-specific
+effect from our code-path's slightly different backward-pass numerics
+under `use_deterministic_algorithms(warn_only=True)`.
+
+Visual comparison — same `annotate_gt_pred` helper on both sides so
+boxes/colours/legend match byte-for-byte:
+- Reference grid pair: `reference_rtdetr_v2/runs/rtdetr_v2_r50_cppe5_seed42_bs16_lr1e4_cosine_wd_bf16/{val,test}_predictions/final.png` (from `reference_rtdetr_v2/inference.py`)
+- In-repo per-epoch val grids: `our_rtdetr_v2_albumentations/runs/seed42/val_predictions/epoch_NN.png` (from `HFValPredictionCallback` at train time)
+
+### Historical progression (how we arrived at Bundle B)
+
+Qubvel's single-run number is 0.5789. Early in-repo runs landed much
+lower because of seed-lottery effects in the class-head reinit. Path:
 
 | Step | Config | test mAP | Gap vs qubvel |
 |---|---|---|---|
-| naïve port | byte-identical to notebook, OS-entropy seeds | 0.5054 | −0.073 |
-| **deterministic** | `set_seed(42)` before `from_pretrained` | 0.5325 | −0.046 |
-| +Bundle A | + cosine LR + `weight_decay=1e-4` + `bf16` | 0.5348 | −0.044 |
-| **+Bundle B** | + `bs=16 + lr=1e-4` (linear scale) | **0.5585** | **−0.020** |
-| Bundle B mean±std (seeds 42 / 0 / 2024) | same | 0.5287 ± 0.030 | −0.050 (+1.65σ) |
-| Bundle B + `--aug strong` | BBoxSafeRandomCrop + stronger HSV + CLAHE | 0.5420 | −0.037 (**worse** than basic) |
+| naïve port | qubvel's recipe, OS-entropy seeds | 0.5054 | −0.073 |
+| +determinism | `set_seed(42)` before `from_pretrained` | 0.5325 | −0.046 |
+| +Bundle A | cosine + WD 1e-4 + bf16 | 0.5348 | −0.044 |
+| +Bundle B | bs=16, lr=1e-4 (linear scale) | 0.5585 | −0.020 |
+| 3-seed mean ± std | seeds 42/0/2024 | 0.5287 ± 0.030 | −0.050 (+1.65σ) |
+| `--aug strong` | + BBoxSafeRandomCrop / CLAHE | 0.5420 | **worse** than basic |
 
-Call it: qubvel's 0.5789 sits at **+1.65σ above our 3-seed mean** under
-Bundle B with basic aug — reachable but likely their lucky seed. Within
-the ±0.05 Phase-1 tolerance on mean; **well within** on the best seed.
+Single-seed test-mAP variance is ±0.03 for 29-image test. Qubvel's 0.5789
+sits at ~+1.5σ above our mean — reachable as a lucky seed, statistically
+not distinguishable from a library regression with this sample size.
 
 ### The deterministic recipe — why it took so many tries
 
