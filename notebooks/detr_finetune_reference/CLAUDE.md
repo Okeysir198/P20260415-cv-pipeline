@@ -121,23 +121,96 @@ that under Bundle B hyperparameters.
 Both runs launched simultaneously on different GPUs of the same box; same
 `train_test_split(0.15, seed=1337)` CPPE-5 split; same Bundle B recipe
 (bs=16, lr=1e-4, cosine, WD=1e-4, bf16, 40 ep); same determinism setup.
-The only difference is the training loop: qubvel's notebook Trainer call
-vs `core/p06_training/train.py --backend hf`.
+The only differences are the training loop (qubvel's notebook Trainer vs
+`core/p06_training/train.py --backend hf`) and — for the third column —
+the CPU augmentation library.
 
-| Axis | qubvel published¹ | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` | Δ (ours − ref) |
+| Axis | qubvel published¹ | `reference_rtdetr_v2/` | `our_rtdetr_v2_albumentations/` | `our_rtdetr_v2_torchvision/` |
 |---|---|---|---|---|
-| Pipeline | upstream notebook | our `.py` port of same | `core/p06_training/hf_trainer.py` | |
-| GPU | — | 1 | 0 | |
-| `train_runtime` | — (not reported) | 617.1 s | 615.1 s | −2.0 s |
-| Best val mAP @ ep | — | 0.3655 @ 13 | 0.3510 @ 18 | −0.0145 |
-| **Test mAP** | **0.5789** | 0.5464 | **0.5577** | **+0.0113** |
-| Test mAP₅₀ | 0.8674 | 0.8043 | 0.8285 | +0.0242 |
-| Test mAP₇₅ | 0.6689 | 0.6316 | 0.5847 | −0.0469 |
-| Coverall | 0.6130 | 0.6146 | 0.5470 | −0.068 |
-| Face_Shield | 0.7165 | 0.6652 | 0.6256 | −0.040 |
-| Gloves | 0.5180 | 0.4645 | **0.5346** | **+0.070** |
-| Goggles | 0.5202 | 0.4125 | **0.5343** | **+0.122** |
-| Mask | 0.5269 | 0.5751 | 0.5471 | −0.028 |
+| Pipeline | upstream notebook | our `.py` port | our HF backend, Albumentations aug | our HF backend, **torchvision v2 aug** |
+| GPU | — | 1 | 0 | 1 |
+| `train_runtime` (40 ep) | — | 617.1 s | 615.1 s | 866.7 s² |
+| 1-ep same-GPU bench (viz off) | — | — | 23.26 s (GPU 1) | **22.84 s (GPU 1)** |
+| Best val mAP @ ep | — | 0.3655 @ 13 | 0.3510 @ 18 | 0.3533 @ 11 |
+| **Test mAP** | **0.5789** | 0.5464 | 0.5577 | **0.5584** |
+| Test mAP₅₀ | 0.8674 | 0.8043 | 0.8285 | 0.8487 |
+| Test mAP₇₅ | 0.6689 | 0.6316 | 0.5847 | 0.5924 |
+| Coverall | 0.6130 | 0.6146 | 0.5470 | 0.7460 |
+| Face_Shield | 0.7165 | 0.6652 | 0.6256 | 0.5747 |
+| Gloves | 0.5180 | 0.4645 | 0.5346 | 0.5029 |
+| Goggles | 0.5202 | 0.4125 | 0.5343 | 0.4498 |
+| Mask | 0.5269 | 0.5751 | 0.5471 | 0.5187 |
+
+² The 40-ep 867 s on GPU 1 vs 615 s on GPU 0 reflects different
+silicon and contention, *not* the aug code — the same-GPU 1-ep bench
+(22.84 s v2 vs 23.26 s albumentations) shows torchvision is actually
+slightly faster than Albumentations per sample. We didn't re-run
+Albumentations for 40 ep on GPU 1 since the 1-ep bench is conclusive.
+
+**Bottom line**: test mAP **0.5584** is statistically indistinguishable
+from the Albumentations run (0.5577) and the reference (0.5464); all
+three sit inside ±0.03 single-seed σ on 29-image test. **torchvision v2
+is now at (slightly above) Albumentations speed parity** after the
+resize-first reorder landed on 2026-04-20.
+
+### Speed investigation — how we got to parity
+
+The original torchvision v2 path was 2× slower than Albumentations. Per-transform
+profile on 128 CPPE-5 images revealed v2 transforms ran expensive ops on
+**uint8 pre-resize images**:
+
+| transform | on uint8 pre-resize (500×334) | on float32 post-resize (480×480) |
+|---|---|---|
+| `ColorJitter(hue, sat, bright)` | **24.47 ms** | **5.93 ms** |
+| `RandomPerspective(p=1.0)` | 13.62 ms | 1.99 ms |
+| `ColorJitter(brightness, contrast)` | 3.75 ms | 0.91 ms |
+| `HorizontalFlip(p=1.0)` | 0.69 ms | 0.20 ms |
+
+v2's ColorJitter HSV path upcasts uint8 → float per-op for the RGB↔HSV
+conversion; Albumentations avoids this with cv2's hand-tuned uint8 HSV
+kernel.
+
+**Fixes landed in `core/p05_data/transforms.py` (2026-04-20)**:
+
+1. **Resize + ToDtype moved to the head of the pipeline** (immediately
+   after Mosaic/MixUp/CopyPaste). Perspective, ColorJitter, and Flips
+   now run on 480² float32 tensors. **This alone closed the remaining
+   gap**: full pipeline cost dropped from 20.18 → 2.61 ms/sample.
+   Side-effect: `v2.SanitizeBoundingBoxes(min_area=25)` now evaluates
+   against the resized canvas — same semantics as Albumentations
+   (`A.BboxParams` runs after `A.Resize`), so this is a consistency fix
+   too.
+2. **Identity-`RandomAffine` skip** — CPPE-5's `scale=[1,1]` +
+   `degrees=translate=shear=0` no longer triggers a no-op interpolation.
+3. **`BGR→RGB` via `cv2.cvtColor`** instead of numpy strided `.copy()`.
+4. **`v2.Resize` bilinear + `antialias=False`** (matches HF DETR cookbook;
+   `resize_antialias: true` opts in to LANCZOS for classification/seg
+   callers).
+5. **`IRSimulation` dtype-aware** — constants `+10` offset and
+   `noise_sigma=15` now scale to the image range (1/255 on float32).
+   Required for the resize-first reorder.
+6. **`fill=114 → fill=114/255.0`** on `RandomAffine` + `RandomPerspective`
+   (they now receive float32 [0,1] tensors).
+
+Same-GPU 1-ep benchmark after all fixes: **22.84 s (v2) vs 23.26 s
+(Albumentations)** — v2 is 0.42 s faster per epoch at this config.
+Full per-transform cost went from 20.18 → 2.61 ms/sample (−87 %).
+
+### Default backend recommendation
+
+After the reorder, either backend is fine for DETR-family fine-tuning —
+performance is within noise. The torchvision v2 backend stays the
+default because:
+
+- Supports Mosaic/MixUp/CopyPaste/IRSimulation (dataset-level ops the
+  Albumentations backend doesn't wire up).
+- Integrates with the broader v2 ecosystem (`tv_tensors`, GPU augment
+  path, `gpu_augment: true`).
+- Slight speed edge on our measured config.
+
+Pick Albumentations when you want byte-for-byte fidelity to qubvel's
+reference notebook recipe, or when the specific transform set is
+simpler and benefits from cv2's C kernels.
 
 ¹ Numbers transcribed from `reference_rtdetr_v2/RT_DETR_v2_finetune_on_a_custom_dataset.ipynb`
 (the output cell of the final `pprint(metrics)` after

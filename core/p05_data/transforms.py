@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
 
+import cv2
 import numpy as np
 import torch
 import torchvision.transforms.v2 as v2
@@ -50,9 +51,11 @@ def _to_v2_sample(
         canvas_size = (image_bgr_np.shape[0], image_bgr_np.shape[1])
     h, w = canvas_size
 
-    # BGR -> RGB, HWC uint8 -> CHW tensor wrapped in tv_tensors.Image
-    rgb_np = image_bgr_np[:, :, ::-1].copy()
-    image_tensor = torch.from_numpy(rgb_np).permute(2, 0, 1)  # CHW uint8
+    # BGR -> RGB via cv2 (C-optimized, faster than numpy strided `.copy()`
+    # or tensor `.flip()`), then HWC uint8 -> CHW via `.permute`. Both
+    # alternatives measured slower on CPPE-5 at bs=16, 2 workers.
+    rgb_np = cv2.cvtColor(image_bgr_np, cv2.COLOR_BGR2RGB)
+    image_tensor = torch.from_numpy(rgb_np).permute(2, 0, 1)
     image = tv_tensors.Image(image_tensor)
 
     if len(targets_np) == 0:
@@ -606,19 +609,25 @@ class IRSimulation(v2.Transform):
 
         if isinstance(sample, dict):
             img = sample["image"]
+            # Handle both uint8 [0,255] (legacy) and float32 [0,1]
+            # (resize-first pipeline) — constants (ir offset `+ 10`,
+            # `noise_sigma=15`) are uint8-scale; scale down by 255 on float.
+            is_float = img.is_floating_point()
+            max_v = 1.0 if is_float else 255.0
+            unit = 1.0 / 255.0 if is_float else 1.0
 
             if random.random() < self.ir_prob:
                 gray = F.rgb_to_grayscale(img, num_output_channels=1)
                 img = gray.repeat(3, 1, 1) if img.ndim == 3 else gray.repeat(1, 3, 1, 1)
-                img = torch.clamp(img.float() * 1.3 + 10, 0, 255).to(img.dtype)
+                img = torch.clamp(img.float() * 1.3 + 10 * unit, 0, max_v).to(img.dtype)
 
             if random.random() < self.low_light_prob:
                 factor = random.uniform(0.1, 0.4)
                 img_f = img.float() * factor
                 if self.noise_sigma > 0:
-                    noise = torch.randn_like(img_f) * self.noise_sigma
+                    noise = torch.randn_like(img_f) * (self.noise_sigma * unit)
                     img_f = img_f + noise
-                img = torch.clamp(img_f, 0, 255).to(sample["image"].dtype)
+                img = torch.clamp(img_f, 0, max_v).to(sample["image"].dtype)
 
             sample = dict(sample)
             sample["image"] = tv_tensors.Image(img)
@@ -683,6 +692,22 @@ def build_transforms(
 
     transforms: List[Any] = []
 
+    # Resize + ToDtype are always present; in train mode they run BEFORE
+    # the per-sample augmentations so color jitter + perspective operate
+    # on the smaller float32 480² tensor instead of the original uint8
+    # image. Measured ~4× speedup on ColorJitter(HSV) and Perspective
+    # (see `notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/
+    # README.md`). Mosaic/MixUp/CopyPaste are dataset-level ops that
+    # produce input_size uint8 output, so Resize after them is a cheap
+    # no-op; they must stay at the head of the list.
+    from torchvision.transforms import InterpolationMode
+    _resize = v2.Resize(
+        size=list(input_size),
+        interpolation=InterpolationMode.BILINEAR,
+        antialias=config.get("resize_antialias", False),
+    )
+    _to_float = v2.ToDtype(torch.float32, scale=True)
+
     if is_train:
         # Mosaic
         if config.get("mosaic", False):
@@ -699,7 +724,14 @@ def build_transforms(
                 max_objects=config.get("copypaste_max", 3),
             ))
 
-        # RandomAffine. Always applied by default (legacy behaviour); set
+        # Resize + ToDtype before the expensive per-sample augmentations.
+        # After this point the image is float32 in [0, 1] at input_size.
+        transforms.append(_resize)
+        transforms.append(_to_float)
+
+        # RandomAffine. Skipped entirely when all params are identity
+        # (avoids per-image interpolation + tv_tensor dispatch for a no-op).
+        # Otherwise always applied by default (legacy behaviour); set
         # `affine_p < 1.0` in the config to gate it probabilistically like
         # Albumentations' `A.Affine(p=...)`.
         scale = config.get("scale", [0.5, 1.5])
@@ -712,18 +744,28 @@ def build_transforms(
         translate_val = config.get("translate", 0.0)
         shear_val = config.get("shear", 0.0)
 
-        affine_tfm = v2.RandomAffine(
-            degrees=degrees,
-            translate=(translate_val, translate_val) if translate_val > 0 else None,
-            scale=scale_range,
-            shear=(-shear_val, shear_val, -shear_val, shear_val) if shear_val > 0 else None,
-            fill=114,
+        affine_is_identity = (
+            scale_range == (1.0, 1.0)
+            and degrees == 0.0
+            and translate_val == 0.0
+            and shear_val == 0.0
         )
-        affine_p = config.get("affine_p", 1.0)
-        if affine_p < 1.0:
-            transforms.append(v2.RandomApply([affine_tfm], p=affine_p))
-        else:
-            transforms.append(affine_tfm)
+        # fill is now in [0, 1] float space (114/255 ≈ 0.447) to match the
+        # post-ToDtype image range.
+        _fill_f = 114.0 / 255.0
+        if not affine_is_identity:
+            affine_tfm = v2.RandomAffine(
+                degrees=degrees,
+                translate=(translate_val, translate_val) if translate_val > 0 else None,
+                scale=scale_range,
+                shear=(-shear_val, shear_val, -shear_val, shear_val) if shear_val > 0 else None,
+                fill=_fill_f,
+            )
+            affine_p = config.get("affine_p", 1.0)
+            if affine_p < 1.0:
+                transforms.append(v2.RandomApply([affine_tfm], p=affine_p))
+            else:
+                transforms.append(affine_tfm)
 
         # Perspective — matches Albumentations' `A.Perspective(p=perspective_p)`.
         # Opt-in via `perspective_p > 0` (default off preserves legacy behavior).
@@ -732,14 +774,14 @@ def build_transforms(
             transforms.append(v2.RandomPerspective(
                 distortion_scale=config.get("perspective_distortion", 0.2),
                 p=perspective_p,
-                fill=114,
+                fill=_fill_f,
             ))
 
         # Clamp + sanitize after spatial transforms.
         # `min_bbox_area` (default 25 pixels squared) matches qubvel's
         # reference Albumentations recipe (`A.BboxParams(min_area=25, ...)`);
-        # drops boxes that became too small after perspective/affine — those
-        # add noise to the matcher without useful signal.
+        # the threshold now evaluates against the resized canvas (same as
+        # Albumentations, where `A.Resize` runs before `BboxParams` clips).
         min_bbox_area = float(config.get("min_bbox_area", 25.0))
         transforms.append(v2.ClampBoundingBoxes())
         transforms.append(v2.SanitizeBoundingBoxes(min_area=min_bbox_area))
@@ -764,15 +806,15 @@ def build_transforms(
             if bc_p > 0:
                 transforms.append(v2.RandomApply(
                     [v2.ColorJitter(
-                        brightness=config.get("brightness", 0.2),   # A.RandomBrightnessContrast brightness_limit default 0.2
-                        contrast=config.get("contrast", 0.2),       # A.RandomBrightnessContrast contrast_limit default 0.2
+                        brightness=config.get("brightness", 0.2),
+                        contrast=config.get("contrast", 0.2),
                     )],
                     p=bc_p,
                 ))
             if hsv_p > 0:
                 transforms.append(v2.RandomApply(
                     [v2.ColorJitter(
-                        hue=config.get("hsv_h", 0.015),             # ≈ ±5° hue shift
+                        hue=config.get("hsv_h", 0.015),
                         saturation=config.get("hsv_s", 0.2),
                         brightness=config.get("hsv_v", 0.1),
                     )],
@@ -791,7 +833,7 @@ def build_transforms(
                     brightness=hsv_v,
                 ))
 
-        # IR simulation
+        # IR simulation — dtype-aware (handles both uint8 and float inputs).
         if config.get("ir_simulation", False):
             transforms.append(IRSimulation(
                 ir_prob=config.get("ir_prob", 0.3),
@@ -807,10 +849,11 @@ def build_transforms(
         flipud = config.get("flipud", 0.0)
         if flipud > 0:
             transforms.append(v2.RandomVerticalFlip(p=flipud))
+    else:
+        # Eval: no augmentations — just resize + ToDtype + Normalize.
+        transforms.append(_resize)
+        transforms.append(_to_float)
 
-    # Always applied (both train and eval)
-    transforms.append(v2.Resize(size=list(input_size), antialias=True))
-    transforms.append(v2.ToDtype(torch.float32, scale=True))
     # HF detection processors (D-FINE, RT-DETRv2) expect [0, 1] rescaled
     # inputs with do_normalize=False — ImageNet normalize degrades their
     # pretrained-feature distribution. Also YOLOX Megvii weights expect
