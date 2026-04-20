@@ -468,9 +468,9 @@ training_args = TrainingArguments(
     output_dir=str(_RUN_DIR),
     num_train_epochs=40,
     max_grad_norm=0.1,
-    learning_rate=5e-5,
-    warmup_steps=300,
-    per_device_train_batch_size=8,
+    learning_rate=1e-4,            # Bundle B: 2x qubvel's 5e-5 (linear scaling with 2x batch)
+    warmup_steps=300,              # keep in steps (bs=16 → covers more epochs but safer at higher LR)
+    per_device_train_batch_size=16,  # Bundle B: 2x qubvel's 8; RTX 5090 has VRAM headroom
     dataloader_num_workers=2,
     metric_for_best_model="eval_map",
     greater_is_better=True,

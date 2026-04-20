@@ -106,7 +106,12 @@ No training-behavior-affecting changes. Original notebooks are preserved under
 
 ## Results log
 
-| Date | Script | Dataset | Subset | Epochs | val mAP | val mAP50 | test mAP | test mAP50 | Wall time | GPU | Notes |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2026-04-20 | `rtdetr_v2_finetune_cppe5.py` | CPPE-5 | full (1k) | 40 | **0.3231** (ep19, best) / 0.3014 (ep40) | 0.6133 / 0.6068 | **0.5054** | 0.7631 | ~10m 33s | RTX 5090 | ~0.04 below qubvel's published 0.34 val mAP but within tolerance; plateaued around ep19–20; test set well above val (29 vs 150 imgs). |
-| — | `dfine_finetune_cppe5.py` | CPPE-5 | full (1k) | 30 | TBD | TBD | TBD | TBD | TBD | — | expected ≈ 0.33 per qubvel |
+### RT-DETRv2 / CPPE-5 — progression toward reproducing qubvel's 0.5789 test mAP
+
+| Date | Tag | Seed | Config | val best | test mAP | test mAP50 | Wall time | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 2026-04-20 | (baseline non-det) | OS-entropy | qubvel's recipe | 0.3231 @ ep19 | 0.5054 | 0.7631 | 10m 33s | one-shot unlucky seed; -0.073 vs qubvel. |
+| 2026-04-20 | (deterministic) | 42 | +`set_seed(42)` before from_pretrained, `cudnn.deterministic`, `use_deterministic_algorithms(warn_only=True)` | 0.3659 @ ep19 | 0.5325 | 0.7814 | 11m 31s | `+0.027` just from seeding the class-head reinit; reproducible run-over-run. |
+| 2026-04-20 | `cosine_wd_bf16` | 42 | Bundle A: `lr_scheduler_type="cosine"`, `weight_decay=1e-4`, `bf16=True` | 0.3686 @ ep23 | 0.5348 | 0.8118 | 11m 28s | Regularization redistributed: Face_Shield +0.06 / Goggles +0.03 / Gloves -0.04 / Mask -0.04 ⇒ net ≈ 0. |
+| 2026-04-20 | `bs16_lr1e4_cosine_wd_bf16` | 42 | Bundle B: `bs=16`, `lr=1e-4`, cosine, WD, bf16 | **0.3740 @ ep13** | **0.5585** | 0.8222 | **9m 23s** | Closes to **-0.020 of qubvel**. Beats qubvel on Coverall / Gloves / small objects. Remaining gap ≈ Goggles class (-0.10). **Faster than qubvel's recipe**. |
+| — | `dfine` on CPPE-5 | 42 | qubvel's recipe | 0.1976 @ ep3 | 0.2617 | 0.3691 | 9m 16s | Val saturated ep3, stuck for 27 more epochs — LR too hot for dfine-large's backbone; not used as Phase-2 reference until re-tuned (lr=2e-5, warmup=500). |
