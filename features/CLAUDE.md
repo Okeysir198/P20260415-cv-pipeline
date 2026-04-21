@@ -13,7 +13,7 @@
 
 | Folder | Type | Mode | Best Pretrained | Pretrained mAP50 | Status |
 |---|---|---|---|---|---|
-| `safety-fire_detection` | Detection | 🎯 Fine-tune | YOLOX-M (canonical lr) | 0.478 (5% val) / 0.978 (5% train) | ✅ YOLOX-M memorizes 5%; RT-DETRv2 plateaus at 0.28 train mAP (architectural small-data limit) |
+| `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | ⬜ Phase B 20% smoke pending (3-arch comparison, see feature CLAUDE.md) |
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi` | Orchestrator | 🔧 Pretrained only | dwpose_384_pose (det_rate=1.0) | — | 🔄 pipelines done |
@@ -59,13 +59,14 @@ GPU 2 has ~28 GB — run one training job at a time to avoid OOM.
 
 **Phase A — Data prep:** ✅ Complete (all 5 ML features)
 
-**Phase B — Training (sequential, one at a time on GPU 2):**
-1. `safety-fire_detection` — 🔄 3 arch configs (`06_training_{yolox,rtdetr,dfine}.yaml`); YOLOX-M is the production choice (Iteration 7)
-2. `ppe-helmet_detection` — 4 classes, start from melihuzunoglu_yolov11_ppe.pt
-3. `safety-fall-detection` — specialized class, start from yolov11_fall_melihuzunoglu.pt
-4. `ppe-shoes_detection` — largest dataset (37k imgs), COCO backbone only
-5. `safety-poketenashi-phone-usage` — action class, COCO backbone only
-6. `safety-fall_pose_estimation` — keypoints, after detection models done
+**Phase B — 20% smoke training (one feature at a time, one arch at a time on a single GPU):**
+Each feature's CLAUDE.md carries the Phase-B plan: 20% train + 20% val (full test) × {YOLOX-M, RT-DETRv2-R50, D-FINE-M}, PASS-gated by loss drop + mAP above pretrained baseline + no class collapse. Execution order:
+1. `safety-fire_detection` — 2 classes, 17k imgs (fastest signal)
+2. `safety-fall-detection` — 2 classes, 12k imgs
+3. `ppe-helmet_detection` — 4 classes, 22k imgs (multi-class stress)
+4. `safety-poketenashi-phone-usage` — 2 classes, 23k imgs, 94.6/5.4 imbalance (class-collapse stress)
+5. `ppe-shoes_detection` — 3 classes, 37k imgs (largest; may short-circuit if winner is obvious)
+6. `safety-fall_pose_estimation` — keypoints, after detection models done; blocked on mmpose + no training_ready data
 
 **Phase C — Config only (no GPU needed):** ✅ Pipelines implemented
 - `safety-poketenashi` — pose rule modules + orchestrator done
@@ -95,45 +96,19 @@ Do not start until all Phase 1 individual models are stable and mAP baselines ar
 
 ## Iteration Log
 
-### Iteration 7 — 2026-04-20
+### Phase-B investigation history — fire_detection, 2026-04-18 to 2026-04-20 (superseded)
 
-Learning-capability / overfit analysis on 5% of `safety-fire_detection` (585 train / 130 val). Goal: verify which arch can memorize a small subset with augmentation OFF.
+Multiple training iterations ran on fire_detection exploring arch choice (YOLOX-M / RT-DETRv2-R18 / D-FINE-S) and scaling behavior. All run dirs, checkpoints, and eval artifacts were cleared on 2026-04-21 when the feature was reset; the fire CLAUDE.md was rewritten to a clean state. **Generalizable lessons kept** (now encoded in root `CLAUDE.md` Gotchas and per-feature Phase-B plans):
 
-- **YOLOX-M wins** at `lr=0.0025` (Megvii scaling rule `basic_lr × bs/64` for bs=16). Train mAP = **0.978**, val = 0.478, 150 ep in 21 min. Default `lr=0.01` at bs=16 was 4× too hot → plateau at train loss ~4, val mAP 0.38.
-- **RT-DETRv2-R18 cannot memorize 585 images** — tested 5 configs (lr=5e-5 / 1e-4 / 1.6e-4, `matcher_class_cost=2/5`, `num_denoising=20/100`, `num_queries=100/300`). Best train mAP = 0.28. Single-batch overfit works (loss 215 → 2.75 in 300 steps) so the pipeline is correct; the 5%-data plateau is a **steps-per-image shortage** compounded by bipartite-matcher instability on low-GT-density data.
-- Fixed `id2label`/`label2id` missing in `build_hf_model` — unblocked single-batch class memorization (fire top-1 conf 0.118 → 0.993) but didn't move 5%-data val numbers materially.
-- New: `notebooks/detr_finetune_reference/` — isolated `.venv-notebook/` with byte-for-byte ports of qubvel's RT-DETRv2 + D-FINE reference notebooks. Use as the known-good baseline for future DETR-family debugging. See that folder's `CLAUDE.md`.
+- **Megvii LR rule**: YOLOX `basic_lr × bs/64` — default `lr=0.01` at `bs=16` is 4× too hot; use `lr=0.0025`.
+- **DETR-family requirements**: `amp: false` mandatory (fp16 → NaN pred_boxes); D-FINE further requires `bf16: false` (DFL stalls under bf16); DETR does not support Mosaic.
+- **HPO LR does not generalize**: LR tuned on 5%-data HPO is typically too hot for full data; use conservative `5e-5` for small-class DETR fine-tune.
+- **D-FINE-S collapses on 2-class fine-tune**: distribution-focal reg head is unstable at startup with reinit'd 2-query cls head; not hparam-fixable at small N_classes. Re-evaluate D-FINE-M fresh in Phase B.
+- **YOLOX small-data overfit**: at 5% data with aug off, YOLOX-M memorizes (train mAP > 0.9); RT-DETRv2 cannot break ~0.3 train mAP (bipartite-matcher instability at low GT density). For any feature < 5k train imgs, YOLOX is the safer pick.
+- **Dual YOLOX impls**: `.venv-yolox-official/` + `model.impl=official` for Megvii parity; `custom` impl for GPU-aug and per-component LR. Scripts in place: `setup-yolox-venv.sh`, `compare_yolox_impls.py`, `yolox_tta_eval.py`, `yolox_failure_cases.py`.
+- **Code fixes made during the investigation** (still in the codebase): YOLOX `+ 0.5` decode bug removed; p08 evaluator preprocessing parity with training val; HF `cls_loss=0.0` logging artefact (key filter now matches `loss_vfl` / `loss_dfl`); `id2label`/`label2id` auto-populated from 05_data `names:` dict in `build_hf_model`.
 
-**Rule of thumb**: prefer YOLOX-M when train data < ~5k images for 2–4 classes. RT-DETR is expected to work at 17k+ images; small-data weakness is a DETR-family architectural trait (matches the D-FINE findings in Iteration 6).
-
----
-
-### Iteration 6 — 2026-04-19
-
-Full training on `safety-fire_detection`, parallel on 2× RTX 5090. Main outcomes:
-
-- **YOLOX-M (official Megvii impl)** via new `.venv-yolox-official/` + `model.impl=official`. Early-stopped ep101, best quick-val mAP=0.510 @ ep51 (full val at that epoch: 0.442; see gotcha about quick-val overstating mAP). TTA eval (3 scales × h-flip) brings it to **0.492 mAP@0.5** (+11%), smoke AP +24%. Error analysis: 99.9% of errors are background FPs, F1-vs-conf curve is pinched at conf ≈ 0.42, hardest val images are indoor warehouses. See `features/safety-fire_detection/eval/yolox_official_ep51/`.
-- **RT-DETRv2-R18 diverges at published HPO LR (0.00016) on full data**: full-val peaks 0.303 @ ep10, collapses to 0.063 @ ep35. The HPO sweet-spot (from 5% data) is too hot for full data. Retraining with `lr=0.0001`, `patience=50`, `val_full_interval=0` (in progress).
-- **D-FINE-S class collapse confirmed structural, not hparam**: two runs with different hparams both collapsed one class to AP≈0; the tuned run flipped which class collapsed. Load-report reinits and HF loss coefficients are *identical* to RT-DETRv2 — the remaining architectural difference is D-FINE's DFL reg head, which is too unstable at startup for bipartite matching on a 2-class, ~17k-image fine-tune. Recommendation: use RT-DETRv2 for small-class detection tasks; save D-FINE for COCO-scale class counts. Full investigation in `features/safety-fire_detection/CLAUDE.md`.
-
-Dual-venv pattern added (custom vs official YOLOX); `scripts/setup-yolox-venv.sh`, `scripts/compare_yolox_impls.py`, `scripts/yolox_tta_eval.py`, `scripts/yolox_failure_cases.py` are the new tooling. Root CLAUDE.md updated with new gotchas (p08 preprocessing parity, quick-val overstatement, TTA utility, RT-DETR lr regression).
-
-Fixed along the way: (1) YOLOX custom `+ 0.5` half-grid-cell decode bug — bit-identical parity with official now; (2) p08 evaluator used its own `_MinimalDetectionDataset` with letterbox + `/255` only → 5× mAP gap vs training; now uses YOLOXDataset + `build_transforms(is_train=False)`; (3) HF detection logs `cls_loss=0.0` because loss-dict key filter missed `loss_vfl` / `loss_dfl` — fixed.
-
----
-
-### Iteration 5 — 2026-04-18
-
-Arch comparison for `safety-fire_detection` on 10% data (1,737 imgs), 15 epochs. RT-DETRv2-R18 wins decisively.
-
-| Arch | best val/mAP50 | Notes |
-|---|---|---|
-| **RT-DETRv2-R18** | **0.541** (ep 15, still rising) | Winner — use `06_training_rtdetr.yaml` |
-| D-FINE-S | 0.190 (ep 9, plateau) | `amp: false` required (fp16 NaN crash) |
-| YOLOX-M | 0.113 (ep 73, early stop) | Previous run |
-
-Max safe batch size on RTX 5090 (28 GB free, fp32): **bs=32** (14.7 GB peak).
-Next: full training — `06_training_rtdetr.yaml`, bs=32, 150 epochs, 100% dataset.
+Current Phase B plan restarts on all 5 detection features from scratch at 20% data, comparing YOLOX-M / RT-DETRv2-R50 / D-FINE-M — see each feature's CLAUDE.md.
 
 ---
 

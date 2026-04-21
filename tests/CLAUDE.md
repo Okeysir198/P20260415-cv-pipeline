@@ -62,7 +62,7 @@ uv run -m pytest tests/test_p06_training.py -v
 | `test_p08_error_analysis.py` | `ErrorAnalyzer` — FP/FN/localization breakdown | — | `outputs/11_error_analysis/` |
 | `test_p09_export.py` | ONNX export, `onnx.checker` validation | — | **`outputs/12_export/model.onnx`** ← p10 reads from here |
 | `test_p09_export_validation.py` | PyTorch vs ONNX numerical match | — | — |
-| `test_p10_inference.py` | `DetectionPredictor` (.pt + .onnx), batch predict | — | `outputs/14_inference/` |
+| `test_p10_inference.py` | `DetectionPredictor` (.pt / .pth + .onnx), batch predict | — | `outputs/14_inference/` |
 | `test_p10_video_inference.py` | `VideoProcessor`, frame counter, alert config | — | — |
 | `test_p10_face_recognition.py` | Face registry, gallery, predictor (optional ONNX weights) | — | — |
 | `test_p11_e2e_pipeline.py` | Full chain: train → eval → export → infer | — | `outputs/15_e2e_pipeline/` |

@@ -40,7 +40,7 @@ Folder names follow a **`<category>-<name>`** convention aligned with
 | 07 | HPO (Optuna search space, pruner, sampler) | `_shared/` (file: `08_hyperparameter_tuning.yaml`) |
 | 08 | Evaluation & Error Analysis (CLI-only, no config YAML) | -- |
 | 09 | Export (ONNX opset, optimization, quantization) | `_shared/` |
-| 10 | Inference (CLI-only, no config YAML; face/pose use feature YAMLs) | -- |
+| 10 | Inference (model path, alerts, frame windows, zone polygons, tracker) | per-usecase (`features/<name>/configs/10_inference.yaml`) |
 
 ## Key Rules
 

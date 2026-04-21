@@ -53,6 +53,11 @@ Two-kind folder convention:
 
 ## Venv
 
+> **⚠️ CRITICAL:** These scripts run in `.venv-notebook/`, **NOT** the main `.venv/`.
+> Running via `uv run` (which uses the main venv) will hit albumentations-version
+> divergence and produce silently-wrong bbox clipping. Always invoke via
+> `.venv-notebook/bin/python ...` or set `UV_PROJECT_ENVIRONMENT=$REPO_ROOT/.venv-notebook`.
+
 Always use `.venv-notebook/` (not the main `.venv/`). Pinned separately via
 `notebooks/detr_finetune_reference/pyproject.toml` + `scripts/setup-notebook-venv.sh`
 because:
