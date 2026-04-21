@@ -1,14 +1,28 @@
-# Training config — Phone Usage Detection (YOLOX)
+# Training config — Phone Usage Detection (YOLOX-M, official Megvii impl)
 # License: Apache 2.0 (Megvii)
 #
-# Variants (override via --override model.arch=<key>):
-#   yolox-s / yolox-m / yolox-l
+# Recipe aligned with notebooks/detr_finetune_reference/our_yolox_torchvision/.
+# MixUp DISABLED across all YOLOX configs (user preference; also particularly
+# appropriate here — 94.6/5.4 imbalance means MixUp's alpha-blend could
+# over-smooth the minority `person` class decision boundary).
 #
-# Usage:
-#   uv run core/p06_training/train.py --config features/safety-poketenashi-phone-usage/configs/06_training_yolox.yaml
+# Scale tightened to [0.8, 1.2] — phone bbox is tiny; extreme scale jitter
+# pushes it below the detectable threshold.
+#
+# Phone-usage-specific: EXTREME class imbalance. Watch `person` AP during
+# training — if it collapses to ~0 while `phone_usage` AP > 0, that's class
+# collapse (mark arch FAIL regardless of overall mAP).
+#
+# Variants (override via --override model.arch=<key>):
+#   yolox-s | yolox-m (DEFAULT) | yolox-l
+#
+# Run:
+#   CUDA_VISIBLE_DEVICES=0 .venv-yolox-official/bin/python core/p06_training/train.py \
+#     --config features/safety-poketenashi-phone-usage/configs/06_training_yolox.yaml
 
 model:
   arch: yolox-m
+  impl: official
   pretrained: ../../../pretrained/yolox_m.pth
   num_classes: 2
   input_size: [640, 640]
@@ -18,7 +32,8 @@ model:
 data:
   dataset_config: 05_data.yaml
   batch_size: 16
-  num_workers: 8
+  num_workers: 4
+  prefetch_factor: 4
   pin_memory: true
   subset:
     train: null
@@ -26,9 +41,10 @@ data:
     test: null
 
 augmentation:
-  mosaic: true          # phone bbox is often small — mosaic helps scale coverage
+  library: torchvision
+  normalize: false
+  mosaic: true
   mixup: false
-  contrast: 0.0
   hsv_h: 0.015
   hsv_s: 0.5
   hsv_v: 0.4
@@ -41,14 +57,22 @@ augmentation:
 
 training:
   backend: pytorch
-  epochs: 200
+  epochs: 100
   optimizer: sgd
-  lr: 0.01
+  lr: 0.0025
   momentum: 0.9
   weight_decay: 0.0005
   warmup_epochs: 5
   scheduler: cosine
-  patience: 50
+  patience: 40
+  val_full_interval: 0
+  val_subset_fraction: 1.0
+  amp: true
+  grad_clip: 35.0
+  ema: true
+  ema_decay: 0.9998
+  gpu_augment: false
+
   val_viz:
     enabled: true
     num_samples: 12
@@ -79,19 +103,11 @@ training:
     text_scale: 0.4
     dpi: 120
 
-  val_full_interval: 5
-  val_subset_fraction: 0.2
-  amp: true
-  grad_clip: 35.0
-  ema: true
-  ema_decay: 0.9998
-
 loss:
   type: yolox
 
 logging:
   wandb_project: smart-camera
-  run_name: phone_usage_yoloxm_v1
 
 checkpoint:
   save_best: true

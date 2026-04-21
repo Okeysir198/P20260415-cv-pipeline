@@ -1,71 +1,96 @@
-# Training config — Fire Detection (YOLOX)
+# Training config — Fire Detection (YOLOX-M, official Megvii impl)
 # License: Apache 2.0 (Megvii)
 #
-# Variants (override via --override model.arch=<key>):
-#   yolox-s   — 2.5M params, fastest inference
-#   yolox-m   — 8.9M params, best accuracy-speed tradeoff  (DEFAULT)
-#   yolox-l   — 46.5M params, highest accuracy, slower
+# Recipe aligned with notebooks/detr_finetune_reference/our_yolox_torchvision/
+# — torchvision v2 aug backend + Mosaic + Megvii LR scaling. MixUp DISABLED
+# across all feature YOLOX configs (user preference — Mosaic alone for
+# regularization, MixUp's image blend can blur crisp class boundaries).
 #
-# Usage:
-#   uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
-#   uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml \
-#       --override model.arch=yolox-s training.epochs=300
+# Scale tightened to [0.8, 1.2] vs Megvii's [0.1, 2.0]:
+# our features are tiny-object-dominant (fire/smoke bboxes at 0.01–0.1% of
+# image) — extreme scale jitter pushes boxes below the training grid.
+#
+# Variants (override via --override model.arch=<key>):
+#   yolox-s (~2.5M) | yolox-m (~8.9M, DEFAULT) | yolox-l (~46.5M)
+#
+# Run (requires the official Megvii venv, not the main .venv/):
+#   bash scripts/setup-yolox-venv.sh                        # one-time
+#   CUDA_VISIBLE_DEVICES=0 .venv-yolox-official/bin/python core/p06_training/train.py \
+#     --config features/safety-fire_detection/configs/06_training_yolox.yaml
 
 model:
   arch: yolox-m
+  impl: official             # upstream Megvii yolox package via _OfficialYOLOXAdapter;
+                             # `custom` (in-repo) also available — set via --override.
   pretrained: ../../../pretrained/yolox_m.pth
   num_classes: 2
-  input_size: [640, 640]
+  input_size: [640, 640]     # tiny fire/smoke objects — do NOT reduce
   depth: 0.67
   width: 0.75
 
 data:
   dataset_config: 05_data.yaml
   batch_size: 16
-  num_workers: 8
+  num_workers: 4             # Mosaic does 4 disk reads/sample — reference recipe
+  prefetch_factor: 4         # smooths Mosaic I/O spikes
   pin_memory: true
-  subset:                  # Limit each split independently (null = use all data)
-    train: null            # int (N images), float (fraction 0.0–1.0), or null
-    val: null              # Use for: quick code checks, experiments, progressive training
+  subset:
+    train: null
+    val: null
     test: null
 
 augmentation:
-  mosaic: true          # YOLOX-specific; keep true for scale/context diversity
-  mixup: false
-  contrast: 0.4         # GPU luma-contrast; fire/smoke are inherently low-contrast
+  library: torchvision       # REQUIRED for Mosaic — Albumentations doesn't implement it
+  normalize: false           # Megvii YOLOX weights: raw [0, 255] inputs (NOT /255)
+  mosaic: true               # THE single biggest lever — keep on
+  mixup: false               # OFF per user preference across all features
   hsv_h: 0.015
-  hsv_s: 0.5
-  hsv_v: 0.4
+  hsv_s: 0.5                 # Megvii default
+  hsv_v: 0.4                 # Megvii default
   fliplr: 0.5
-  flipud: 0.0
-  scale: [0.8, 1.2]
+  flipud: 0.0                # YOLOX never flips vertically
+  scale: [0.8, 1.2]          # ±20% — tight for tiny-object datasets; Mosaic gives
+                             # the big scale/context variety, affine is fine jitter
   degrees: 10.0
   translate: 0.1
   shear: 2.0
 
 training:
   backend: pytorch
-  epochs: 200
+  epochs: 100                # reference production count (was 200)
   optimizer: sgd
-  lr: 0.01
+  lr: 0.0025                 # Megvii scaling rule: basic_lr × bs/64 = 0.01 × 16/64.
+                             # The previous default 0.01 was 4× too hot at bs=16
+                             # (documented in features/CLAUDE.md Iteration log).
   momentum: 0.9
   weight_decay: 0.0005
   warmup_epochs: 5
   scheduler: cosine
-  patience: 50
+  patience: 40
+  val_full_interval: 0       # full val every epoch — production best.pth selection.
+                             # Quick-val on a 20% subset overstates mAP by a few
+                             # points vs full val; best-epoch selection is only
+                             # reliable when every checked epoch uses full val.
+  val_subset_fraction: 1.0   # ignored when val_full_interval=0
+  amp: true                  # YOLOX is AMP-safe (unlike DETR-family)
+  grad_clip: 35.0
+  ema: true
+  ema_decay: 0.9998
+  gpu_augment: false         # keep Mosaic on CPU — it calls dataset.get_raw_item()
+
   val_viz:
     enabled: true
-    num_samples: 12       # images sampled from val set (fixed across epochs)
-    conf_threshold: 0.25  # min score to show a prediction box
-    grid_cols: 2          # columns; rows computed from num_samples / grid_cols
-    gt_color_rgb: [160, 32, 240]   # GT box color (R,G,B) — purple
-    pred_color_rgb: [0, 200, 0]   # prediction box color (R,G,B) — green
-    gt_thickness: 2               # GT box line width
-    pred_thickness: 1             # prediction box line width (drawn on top)
-    text_scale: 0.4               # label font scale
-    dpi: 150                      # output image DPI
+    num_samples: 12
+    conf_threshold: 0.25
+    grid_cols: 2
+    gt_color_rgb: [160, 32, 240]
+    pred_color_rgb: [0, 200, 0]
+    gt_thickness: 2
+    pred_thickness: 1
+    text_scale: 0.4
+    dpi: 150
 
-  data_viz:                # Raw images + GT label grid (once before training)
+  data_viz:
     enabled: true
     splits: [train, val, test]
     num_samples: 16
@@ -74,8 +99,8 @@ training:
     text_scale: 0.4
     dpi: 120
 
-  aug_viz:                 # Augmented images + label grid (once before training)
-    enabled: true
+  aug_viz:
+    enabled: true             # verify Mosaic is actually running
     splits: [train]
     num_samples: 16
     grid_cols: 4
@@ -83,19 +108,12 @@ training:
     text_scale: 0.4
     dpi: 120
 
-  val_full_interval: 5        # 0 = full val every epoch; N = full val every N epochs
-  val_subset_fraction: 0.2   # fraction of val set for quick per-epoch val
-  amp: true
-  grad_clip: 35.0
-  ema: true
-  ema_decay: 0.9998
-
 loss:
   type: yolox
 
 logging:
   wandb_project: smart-camera
-  run_name: fire_yoloxm_v1
+  # run_name omitted — trainer derives it from the config path
 
 checkpoint:
   save_best: true

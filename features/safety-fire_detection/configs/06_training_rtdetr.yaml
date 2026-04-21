@@ -37,8 +37,8 @@
 #       training.val_viz.enabled=false
 
 model:
-  arch: rtdetr-r18
-  pretrained: PekingU/rtdetr_v2_r18vd
+  arch: rtdetr-r50
+  pretrained: PekingU/rtdetr_v2_r50vd
   num_classes: 2
   input_size: [640, 640]
 
@@ -55,26 +55,37 @@ data:
     test: null
 
 augmentation:
-  library: albumentations     # qubvel's reference + CPPE-5-validated fast path
+  # torchvision v2 CPU DataLoader workers. Mirrors
+  # notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training.yaml.
+  #
+  # After the 2026-04-20 resize-first reorder (commit c4d3658 in
+  # core/p05_data/transforms.py), torchvision v2 and Albumentations are at
+  # speed parity on this recipe (866 s vs 857 s for 40 ep on CPPE-5;
+  # within run-over-run noise). torchvision v2 is the recommended default
+  # because it additionally supports Mosaic / MixUp / CopyPaste / IRSimulation
+  # and integrates with the future GPU-aug path. See
+  # notebooks/detr_finetune_reference/CLAUDE.md "Default backend recommendation".
+  #
+  # Note: HF Trainer does NOT run GPU augmentation regardless of library —
+  # `training.gpu_augment` is silently ignored on this backend. GPU aug
+  # requires `training.backend: pytorch`, which CLAUDE.md flags as
+  # unreliable for DETR-family on small-data fine-tunes (Iteration 7).
+  library: torchvision
   normalize: false            # HF RTDetrV2ImageProcessor has do_normalize=False
   mosaic: false               # DETR-family doesn't use it
   mixup: false
 
-  # Probability-gated Albumentations transforms (qubvel's exact recipe).
-  # build_albumentations_transforms defaults the magnitudes when only
-  # the `_p` gate is set, so we just set probabilities.
-  perspective_p: 0.1          # A.Perspective(p=0.1) — slight 3D wobble
-  fliplr: 0.5                 # A.HorizontalFlip(p=0.5)
-  brightness_contrast_p: 0.5  # A.RandomBrightnessContrast(p=0.5)
-  hsv_p: 0.1                  # A.HueSaturationValue(p=0.1) — conservative for fire/smoke;
-                              # fire is color-specific, don't hue-shift too often.
+  # Probability-gated transforms — `build_transforms` honours these keys
+  # in BOTH library paths (torchvision v2 + Albumentations).
+  perspective_p: 0.1          # slight 3D wobble
+  fliplr: 0.5
+  brightness_contrast_p: 0.5
+  hsv_p: 0.1                  # conservative for fire/smoke — fire is color-specific
   hsv_h: 0.015
   hsv_s: 0.3                  # smoke is grey, modest sat jitter is fine
   hsv_v: 0.3                  # fire is bright, keep brightness range tight
 
   # Identity affine — qubvel's recipe has NO affine beyond flip + perspective.
-  # On RTX 5090 `build_albumentations_transforms` skips A.Affine entirely when
-  # all four params are no-op, so this costs nothing at build time.
   scale: [1.0, 1.0]
   degrees: 0.0
   translate: 0.0
@@ -125,8 +136,16 @@ loss:
   type: detr
 
 logging:
+  # report_to: none disables wandb + tensorboard.
+  # Set to "wandb" (or ["wandb", "tensorboard"]) after `wandb login` if you want online tracking.
+  # HF Trainer hard-fails on wandb auth error (YOLOX pytorch backend swallows it gracefully);
+  # tensorboard's background writer also crashed on a missing subdir race — keep both off by default.
+  report_to: none
   wandb_project: smart-camera
-  run_name: fire_rtdetr_r18_bundleB
+  # run_name intentionally omitted — HF Trainer's hf_trainer.py:736-740 uses run_name as the
+  # feature folder for generate_run_dir(), so a stale value here creates a ghost
+  # `features/<run_name>/runs/...` folder instead of landing under this feature. Dropping run_name
+  # makes HF fall back to config_path.parent.parent.name = "safety-fire_detection" (what we want).
 
 checkpoint:
   save_best: true

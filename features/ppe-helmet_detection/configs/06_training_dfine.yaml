@@ -1,22 +1,29 @@
-# Training config — PPE: Helmet Compliance (D-FINE)
+# Training config — PPE: Helmet Compliance (D-FINE, HF Trainer backend)
 # License: Apache 2.0 (USTC / DEIM)
 #
-# Variants (override via --override model.arch=<key>):
-#   dfine-n / dfine-s / dfine-m
+# Recipe aligned with notebooks/detr_finetune_reference/our_dfine_torchvision/
+# — HF Trainer + torchvision v2 (the validated-on-CPPE-5 path). See the fire
+# D-FINE config for the full rationale on moving off the pytorch backend.
 #
-# Usage:
-#   uv run core/p06_training/train.py --config features/ppe-helmet_detection/configs/06_training_dfine.yaml
+# Helmet notes:
+# - 4 classes, tail class `head_with_nitto_hat` at 1.6% — multi-class stress test.
+# - D-FINE's distribution-focused reg head is more sensitive to tail-class noise
+#   than RT-DETRv2. Watch `head_with_nitto_hat` AP during Phase B; don't FAIL
+#   the arch purely on this class if other classes train cleanly.
+#
+# Variants (override via --override model.arch=<key>):
+#   dfine-n | dfine-s (DEFAULT) | dfine-m | dfine-large
 
 model:
-  arch: dfine-s
-  pretrained: ustc-community/dfine_s_coco
+  arch: dfine-m
+  pretrained: ustc-community/dfine_m_coco
   num_classes: 4
   input_size: [640, 640]
 
 data:
   dataset_config: 05_data.yaml
   batch_size: 8
-  num_workers: 8
+  num_workers: 4
   prefetch_factor: 4
   pin_memory: true
   subset:
@@ -25,77 +32,67 @@ data:
     test: null
 
 augmentation:
+  library: torchvision
   normalize: false
   mosaic: false
   mixup: false
-  contrast: 0.0
+
+  perspective_p: 0.1
+  fliplr: 0.5
+  brightness_contrast_p: 0.5
+  hsv_p: 0.1
   hsv_h: 0.015
   hsv_s: 0.5
   hsv_v: 0.4
-  fliplr: 0.5
-  flipud: 0.0
-  scale: [0.8, 1.2]
-  degrees: 10.0
-  translate: 0.1
-  shear: 2.0
+
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
 
 training:
-  backend: pytorch
-  epochs: 150
+  backend: hf
+  epochs: 50
   optimizer: adamw
-  lr: 0.0001
-  weight_decay: 0.0001
-  warmup_epochs: 10
-  scheduler: cosine
-  patience: 30
+  lr: 0.00005
+  weight_decay: 0.0
+  warmup_steps: 300
+  scheduler: linear
+  max_grad_norm: 0.1
+  bf16: false                # MANDATORY for D-FINE
+  amp: false
+  gpu_augment: false
+  ema: false
+  patience: 50
+
   val_viz:
     enabled: true
     num_samples: 8
     conf_threshold: 0.05
     grid_cols: 2
-
   train_viz:
-    enabled: true
-    num_samples: 8
-    conf_threshold: 0.05
-    grid_cols: 2
-
+    enabled: false
   data_viz:
     enabled: true
     splits: [train, val, test]
     num_samples: 16
     grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
-
   aug_viz:
     enabled: true
     splits: [train]
     num_samples: 16
     grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
-
-  val_full_interval: 5
-  val_subset_fraction: 0.2
-  amp: false
-  bf16: false
-  gpu_augment: true
-  grad_clip: 0.1
-  ema: false
 
 loss:
   type: detr
 
 logging:
+  report_to: none
   wandb_project: smart-camera
-  run_name: helmet_dfines_v1
 
 checkpoint:
   save_best: true
-  metric: val/mAP50
+  metric: eval_map
   mode: max
   save_interval: 10
 

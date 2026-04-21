@@ -1,27 +1,23 @@
-# Training config — Fall Detection (D-FINE)
+# Training config — Fall Detection (D-FINE, HF Trainer backend)
 # License: Apache 2.0 (USTC / DEIM)
 #
+# Recipe aligned with notebooks/detr_finetune_reference/our_dfine_torchvision/
+# — HF Trainer + torchvision v2 (the validated-on-CPPE-5 path). See the fire
+# D-FINE config for the full rationale on moving off the pytorch backend.
+#
 # Variants (override via --override model.arch=<key>):
-#   dfine-n   — smallest, fastest inference (~4M params)
-#   dfine-s   — 16M params, good accuracy-speed tradeoff   (DEFAULT)
-#   dfine-m   — 31M params, highest accuracy, slower
-#
-# Pretrained weights downloaded from HuggingFace Hub on first run:
-#   ustc-community/dfine_s_coco, ustc-community/dfine_m_coco
-#
-# Usage:
-#   uv run core/p06_training/train.py --config features/safety-fall-detection/configs/06_training_dfine.yaml
+#   dfine-n | dfine-s (DEFAULT) | dfine-m | dfine-large
 
 model:
-  arch: dfine-s
-  pretrained: ustc-community/dfine_s_coco
+  arch: dfine-m
+  pretrained: ustc-community/dfine_m_coco
   num_classes: 2
   input_size: [640, 640]
 
 data:
   dataset_config: 05_data.yaml
   batch_size: 8
-  num_workers: 8
+  num_workers: 4
   prefetch_factor: 4
   pin_memory: true
   subset:
@@ -30,77 +26,73 @@ data:
     test: null
 
 augmentation:
-  normalize: false      # HF DFineImageProcessor has do_normalize=False — feed [0,1] inputs
-  mosaic: false         # not supported for DETR-family models
+  library: torchvision
+  normalize: false
+  mosaic: false              # DETR-family doesn't use it
   mixup: false
-  contrast: 0.0
+
+  perspective_p: 0.1
+  fliplr: 0.5                # horizontal flip OK for fall detection
+  brightness_contrast_p: 0.5
+  hsv_p: 0.1
   hsv_h: 0.015
   hsv_s: 0.5
   hsv_v: 0.4
-  fliplr: 0.5
-  flipud: 0.0
-  scale: [0.8, 1.2]
-  degrees: 10.0
-  translate: 0.1
-  shear: 2.0
+
+  # Identity affine — no rotation/shear; fall class is orientation-sensitive
+  # (horizontal/wide-aspect vs upright).
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
+  # NB: flipud MUST stay 0 (not set here — torchvision default is off).
+  # Vertical flip destroys the upright-vs-fallen signal.
 
 training:
-  backend: pytorch
-  epochs: 150
+  backend: hf
+  epochs: 50                 # D-FINE under-trained at qubvel's 30 — reference: +0.06
   optimizer: adamw
-  lr: 0.0001
-  weight_decay: 0.0001
-  warmup_epochs: 10
-  scheduler: cosine
-  patience: 30
+  lr: 0.00005                # qubvel's 5e-5 (conservative; 1e-4 diverges on small classes)
+  weight_decay: 0.0
+  warmup_steps: 300
+  scheduler: linear
+  max_grad_norm: 0.1
+  bf16: false                # MANDATORY for D-FINE — bf16 stalls val mAP at ~0.15
+  amp: false                 # fp16 AMP overflows DETR decoder
+  gpu_augment: false         # HF Trainer uses its own DataLoader
+  ema: false
+  patience: 50
+
   val_viz:
     enabled: true
     num_samples: 8
     conf_threshold: 0.05
     grid_cols: 2
-
   train_viz:
-    enabled: true
-    num_samples: 8
-    conf_threshold: 0.05
-    grid_cols: 2
-
+    enabled: false
   data_viz:
     enabled: true
     splits: [train, val, test]
     num_samples: 16
     grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
-
   aug_viz:
     enabled: true
     splits: [train]
     num_samples: 16
     grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
-
-  val_full_interval: 5
-  val_subset_fraction: 0.2
-  amp: false           # D-FINE decoder overflows in fp16 — keep fp32
-  bf16: false          # D-FINE DFL loss stalls under bf16 (see root CLAUDE.md)
-  gpu_augment: true
-  grad_clip: 0.1
-  ema: false
 
 loss:
   type: detr
 
 logging:
+  report_to: none            # prevents HF Trainer wandb/TB crashes without `wandb login`
   wandb_project: smart-camera
-  run_name: fall_dfines_v1
+  # run_name omitted — HF Trainer derives feature folder from config path
+  # (see hf_trainer.py:736-740) to avoid ghost `features/<run_name>/` trees.
 
 checkpoint:
   save_best: true
-  metric: val/mAP50
+  metric: eval_map
   mode: max
   save_interval: 10
 

@@ -1,108 +1,137 @@
-# Training config — Fire Detection (D-FINE)
+# Training config — Fire Detection (D-FINE, HF Trainer backend)
 # License: Apache 2.0 (USTC / DEIM)
 #
+# Recipe aligned with notebooks/detr_finetune_reference/our_dfine_torchvision/
+# — same HF Trainer recipe that reproduces qubvel's D-FINE results on CPPE-5
+# (test mAP 0.492 at 50 ep seed=42, beats qubvel's published 0.449).
+#
+# Why HF backend instead of pytorch (our earlier default):
+#   Iteration 7 found D-FINE on the custom pytorch trainer collapses at small
+#   N_classes (distribution-focused reg head unstable at startup with 2-query
+#   reinit'd cls head; not hparam-fixable). HF backend + torchvision reproduces
+#   the reference notebook and has been validated end-to-end on CPPE-5.
+#
 # Variants (override via --override model.arch=<key>):
-#   dfine-n   — smallest, fastest inference (~4M params)
-#   dfine-s   — 16M params, good accuracy-speed tradeoff   (DEFAULT)
-#   dfine-m   — 31M params, highest accuracy, slower
+#   dfine-n      — smallest, fastest inference (~4M params)
+#   dfine-s      — 16M params                                  (DEFAULT)
+#   dfine-m      — 31M params, balanced accuracy-speed
+#   dfine-large  — 102M params, highest accuracy
 #
 # Pretrained weights downloaded from HuggingFace Hub on first run:
-#   ustc-community/dfine_s_coco, ustc-community/dfine_m_coco
-# Local cache available at: pretrained/safety-fire_detection/ustc-community_dfine-*-coco/
+#   ustc-community/dfine_s_coco, ustc-community/dfine_m_coco,
+#   ustc-community/dfine-large-coco
 #
 # Usage:
 #   uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml
+#   # 20% smoke, dfine-m:
 #   uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml \
-#       --override model.arch=dfine-m training.epochs=300
+#       --override model.arch=dfine-m model.pretrained=ustc-community/dfine_m_coco \
+#         data.subset.train=0.2 data.subset.val=0.2 training.epochs=30
 
 model:
-  arch: dfine-s
-  pretrained: ustc-community/dfine_s_coco
+  arch: dfine-m
+  pretrained: ustc-community/dfine_m_coco
   num_classes: 2
-  input_size: [640, 640]
+  input_size: [640, 640]     # fire/smoke objects are predominantly tiny (<1% of image);
+                             # do NOT reduce below 640 — see feature CLAUDE.md "Data Findings"
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 8
-  num_workers: 8
+  batch_size: 8              # reference recipe (qubvel's per_device_train_batch_size)
+  num_workers: 4
   prefetch_factor: 4
   pin_memory: true
-  subset:                  # Limit each split independently (null = use all data)
-    train: null            # int (N images), float (fraction 0.0–1.0), or null
-    val: null              # Use for: quick code checks, experiments, progressive training
+  subset:
+    train: null
+    val: null
     test: null
 
 augmentation:
-  normalize: false      # HF DFineImageProcessor has do_normalize=False — feed [0,1] inputs
-  mosaic: false         # not supported for DETR-family models
+  # torchvision v2 (CPU DataLoader workers). At speed parity with Albumentations
+  # after 2026-04-20 resize-first reorder; preferred for Mosaic/MixUp/CopyPaste
+  # support and future GPU-aug path. See notebooks/detr_finetune_reference/CLAUDE.md.
+  # HF Trainer does not run GPU augmentation regardless of library.
+  library: torchvision
+  normalize: false           # HF DFineImageProcessor handles normalization; feed [0,1]
+  mosaic: false              # DETR-family doesn't use it
   mixup: false
-  contrast: 0.4         # GPU luma-contrast; fire/smoke are inherently low-contrast
-  hsv_h: 0.015
-  hsv_s: 0.5
-  hsv_v: 0.4
+
+  # Probability-gated transforms — `build_transforms` honours these keys
+  # in BOTH library paths (torchvision v2 + Albumentations).
+  perspective_p: 0.1         # slight 3D wobble
   fliplr: 0.5
-  flipud: 0.0
-  scale: [0.8, 1.2]
-  degrees: 10.0
-  translate: 0.1
-  shear: 2.0
+  brightness_contrast_p: 0.5
+  hsv_p: 0.1                 # conservative for fire/smoke — fire is color-specific
+  hsv_h: 0.015
+  hsv_s: 0.3                 # smoke is grey, modest sat jitter is fine
+  hsv_v: 0.3                 # fire is bright, keep brightness range tight
+
+  # Identity affine — qubvel's recipe has NO affine beyond flip + perspective.
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
 
 training:
-  backend: pytorch
-  epochs: 150
+  backend: hf                # HF Trainer — proven for D-FINE on CPPE-5 (test mAP 0.492)
+  epochs: 50                 # bumped from qubvel's 30 — reference shows +0.06 test mAP
+                             # (0.43 → 0.49 on CPPE-5, 30 ep → 50 ep). D-FINE is
+                             # under-trained at 30 ep; Goggles class 0.096 → 0.307.
   optimizer: adamw
-  lr: 0.0001
-  weight_decay: 0.0001
-  warmup_epochs: 10
-  scheduler: cosine
-  patience: 30
+  lr: 0.00005                # qubvel's learning_rate=5e-5 (conservative — 1e-4 diverges
+                             # on small-class DETR fine-tune per Iteration 7)
+  weight_decay: 0.0          # qubvel's default (explicit 0, not 1e-4)
+  warmup_steps: 300          # reference pin (HF expects steps, not epochs)
+  scheduler: linear          # reference default — cosine is OK too but linear matches qubvel
+  max_grad_norm: 0.1         # DETR-family standard
+  bf16: false                # MANDATORY for D-FINE — distribution-focused loss stalls
+                             # val mAP at ~0.15 under bf16 (unlike RT-DETRv2 which is
+                             # bf16-neutral). Keep fp32.
+  amp: false                 # fp16 AMP overflows DETR decoder — NaN pred_boxes
+  gpu_augment: false         # HF Trainer uses its own DataLoader
+  ema: false                 # reference doesn't use EMA
+  patience: 50               # HF Trainer early stopping — DETR noisier mAP trajectory
+
   val_viz:
     enabled: true
     num_samples: 8
-    conf_threshold: 0.05
+    conf_threshold: 0.05     # DETR sigmoid scores cap ~0.2; keep low
     grid_cols: 2
-
   train_viz:
-    enabled: true
-    num_samples: 8
-    conf_threshold: 0.05
-    grid_cols: 2
-
-  data_viz:                # Raw images + GT label grid (once before training)
+    enabled: false           # HF backend viz bridge is val-only
+  data_viz:
     enabled: true
     splits: [train, val, test]
     num_samples: 16
     grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
-
-  aug_viz:                 # Augmented images + label grid (once before training)
+  aug_viz:
     enabled: true
     splits: [train]
     num_samples: 16
     grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
 
-  val_full_interval: 5        # 0 = full val every epoch; N = full val every N epochs
-  val_subset_fraction: 0.2   # fraction of val set for quick per-epoch val
-  amp: false  # D-FINE decoder overflows in fp16 — keep fp32
-  gpu_augment: true
-  grad_clip: 0.1
-  ema: false
+  # NB: pytorch-backend-only keys removed (val_full_interval, val_subset_fraction,
+  # grad_clip, ema_decay, warmup_epochs, patience-as-epochs). HF Trainer evals
+  # every epoch by default.
 
 loss:
   type: detr
 
 logging:
+  # report_to: none disables wandb + tensorboard. HF Trainer hard-fails on wandb
+  # auth error if `wandb login` hasn't been run; tensorboard background writer
+  # has also crashed on missing-subdir races. Keep off by default; flip to
+  # "wandb" or ["wandb","tensorboard"] after `wandb login`.
+  report_to: none
   wandb_project: smart-camera
-  run_name: fire_dfines_v1
+  # run_name omitted — HF Trainer (hf_trainer.py:736-740) uses run_name as the
+  # feature folder for generate_run_dir(), so a stale value creates a ghost
+  # `features/<run_name>/runs/...` tree. Dropping it makes HF fall back to
+  # config_path.parent.parent.name = "safety-fire_detection" (what we want).
 
 checkpoint:
   save_best: true
-  metric: val/mAP50
+  metric: eval_map           # HF Trainer + torchmetrics key (was val/mAP50 under pytorch)
   mode: max
   save_interval: 10
 

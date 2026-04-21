@@ -20,8 +20,8 @@
 #     --config features/safety-fall-detection/configs/06_training_rtdetr.yaml
 
 model:
-  arch: rtdetr-r18
-  pretrained: PekingU/rtdetr_v2_r18vd
+  arch: rtdetr-r50
+  pretrained: PekingU/rtdetr_v2_r50vd
   num_classes: 2
   input_size: [640, 640]
 
@@ -37,7 +37,11 @@ data:
     test: null
 
 augmentation:
-  library: albumentations     # qubvel's reference + CPPE-5-validated fast path
+  # torchvision v2 (CPU DataLoader workers). At speed parity with Albumentations
+  # after 2026-04-20 resize-first reorder; preferred for Mosaic/MixUp/CopyPaste
+  # support and future GPU-aug path. See notebooks/detr_finetune_reference/CLAUDE.md.
+  # HF Trainer does not run GPU augmentation regardless of library.
+  library: torchvision
   normalize: false            # HF RTDetrV2ImageProcessor has do_normalize=False
   mosaic: false               # DETR-family doesn't use it
   mixup: false
@@ -94,8 +98,16 @@ loss:
   type: detr
 
 logging:
+  # report_to: none disables wandb + tensorboard. HF Trainer hard-fails on wandb
+  # auth error if `wandb login` hasn't been run; tensorboard background writer
+  # has also crashed on missing-subdir races. Keep off by default; flip to
+  # "wandb" or ["wandb","tensorboard"] after `wandb login`.
+  report_to: none
   wandb_project: smart-camera
-  run_name: fall_rtdetr_r18_bundleB
+  # run_name omitted — HF Trainer (hf_trainer.py:736-740) uses run_name as the
+  # feature folder for generate_run_dir(), so a stale value creates a ghost
+  # `features/<run_name>/runs/...` tree. Dropping it makes HF fall back to
+  # config_path.parent.parent.name = "safety-fall-detection" (what we want).
 
 checkpoint:
   save_best: true

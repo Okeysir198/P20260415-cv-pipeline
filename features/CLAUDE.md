@@ -112,6 +112,18 @@ Current Phase B plan restarts on all 5 detection features from scratch at 20% da
 
 ---
 
+### Iteration 8 — 2026-04-21 (config defaults alignment)
+
+All 15 detection-feature training configs (5 YOLOX + 5 RT-DETR + 5 D-FINE across 5 Phase-B features) aligned to the validated recipes in `notebooks/detr_finetune_reference/`:
+
+- **RT-DETR**: default arch bumped r18 → **r50** (`PekingU/rtdetr_v2_r50vd`); `augmentation.library: torchvision`; `logging.report_to: none`; stale `run_name` dropped.
+- **D-FINE**: migrated from `backend: pytorch` (broken on small-class per Iteration 7) → `backend: hf`; default arch s → **dfine-m**; `bf16: false`, `amp: false`, `weight_decay: 0`, `lr: 5e-5`, `warmup_steps: 300`, `scheduler: linear`, `epochs: 50` (reference showed +0.06 test mAP over 30 ep on CPPE-5).
+- **YOLOX**: explicit `model.impl: official`, `augmentation.library: torchvision`, `mosaic: true`, `mixup: false`, `normalize: false`, `lr: 0.0025` (Megvii rule `0.01 × bs/64`), `val_full_interval: 0`, `val_subset_fraction: 1.0`; `contrast` key removed. Scale stays `[0.8, 1.2]` (tight for tiny-object features — do NOT widen to Megvii's `[0.1, 2.0]` default; on 0.01–0.1% bboxes, aggressive scale jitter pushes objects below the training grid).
+
+**Effect on Phase B commands**: each feature's CLAUDE.md now overrides only `training.epochs=30 data.subset.train=0.2 data.subset.val=0.2` plus viz-off flags — the previous 8–10 arch/backend/aug overrides are now config defaults. New HF-Trainer footguns (`run_name` ghost folder, `report_to` wandb/TB crash) documented in root CLAUDE.md.
+
+---
+
 ### Iteration 4 — 2026-04-17
 
 Full re-run of all 8 benchmark scripts. All exit 0. Results stable. See per-feature CLAUDE.md for full tables.

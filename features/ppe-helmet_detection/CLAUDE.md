@@ -49,32 +49,29 @@ Sanity-check each arch can learn on this dataset. 20% train + 20% val (full test
 ### Commands
 
 ```bash
-# YOLOX-M (official Megvii impl)
+# YOLOX-M (config defaults: impl=official, library=torchvision, mosaic=true,
+# mixup=false, normalize=false, lr=0.0025, val_full_interval=0 — Phase B only
+# overrides epochs→30 + subset)
 CUDA_VISIBLE_DEVICES=0 .venv-yolox-official/bin/python core/p06_training/train.py \
   --config features/ppe-helmet_detection/configs/06_training_yolox.yaml \
-  --override model.impl=official augmentation.normalize=false \
-    training.val_full_interval=0 training.epochs=30 \
+  --override training.epochs=30 \
     data.subset.train=0.2 data.subset.val=0.2 \
     training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
 
-# RT-DETRv2-R50 (arch bump from r18 via override)
+# RT-DETRv2-R50 (config defaults: arch=r50, pretrained=r50vd, bf16=true, amp=false,
+# mosaic=false, warmup_steps=300, lr=1e-4 — Phase B overrides lr→5e-5 + bs→8 + epochs→30)
 CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
   --config features/ppe-helmet_detection/configs/06_training_rtdetr.yaml \
-  --override model.arch=rtdetr-r50 \
-    training.lr=5e-5 training.warmup_steps=300 training.epochs=30 \
-    training.bf16=true training.amp=false \
+  --override training.lr=5e-5 training.epochs=30 \
     data.batch_size=8 data.subset.train=0.2 data.subset.val=0.2 \
-    training.val_full_interval=0 augmentation.mosaic=false \
     training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
 
-# D-FINE-M (arch bump from s via override)
+# D-FINE-M (config defaults: arch=dfine-m, pretrained=dfine_m_coco, bf16=false, amp=false,
+# weight_decay=0, lr=5e-5, bs=8 — match the reference recipe; Phase B only overrides epochs→30)
 CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
   --config features/ppe-helmet_detection/configs/06_training_dfine.yaml \
-  --override model.arch=dfine-m \
-    training.lr=5e-5 training.warmup_steps=300 training.epochs=30 \
-    training.bf16=false training.amp=false training.weight_decay=0 \
-    data.batch_size=8 data.subset.train=0.2 data.subset.val=0.2 \
-    training.val_full_interval=0 augmentation.mosaic=false \
+  --override training.epochs=30 \
+    data.subset.train=0.2 data.subset.val=0.2 \
     training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
 ```
 
@@ -143,8 +140,8 @@ Full results: `eval/benchmark_results.json` | `eval/benchmark_report.md`
 configs/00_data_preparation.yaml  — data sources + class map
 configs/05_data.yaml              — dataset paths + class names
 configs/06_training_yolox.yaml    — YOLOX-M (recommended starting arch)
-configs/06_training_rtdetr.yaml   — RT-DETRv2-R18 (re-eval on full data)
-configs/06_training_dfine.yaml    — D-FINE-S (reference)
+configs/06_training_rtdetr.yaml   — RT-DETRv2-R50 (HF backend, torchvision aug)
+configs/06_training_dfine.yaml    — D-FINE-M (HF backend, torchvision aug, bf16=false)
 code/benchmark.py                 — pretrained benchmark
 eval/benchmark_results.json       — benchmark output
 eval/benchmark_report.md          — benchmark summary
