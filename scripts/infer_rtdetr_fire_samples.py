@@ -26,9 +26,9 @@ from core.p10_inference.supervision_bridge import (
 )
 from utils.config import load_config
 
-RUN_DIR = REPO / "features/safety-fire_detection/runs/2026-04-21_154828_06_training"
+RUN_DIR = REPO / "features/safety-fire_detection/runs/2026-04-21_174000_06_training"
 HF_CKPT = RUN_DIR / "checkpoint-2930/pytorch_model.bin"
-REPACKED = RUN_DIR / "checkpoint-2930/best_repacked.pt"
+REPACKED = RUN_DIR / "checkpoint-2930/best_repacked_q100.pt"
 TRAIN_CFG = RUN_DIR / "06_training.yaml"
 DATA_CFG = RUN_DIR / "05_data.yaml"
 SAMPLES = REPO / "features/safety-fire_detection/samples"

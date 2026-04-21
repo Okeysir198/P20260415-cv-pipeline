@@ -1,9 +1,16 @@
 # Training config — Fire Detection (D-FINE, HF Trainer backend)
 # License: Apache 2.0 (USTC / DEIM)
 #
-# Recipe aligned with notebooks/detr_finetune_reference/our_dfine_torchvision/
-# — same HF Trainer recipe that reproduces qubvel's D-FINE results on CPPE-5
-# (test mAP 0.492 at 50 ep seed=42, beats qubvel's published 0.449).
+# Validated Phase-B result (2026-04-21, 20% train/val subset):
+#   Peak val mAP@0.5 = 0.5677 @ ep39 (run 2026-04-21_201919_06_training)
+#   Beats v1 (const_warmup, clip 0.1, 50 ep, killed @ ep43) which peaked 0.491.
+#   Clearly beats v2 (cosine, clip 1.0, 40 ep) which peaked 0.328 @ ep10.
+#
+# Recipe is the official Peterande/D-FINE optimizer.yml (layered AdamW +
+# constant_with_warmup + clip 0.1 + EMA 0.9999) adapted to HF Trainer via our
+# `_DetectionTrainer.create_optimizer` backbone-vs-head param-group split.
+# Reference notebook: notebooks/detr_finetune_reference/our_dfine_torchvision/
+# (reproduces qubvel's D-FINE on CPPE-5, test mAP 0.492 at 50 ep seed=42).
 #
 # Why HF backend instead of pytorch (our earlier default):
 #   Iteration 7 found D-FINE on the custom pytorch trainer collapses at small
@@ -74,10 +81,13 @@ augmentation:
 
 training:
   backend: hf                # HF Trainer — proven for D-FINE on CPPE-5 (test mAP 0.492)
-  # Epochs: official Peterande/D-FINE base is 72 (COCO) / 56 (obj365→custom).
-  # CPPE-5 reference showed +0.06 test mAP going 30 → 50. 30-ep Phase-B kill on
-  # fire landed at 0.19 peak — clearly under-trained. 72 matches official base.
-  epochs: 72
+  # Epochs: official Peterande/D-FINE base is 72; CPPE-5 reference uses 50.
+  # Phase-B confirmed 40-ep with this recipe peaks ep39 at val mAP@0.5 = 0.5677
+  # on 20%-fire (best of 3 recipe variants tested). `load_best_model_at_end`
+  # rescues the best-checkpoint on any noisy late-epoch dip. For full-data
+  # Phase C, bump to 60–72 to match official base — D-FINE's DFL head keeps
+  # refining past ep40 when the training distribution is larger.
+  epochs: 40
   optimizer: adamw
   # Layered AdamW matching official Peterande/D-FINE `configs/dfine/include/
   # optimizer.yml` — head (encoder/decoder) at 2.5e-4, backbone (HGNetv2) at
@@ -89,10 +99,11 @@ training:
   weight_decay: 0.000125     # official D-FINE optimizer.yml (norm groups get 0)
   warmup_steps: 500          # official LinearWarmup duration (was 300 from qubvel)
   # constant_with_warmup approximates official MultiStepLR (flat after warmup,
-  # gamma step only near end). `linear` decays to 0 by final epoch — starves the
-  # DFL head that keeps refining box-corner distributions late in training.
+  # gamma step only near end). Empirical: cosine (attempt v2) decayed too fast
+  # on 20% data — LR dropped below effective level by ep10, peak only 0.328.
+  # Flat LR + patience-driven early stop wins here.
   scheduler: constant_with_warmup
-  max_grad_norm: 0.1         # official clip_max_norm
+  max_grad_norm: 0.1         # official D-FINE clip_max_norm
   bf16: false                # MANDATORY for D-FINE — distribution-focused loss stalls
                              # val mAP at ~0.15 under bf16 (unlike RT-DETRv2 which is
                              # bf16-neutral). Keep fp32.

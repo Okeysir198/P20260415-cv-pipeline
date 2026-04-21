@@ -41,12 +41,25 @@ model:
   pretrained: PekingU/rtdetr_v2_r50vd
   num_classes: 2
   input_size: [640, 640]
-  # Tuned for fire_detection (2 classes, sparse bboxes, max 22 / p99 9 boxes per image).
-  # Defaults (300/100) are COCO-tuned (80 cls, dense) and cause 298/300 queries to
-  # match "no-object" each step — VFL suppresses all logits and bleeds onto the few
-  # positives, producing the 0.15-max calibration we observed at 20%-data / 30 ep.
-  num_queries: 100            # from HF default 300 — less no-object pressure
-  num_denoising: 200          # from HF default 100 — stabilize matching on sparse data
+  # Smaller query set than COCO default. Bbox stats on fire_detection:
+  # max=22 boxes/image, p99=9 → 50 queries is 5× p99 headroom and ~6× faster
+  # decoder than the 300 default. Denoising halved too (100 → 50) to match
+  # the smaller signal budget — 2 × num_queries is the typical DN:Q ratio.
+  # Note: q=100/dn=200 (prior attempt) moved mAP ≤±0.01 and did not fix
+  # calibration (root cause is pos/neg logit gap ≈ 0.86 at convergence —
+  # a training-dynamics issue; use scripts/fit_rtdetr_temperature.py).
+  num_queries: 50
+  num_denoising: 50
+
+  # Label-quality regime — fire_detection is 🟢 clean (p02 QA: 95.1% good).
+  # Recipe from memory/feedback_detr_label_quality_tuning.md ("good labels,
+  # tiny boxes" row). Trust classes but allow box geometry some slack because
+  # bboxes are tiny (0.01-0.1% of image area; ±px error is fractionally large).
+  label_noise_ratio: 0.25     # from default 0.5 — classes are trustworthy
+  box_noise_scale: 1.5        # from default 1.0 — tiny-box caveat overrides the usual "clean" 0.5
+  focal_loss_gamma: 1.5       # from default 2.0 — hard examples are real signal, not mislabels
+  weight_loss_bbox: 7.0       # from default 5.0 — trust the geometry
+  weight_loss_giou: 3.0       # from default 2.0 — same
 
 data:
   dataset_config: 05_data.yaml
@@ -91,15 +104,18 @@ augmentation:
   hsv_s: 0.3                  # smoke is grey, modest sat jitter is fine
   hsv_v: 0.3                  # fire is bright, keep brightness range tight
 
-  # Identity affine — qubvel's recipe has NO affine beyond flip + perspective.
-  scale: [1.0, 1.0]
-  degrees: 0.0
-  translate: 0.0
-  shear: 0.0
+  # Mild affine — added 2026-04-22 to regularize the ep15-21 overfit tail
+  # we saw on 20%-smoke runs. scale tightened to [0.9, 1.1] (safer than
+  # [0.8, 1.2] per root CLAUDE.md: aggressive jitter pushes 0.01-0.1% bboxes
+  # below the training grid).
+  scale: [0.9, 1.1]
+  degrees: 5.0
+  translate: 0.1
+  shear: 0.0       # off — 2° fattens tiny-box labels ~20% (axis-align effect)
 
 training:
   backend: hf                 # HF Trainer — proven on CPPE-5 RT-DETRv2-R50 (test mAP 0.5577)
-  epochs: 150
+  epochs: 50
   optimizer: adamw            # hardcoded in HF Trainer for DETR; listed for lineage
   lr: 0.0001                  # Bundle B (was 0.00016 from 5% HPO — diverged at full data;
                               # CPPE-5 reproduction confirmed 1e-4 is the safe canonical LR)
@@ -113,7 +129,7 @@ training:
   amp: false                  # explicit: NOT fp16 AMP (overflow crashes decoder)
   gpu_augment: false          # HF backend doesn't use the GPU aug path
   ema: false                  # reference doesn't use EMA
-  patience: 50                # HF Trainer early stopping — larger than pytorch backend
+  patience: 15                # HF Trainer early stopping — larger than pytorch backend
                               # because DETR training has noisier mAP trajectory
 
   val_viz:
