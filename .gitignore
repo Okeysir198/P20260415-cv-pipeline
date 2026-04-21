@@ -51,3 +51,7 @@ build/
 .claude/roboflow-mcp/venv/
 .claude/roboflow-mcp/__pycache__/
 
+# Claude Code runtime state
+.claude/scheduled_tasks.lock
+.claude/plugins/*/.claude-plugin/marketplace.json
+
