@@ -96,7 +96,7 @@ releases/              Versioned model releases.
 ## Key Design Principles
 
 - **Config-driven**: All hyperparameters from YAML. No hardcoded values. CLI `--override` for tuning.
-- **Registry pattern**: Models, losses, metrics, postprocessors registered via decorators. Add new ones without editing core.
+- **Registry pattern**: Models, losses, metrics, postprocessors registered via decorators on a shared `utils.registry.Registry` base. Add new ones without editing core.
 - **No unnecessary abstractions**: Lean code, framework-native features preferred (torchvision v2, HF built-in loss).
 
 ## Model Registry

@@ -3,13 +3,13 @@
 import os
 import random
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 import torch
 
 
-def auto_select_gpu(verbose: bool = True) -> Optional[str]:
+def auto_select_gpu(verbose: bool = True) -> str | None:
     """Pick the NVIDIA GPU with the most free memory and set CUDA_VISIBLE_DEVICES.
 
     Respects an existing user-supplied ``CUDA_VISIBLE_DEVICES`` (never
@@ -53,7 +53,7 @@ def auto_select_gpu(verbose: bool = True) -> Optional[str]:
     return str(best)
 
 
-def _query_free_memory_mib() -> List[int]:
+def _query_free_memory_mib() -> list[int]:
     """Return a list of free VRAM (MiB) per GPU, or [] if nvidia-smi missing."""
     try:
         out = subprocess.run(
@@ -72,7 +72,7 @@ def _query_free_memory_mib() -> List[int]:
     if out.returncode != 0:
         return []
 
-    free: List[int] = []
+    free: list[int] = []
     for line in out.stdout.splitlines():
         line = line.strip()
         if not line:
@@ -84,7 +84,7 @@ def _query_free_memory_mib() -> List[int]:
     return free
 
 
-def get_device(device: Optional[str] = None) -> torch.device:
+def get_device(device: str | None = None) -> torch.device:
     """Return a CUDA torch.device.
 
     GPU-only: raises if CUDA is unavailable. CPU and MPS are not supported
@@ -144,7 +144,7 @@ def set_seed(seed: int) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
 
 
-def get_gpu_info() -> Dict[str, Any]:
+def get_gpu_info() -> dict[str, Any]:
     """Get GPU information for the current system.
 
     Returns:
@@ -159,7 +159,7 @@ def get_gpu_info() -> Dict[str, Any]:
         >>> if info["available"]:
         ...     print(f"GPU: {info['devices'][0]['name']}")
     """
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         "available": torch.cuda.is_available(),
         "count": 0,
         "devices": [],

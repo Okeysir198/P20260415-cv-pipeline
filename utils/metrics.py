@@ -11,7 +11,6 @@ import numpy as np
 import torch
 from torchvision.ops import box_iou, nms
 
-
 # ---------------------------------------------------------------------------
 # Box format conversions
 # ---------------------------------------------------------------------------

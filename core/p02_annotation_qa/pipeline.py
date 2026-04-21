@@ -16,7 +16,7 @@ import logging
 import time
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 from langgraph.func import entrypoint, task
@@ -39,7 +39,7 @@ def _image_to_b64(image_path: Path) -> str:
     return pil_to_b64(image)
 
 
-def _read_label_lines(label_path: Path) -> List[str]:
+def _read_label_lines(label_path: Path) -> list[str]:
     """Read YOLO label lines from a file."""
     if not label_path.exists():
         return []
@@ -56,11 +56,11 @@ def _read_label_lines(label_path: Path) -> List[str]:
 
 @task
 def sample_task(
-    data_config: Dict[str, Any],
-    qa_config: Dict[str, Any],
+    data_config: dict[str, Any],
+    qa_config: dict[str, Any],
     config_dir: str,
-    splits: List[str],
-) -> Dict[str, List[str]]:
+    splits: list[str],
+) -> dict[str, list[str]]:
     """Sample images from the dataset for QA checking.
 
     Uses :class:`StratifiedSampler` to perform class-aware stratified
@@ -90,9 +90,9 @@ def sample_task(
 def validate_image_task(
     image_path: str,
     split: str,
-    class_names: Dict[int, str],
-    qa_config: Dict[str, Any],
-) -> Dict[str, Any]:
+    class_names: dict[int, str],
+    qa_config: dict[str, Any],
+) -> dict[str, Any]:
     """Structural validation of a single image via POST /validate.
 
     Reads the image + YOLO labels from disk, encodes image as base64,
@@ -199,12 +199,12 @@ def validate_image_task(
 
 @task
 def verify_image_task(
-    result: Dict[str, Any],
-    class_names: Dict[int, str],
-    qa_config: Dict[str, Any],
-    auto_label_config: Dict[str, Any],
-    data_config: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
+    result: dict[str, Any],
+    class_names: dict[int, str],
+    qa_config: dict[str, Any],
+    auto_label_config: dict[str, Any],
+    data_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """SAM3 verification of a single image via POST /verify.
 
     When ``auto_label_config`` is provided, includes ``detection_classes``,
@@ -223,7 +223,7 @@ def verify_image_task(
     validation_config = qa_config.get("validation", {})
     # Prefer feature-local prompts in 05_data.yaml; fall back to shared qa_config (legacy).
     data_config = data_config or {}
-    text_prompts: Dict[str, str] = (
+    text_prompts: dict[str, str] = (
         data_config.get("text_prompts")
         or qa_config.get("text_prompts", {})
     )
@@ -250,7 +250,7 @@ def verify_image_task(
     sam3_cfg = qa_config.get("sam3", {})
     include_missing = bool(sam3_cfg.get("include_missing_detection", True))
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "image": image_b64,
         "labels": label_lines,
         "label_format": "yolo",
@@ -325,9 +325,9 @@ def verify_image_task(
 
 @task
 def score_results_task(
-    results: List[Dict[str, Any]],
-    qa_config: Dict[str, Any],
-) -> List[Dict[str, Any]]:
+    results: list[dict[str, Any]],
+    qa_config: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Score any results that lack a grade (local fallback).
 
     When the QA service returns scores via /validate or /verify, this is
@@ -353,12 +353,12 @@ def score_results_task(
 
 @task
 def aggregate_results_task(
-    image_results: List[Dict[str, Any]],
+    image_results: list[dict[str, Any]],
     dataset_name: str,
-    qa_config: Dict[str, Any],
-    class_names: Dict[int, str],
+    qa_config: dict[str, Any],
+    class_names: dict[int, str],
     config_dir: str = ".",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Aggregate per-image results into a dataset-level summary and report.
 
     Computes grade distribution, average quality score, issue breakdown,
@@ -375,7 +375,7 @@ def aggregate_results_task(
     worst_n: int = reporting_config.get("worst_images_count", 50)
 
     # Grade distribution
-    grade_counts: Dict[str, int] = {"good": 0, "review": 0, "bad": 0}
+    grade_counts: dict[str, int] = {"good": 0, "review": 0, "bad": 0}
     for r in image_results:
         grade = r.get("grade", "review")
         grade_counts[grade] = grade_counts.get(grade, 0) + 1
@@ -385,14 +385,14 @@ def aggregate_results_task(
     avg_score = float(np.mean(scores)) if scores else 0.0
 
     # Issue-type breakdown
-    issue_counts: Dict[str, int] = {}
+    issue_counts: dict[str, int] = {}
     for r in image_results:
         for issue in r.get("validation_issues", []):
             itype = issue["type"]
             issue_counts[itype] = issue_counts.get(itype, 0) + 1
 
     # Per-class statistics
-    per_class: Dict[str, Dict[str, int]] = {}
+    per_class: dict[str, dict[str, int]] = {}
     for r in image_results:
         for ann in r.get("annotations", []):
             cls_id = ann[0]
@@ -431,8 +431,8 @@ def aggregate_results_task(
     # Timing statistics
     validate_times = [r.get("timing", {}).get("validate_s", 0.0) for r in image_results]
     sam3_times = [r.get("timing", {}).get("sam3_verify_s", 0.0) for r in image_results]
-    total_times = [v + s for v, s in zip(validate_times, sam3_times)]
-    timing_stats: Dict[str, Any] = {
+    total_times = [v + s for v, s in zip(validate_times, sam3_times, strict=True)]
+    timing_stats: dict[str, Any] = {
         "avg_validate_s": round(float(np.mean(validate_times)), 4) if validate_times else 0.0,
         "avg_sam3_verify_s": round(float(np.mean(sam3_times)), 4) if sam3_times else 0.0,
         "avg_total_per_sample_s": round(float(np.mean(total_times)), 4) if total_times else 0.0,
@@ -440,7 +440,7 @@ def aggregate_results_task(
         "min_total_per_sample_s": round(float(np.min(total_times)), 4) if total_times else 0.0,
     }
 
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "dataset": dataset_name,
         "total_checked": len(image_results),
         "grades": grade_counts,
@@ -480,7 +480,7 @@ def aggregate_results_task(
 
 
 @entrypoint()
-def qa_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
+def qa_pipeline(state: dict[str, Any]) -> dict[str, Any]:
     """Run the annotation QA pipeline (functional API).
 
     When ``auto_label_config`` is present, the /verify payload is enriched
@@ -501,13 +501,13 @@ def qa_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
     splits = state.get("splits", ["train", "val"])
     batch_size = state.get("batch_size", 32)
     use_sam3 = state.get("use_sam3", True)
-    auto_label_config: Dict[str, Any] = state.get("auto_label_config", {})
+    auto_label_config: dict[str, Any] = state.get("auto_label_config", {})
 
     # --- Sample ---
     sampled_paths = sample_task(data_config, qa_config, config_dir, splits).result()
 
     # Flatten into (image_path, split) pairs
-    all_pairs: List[tuple] = []
+    all_pairs: list[tuple] = []
     for split, paths in sampled_paths.items():
         for p in paths:
             all_pairs.append((p, split))
@@ -521,7 +521,7 @@ def qa_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("Sampled %d images in %d batches", total_images, total_batches)
 
     # --- Process batches ---
-    all_results: List[Dict[str, Any]] = []
+    all_results: list[dict[str, Any]] = []
 
     for batch_idx in range(total_batches):
         start = batch_idx * batch_size

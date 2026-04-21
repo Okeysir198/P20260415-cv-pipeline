@@ -17,7 +17,7 @@ import shutil
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
@@ -300,7 +300,7 @@ def _append_qa_to_dataset_report(
         existing = existing[: existing.index(qa_marker)]
 
     report_md.write_text(existing.rstrip() + "\n" + "\n".join(lines), encoding="utf-8")
-    print(f"  ↳ Updated DATASET_REPORT.md with label quality section")
+    print("  ↳ Updated DATASET_REPORT.md with label quality section")
 
 
 def apply_fixes(report_dir: str) -> None:
@@ -345,7 +345,7 @@ def apply_fixes(report_dir: str) -> None:
     # Collect the unique labels directories that will be modified.
     backed_up_dirs: set[str] = set()
     backup_dir_map: dict[str, str] = {}
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     for label_path in fixes_by_label:
         labels_dir = str(Path(label_path).parent)

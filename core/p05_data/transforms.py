@@ -12,17 +12,18 @@ Internal representation uses v2 dict format:
 
 import random
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any
 
 import cv2
 import numpy as np
 import torch
 import torchvision.transforms.v2 as v2
-
-from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
 import torchvision.transforms.v2.functional as F
 from torchvision import tv_tensors
+
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -34,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 def _to_v2_sample(
     image_bgr_np: np.ndarray,
     targets_np: np.ndarray,
-    canvas_size: Optional[Tuple[int, int]] = None,
+    canvas_size: tuple[int, int] | None = None,
 ) -> dict:
     """BGR numpy + (N,5) normalized CXCYWH -> v2 sample dict.
 
@@ -88,7 +89,7 @@ def _to_v2_sample(
     return {"image": image, "boxes": boxes, "labels": labels}
 
 
-def _from_v2_sample(sample: dict, canvas_size: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+def _from_v2_sample(sample: dict, canvas_size: tuple[int, int] | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     """v2 sample dict -> (CHW float32 tensor, (N,5) tensor).
 
     Args:
@@ -135,8 +136,8 @@ class DetectionTransform:
 
     def __init__(
         self,
-        v2_transforms: List[Any],
-        canvas_size: Tuple[int, int],
+        v2_transforms: list[Any],
+        canvas_size: tuple[int, int],
     ) -> None:
         self.pipeline = v2.Compose(v2_transforms)
         self.transforms = v2_transforms
@@ -144,7 +145,7 @@ class DetectionTransform:
 
     def __call__(
         self, image: np.ndarray, targets: np.ndarray
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         original_size = (image.shape[0], image.shape[1])
         sample = _to_v2_sample(image, targets, original_size)
         sample = self.pipeline(sample)
@@ -165,7 +166,7 @@ class AlbumentationsDetectionTransform:
     def __init__(
         self,
         albu_pipeline: Any,
-        canvas_size: Tuple[int, int],
+        canvas_size: tuple[int, int],
         normalize: bool,
         mean: Sequence[float],
         std: Sequence[float],
@@ -178,7 +179,7 @@ class AlbumentationsDetectionTransform:
 
     def __call__(
         self, image: np.ndarray, targets: np.ndarray
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         H, W = image.shape[:2]
 
         # YOLO normalized cxcywh → COCO pixel xywh that Albumentations
@@ -244,7 +245,7 @@ class Mosaic(v2.Transform):
 
     def __init__(
         self,
-        input_size: Tuple[int, int] = (640, 640),
+        input_size: tuple[int, int] = (640, 640),
         dataset: Any = None,
         border_value: int = 114,
     ) -> None:
@@ -258,7 +259,7 @@ class Mosaic(v2.Transform):
     def set_dataset(self, dataset: Any) -> None:
         self.dataset = dataset
 
-    def _get_image_tensor(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _get_image_tensor(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Get image as CHW RGB uint8 tensor + boxes + labels from dataset."""
         raw = self.dataset.get_raw_item(idx)
         img_bgr, tgt_np = raw["image"], raw["targets"]
@@ -650,9 +651,9 @@ class IRSimulation(v2.Transform):
 def build_transforms(
     config: dict,
     is_train: bool = True,
-    input_size: Optional[Tuple[int, int]] = None,
-    mean: Optional[Sequence[float]] = None,
-    std: Optional[Sequence[float]] = None,
+    input_size: tuple[int, int] | None = None,
+    mean: Sequence[float] | None = None,
+    std: Sequence[float] | None = None,
 ):
     """Build a transform pipeline from an augmentation config dict.
 
@@ -690,7 +691,7 @@ def build_transforms(
             input_size=input_size, mean=mean, std=std,
         )
 
-    transforms: List[Any] = []
+    transforms: list[Any] = []
 
     # Resize + ToDtype are always present; in train mode they run BEFORE
     # the per-sample augmentations so color jitter + perspective operate
@@ -867,7 +868,7 @@ def build_transforms(
 def build_albumentations_transforms(
     config: dict,
     is_train: bool = True,
-    input_size: Tuple[int, int] = (640, 640),
+    input_size: tuple[int, int] = (640, 640),
     mean: Sequence[float] = IMAGENET_MEAN,
     std: Sequence[float] = IMAGENET_STD,
 ):
@@ -889,7 +890,7 @@ def build_albumentations_transforms(
     H_in, W_in = int(input_size[0]), int(input_size[1])
     normalize = bool(config.get("normalize", True))
 
-    tfms: List[Any] = []
+    tfms: list[Any] = []
     if is_train:
         perspective_p = config.get("perspective_p", 0.0)
         if perspective_p > 0:
@@ -1055,9 +1056,9 @@ class GpuDetectionTransform:
     def __init__(
         self,
         degrees: float,
-        translate: Optional[Tuple[float, float]],
-        scale_range: Tuple[float, float],
-        shear: Optional[Tuple[float, float, float, float]],
+        translate: tuple[float, float] | None,
+        scale_range: tuple[float, float],
+        shear: tuple[float, float, float, float] | None,
         fill: float,
         hsv_h: float,
         hsv_s: float,
@@ -1067,7 +1068,7 @@ class GpuDetectionTransform:
         flip_v_p: float,
         mean: Sequence[float],
         std: Sequence[float],
-        input_size: Tuple[int, int],
+        input_size: tuple[int, int],
         normalize: bool = True,
     ) -> None:
         self.degrees = degrees
@@ -1089,8 +1090,8 @@ class GpuDetectionTransform:
     def __call__(
         self,
         images: torch.Tensor,
-        targets: List[torch.Tensor],
-    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        targets: list[torch.Tensor],
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Apply GPU augmentations to a collated batch.
 
         Args:
@@ -1124,7 +1125,7 @@ class GpuDetectionTransform:
             # Adjust boxes: normalized coords shift with scale + padding
             scale_w, scale_h = new_W / W, new_H / H
             off_x, off_y = pad_left / W, pad_top / H
-            new_targets: List[torch.Tensor] = []
+            new_targets: list[torch.Tensor] = []
             for tgt in targets:
                 if len(tgt) == 0:
                     new_targets.append(tgt)
@@ -1168,7 +1169,7 @@ class GpuDetectionTransform:
         targets = _transform_boxes(targets, M_fwd, H, W)
 
         # --- ColorJitter: randomized order, fully vectorized ---
-        color_ops: List[str] = []
+        color_ops: list[str] = []
         if self.hsv_v > 0:
             color_ops.append("brightness")
         if self.contrast > 0:
@@ -1250,7 +1251,7 @@ def _build_affine_theta(
     shear_y: torch.Tensor,
     H: int,
     W: int,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Return (B,3,3) pixel-space M_inv and (B,2,3) normalized theta.
 
     Uses torchvision's exact affine formula so box transforms match image warps.
@@ -1304,18 +1305,18 @@ def _build_affine_theta(
 
 
 def _transform_boxes(
-    targets: List[torch.Tensor],
+    targets: list[torch.Tensor],
     M_fwd: torch.Tensor,
     H: int,
     W: int,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     """Transform normalized CXCYWH boxes using forward affine matrices.
 
     Each box's 4 corners are mapped through M_fwd[i], the axis-aligned
     envelope is taken, clamped to [0,W]×[0,H], and boxes with area < 1px
     are dropped.
     """
-    new_targets: List[torch.Tensor] = []
+    new_targets: list[torch.Tensor] = []
     for i, tgt in enumerate(targets):
         if len(tgt) == 0:
             new_targets.append(tgt)
@@ -1371,9 +1372,9 @@ def _transform_boxes(
 def build_cpu_transforms(
     config: dict,
     is_train: bool = True,
-    input_size: Optional[Tuple[int, int]] = None,
-    mean: Optional[Sequence[float]] = None,
-    std: Optional[Sequence[float]] = None,
+    input_size: tuple[int, int] | None = None,
+    mean: Sequence[float] | None = None,
+    std: Sequence[float] | None = None,
 ) -> DetectionTransform:
     """CPU-only transform pipeline when GPU augmentation is enabled.
 
@@ -1394,7 +1395,7 @@ def build_cpu_transforms(
     if input_size is None:
         raise ValueError("input_size is required for build_cpu_transforms")
 
-    transforms: List[Any] = []
+    transforms: list[Any] = []
 
     if is_train:
         if config.get("mosaic", False):
@@ -1424,9 +1425,9 @@ def build_cpu_transforms(
 
 def build_gpu_transforms(
     config: dict,
-    input_size: Tuple[int, int],
-    mean: Optional[Sequence[float]] = None,
-    std: Optional[Sequence[float]] = None,
+    input_size: tuple[int, int],
+    mean: Sequence[float] | None = None,
+    std: Sequence[float] | None = None,
 ) -> GpuDetectionTransform:
     """Stateless augmentations to run on GPU after batch transfer.
 

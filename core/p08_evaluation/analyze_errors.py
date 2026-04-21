@@ -34,7 +34,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -73,7 +72,7 @@ def _load_model_from_training_config(
     training_config_path: Path,
     checkpoint_path: Path,
     device: torch.device,
-) -> Tuple[torch.nn.Module, dict]:
+) -> tuple[torch.nn.Module, dict]:
     """Build model from a training config + load any checkpoint format.
 
     Uses ``build_model(train_cfg)`` so arch is taken from the config —
@@ -146,13 +145,13 @@ def _load_model_from_training_config(
 def _run_inference(
     model: torch.nn.Module,
     dataset: YOLOXDataset,
-    indices: List[int],
+    indices: list[int],
     device: torch.device,
-    input_size: Tuple[int, int],
+    input_size: tuple[int, int],
     batch_size: int,
     conf_threshold: float,
     iou_threshold: float,
-) -> Tuple[List[Dict], List[Dict], List[np.ndarray]]:
+) -> tuple[list[dict], list[dict], list[np.ndarray]]:
     """Batched inference on a dataset subset.
 
     Returns
@@ -164,11 +163,11 @@ def _run_inference(
     input_h, input_w = input_size
     output_format = getattr(model, "output_format", "yolox")
 
-    predictions: List[Dict] = []
-    ground_truths: List[Dict] = []
-    raw_images: List[np.ndarray] = []
+    predictions: list[dict] = []
+    ground_truths: list[dict] = []
+    raw_images: list[np.ndarray] = []
 
-    def _gt_from_yolo(gt_np: np.ndarray, w: int, h: int) -> Dict:
+    def _gt_from_yolo(gt_np: np.ndarray, w: int, h: int) -> dict:
         if gt_np is None or len(gt_np) == 0:
             return {"boxes": np.zeros((0, 4), dtype=np.float32),
                     "labels": np.zeros(0, dtype=np.int64)}
@@ -246,23 +245,23 @@ def _run_inference(
 # ---------------------------------------------------------------------------
 
 
-def _error_type_counts(errors: List[ErrorCase]) -> Dict[str, int]:
-    counts: Dict[str, int] = {}
+def _error_type_counts(errors: list[ErrorCase]) -> dict[str, int]:
+    counts: dict[str, int] = {}
     for e in errors:
         counts[e.error_type] = counts.get(e.error_type, 0) + 1
     return counts
 
 
-def _size_category_counts(errors: List[ErrorCase]) -> Dict[str, int]:
-    counts: Dict[str, int] = {}
+def _size_category_counts(errors: list[ErrorCase]) -> dict[str, int]:
+    counts: dict[str, int] = {}
     for e in errors:
         counts[e.size_category] = counts.get(e.size_category, 0) + 1
     return counts
 
 
 def _format_optimal_thresholds(
-    report: ErrorReport, class_names: Dict[int, str]
-) -> List[Dict]:
+    report: ErrorReport, class_names: dict[int, str]
+) -> list[dict]:
     out = []
     for cid, info in sorted(report.optimal_thresholds.items()):
         if not isinstance(info, dict):
@@ -281,11 +280,11 @@ def _format_optimal_thresholds(
 def _format_hardest_images(
     report: ErrorReport,
     dataset: YOLOXDataset,
-    indices: List[int],
-    predictions: List[Dict],
-    ground_truths: List[Dict],
+    indices: list[int],
+    predictions: list[dict],
+    ground_truths: list[dict],
     top_n: int = 10,
-) -> List[Dict]:
+) -> list[dict]:
     ranked = sorted(
         report.per_image_error_count.items(), key=lambda item: -item[1]
     )[:top_n]
@@ -307,21 +306,21 @@ def _render_markdown_report(
     *,
     split: str,
     n_images: int,
-    subset_fraction: Optional[float],
+    subset_fraction: float | None,
     conf_threshold: float,
     iou_threshold: float,
-    class_names: Dict[int, str],
-    errors: List[ErrorCase],
-    type_counts: Dict[str, int],
-    size_counts: Dict[str, int],
-    thresholds: List[Dict],
-    hardest: List[Dict],
-    run_context: Dict,
+    class_names: dict[int, str],
+    errors: list[ErrorCase],
+    type_counts: dict[str, int],
+    size_counts: dict[str, int],
+    thresholds: list[dict],
+    hardest: list[dict],
+    run_context: dict,
 ) -> str:
     total_errors = len(errors)
     total_pct = lambda v: f"{100 * v / total_errors:5.1f} %" if total_errors else "  —  "
 
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append(f"# Error Analysis — `{split}` split\n")
     lines.append(f"- Arch: `{run_context.get('arch', '?')}`  |  "
                  f"checkpoint: `{run_context.get('checkpoint', '?')}`")

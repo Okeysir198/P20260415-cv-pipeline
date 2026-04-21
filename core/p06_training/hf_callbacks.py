@@ -24,7 +24,7 @@ import logging
 import math
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 from transformers import TrainerCallback
@@ -39,7 +39,7 @@ from core.p06_training.callbacks import (
 logger = logging.getLogger(__name__)
 
 
-def _build_class_names(data_config: dict) -> Dict[int, str]:
+def _build_class_names(data_config: dict) -> dict[int, str]:
     return {int(k): str(v) for k, v in data_config.get("names", {}).items()}
 
 
@@ -54,8 +54,8 @@ class HFDatasetStatsCallback(TrainerCallback):
         save_dir: str,
         data_config: dict,
         base_dir: str,
-        splits: List[str],
-        subsets: Optional[Dict[str, Optional[List[int]]]] = None,
+        splits: list[str],
+        subsets: dict[str, list[int] | None] | None = None,
         dpi: int = 120,
     ) -> None:
         self.save_dir = Path(save_dir)
@@ -66,7 +66,7 @@ class HFDatasetStatsCallback(TrainerCallback):
         self.dpi = dpi
 
     def on_train_begin(self, args, state, control, **kwargs):
-        from core.p05_data.run_viz import generate_dataset_stats, _load_cached_stats
+        from core.p05_data.run_viz import _load_cached_stats, generate_dataset_stats
 
         out_dir = self.save_dir / "data_preview"
         if _load_cached_stats(out_dir):
@@ -90,10 +90,10 @@ class HFDataLabelGridCallback(TrainerCallback):
     def __init__(
         self,
         save_dir: str,
-        splits: List[str],
+        splits: list[str],
         data_config: dict,
         base_dir: str,
-        subsets: Optional[Dict[str, Optional[List[int]]]] = None,
+        subsets: dict[str, list[int] | None] | None = None,
         num_samples: int = 16,
         grid_cols: int = 4,
         thickness: int = 2,
@@ -130,7 +130,7 @@ class HFDataLabelGridCallback(TrainerCallback):
                 continue
             indices = sorted(random.sample(pool, n))
 
-            annotated: List[np.ndarray] = []
+            annotated: list[np.ndarray] = []
             for idx in indices:
                 item = ds.get_raw_item(idx)
                 targets = ds._load_label(ds.img_paths[idx])
@@ -165,12 +165,12 @@ class HFAugLabelGridCallback(TrainerCallback):
     def __init__(
         self,
         save_dir: str,
-        splits: List[str],
+        splits: list[str],
         data_config: dict,
         aug_config: dict,
         base_dir: str,
-        input_size: Tuple[int, int],
-        subsets: Optional[Dict[str, Optional[List[int]]]] = None,
+        input_size: tuple[int, int],
+        subsets: dict[str, list[int] | None] | None = None,
         num_samples: int = 16,
         grid_cols: int = 4,
         thickness: int = 2,
@@ -229,7 +229,7 @@ class HFAugLabelGridCallback(TrainerCallback):
                 continue
             indices = sorted(random.sample(pool, n))
 
-            annotated: List[np.ndarray] = []
+            annotated: list[np.ndarray] = []
             for i in indices:
                 try:
                     result = ds[i]
@@ -276,8 +276,8 @@ class HFValPredictionCallback(TrainerCallback):
     def __init__(
         self,
         save_dir: str,
-        class_names: Dict[int, str],
-        input_size: Tuple[int, int],
+        class_names: dict[int, str],
+        input_size: tuple[int, int],
         num_samples: int = 12,
         conf_threshold: float = 0.05,
         grid_cols: int = 2,
@@ -296,7 +296,7 @@ class HFValPredictionCallback(TrainerCallback):
         self.pred_thickness = pred_thickness
         self.text_scale = text_scale
         self.dpi = dpi
-        self._sample_indices: Optional[List[int]] = None
+        self._sample_indices: list[int] | None = None
 
     @staticmethod
     def _unwrap(dataset: Any):
@@ -310,6 +310,7 @@ class HFValPredictionCallback(TrainerCallback):
         import matplotlib
         import supervision as sv
         import torch
+
         from core.p10_inference.supervision_bridge import annotate_gt_pred
 
         eval_loader = kwargs.get("eval_dataloader")
@@ -369,7 +370,7 @@ class HFValPredictionCallback(TrainerCallback):
             return control
         all_decoded = model.postprocess(preds_raw, self.conf_threshold, target_sizes)
 
-        rows: List[np.ndarray] = []
+        rows: list[np.ndarray] = []
         for i, (real_idx, image, _) in enumerate(samples):
             orig_h, orig_w = image.shape[:2]
 

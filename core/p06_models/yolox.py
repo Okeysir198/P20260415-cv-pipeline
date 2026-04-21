@@ -10,19 +10,18 @@ and ``width`` values in the config override the variant defaults.
 """
 
 import logging
-from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
 
 from core.p06_models.base import DetectionModel
-from core.p06_models.registry import MODEL_REGISTRY, _VARIANT_MAP, register_model
+from core.p06_models.registry import _VARIANT_MAP, register_model
 
 logger = logging.getLogger(__name__)
 
 # --- YOLOX variant defaults (depth, width) --------------------------------
 
-_YOLOX_VARIANTS: Dict[str, Tuple[float, float]] = {
+_YOLOX_VARIANTS: dict[str, tuple[float, float]] = {
     "yolox-nano": (0.33, 0.25),
     "yolox-tiny": (0.33, 0.375),
     "yolox-s": (0.33, 0.50),
@@ -53,7 +52,7 @@ class _OfficialYOLOXAdapter(DetectionModel):
         self, num_classes: int, depth: float, width: float
     ) -> None:
         super().__init__()
-        from yolox.models import YOLOX, YOLOPAFPN, YOLOXHead
+        from yolox.models import YOLOPAFPN, YOLOX, YOLOXHead
 
         in_channels = [256, 512, 1024]
         backbone = YOLOPAFPN(depth, width, in_channels=in_channels)
@@ -69,11 +68,11 @@ class _OfficialYOLOXAdapter(DetectionModel):
         return "yolox"
 
     @property
-    def strides(self) -> List[int]:
+    def strides(self) -> list[int]:
         return list(self._strides)
 
     @staticmethod
-    def _convert_targets(targets: List[torch.Tensor]) -> torch.Tensor:
+    def _convert_targets(targets: list[torch.Tensor]) -> torch.Tensor:
         """Convert per-image target list to official padded batch tensor.
 
         Args:
@@ -130,8 +129,8 @@ class _OfficialYOLOXAdapter(DetectionModel):
         return self._model.load_state_dict(state_dict, strict=strict)
 
     def forward_with_loss(
-        self, images: torch.Tensor, targets: List[torch.Tensor]
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        self, images: torch.Tensor, targets: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
         """Forward + loss contract matching HF detection models.
 
         Training mode: returns ``(loss, loss_dict, None)`` — predictions
@@ -177,8 +176,8 @@ _ACT_MAP = {"silu": nn.SiLU, "relu": nn.ReLU, "hardswish": nn.Hardswish}
 
 
 def _filter_shape_mismatched(
-    state_dict: Dict[str, torch.Tensor], model: nn.Module
-) -> Dict[str, torch.Tensor]:
+    state_dict: dict[str, torch.Tensor], model: nn.Module
+) -> dict[str, torch.Tensor]:
     """Drop state_dict entries whose shape does not match the target model.
 
     ``nn.Module.load_state_dict(strict=False)`` handles missing/unexpected
@@ -189,8 +188,8 @@ def _filter_shape_mismatched(
     regression head) load.
     """
     target = model.state_dict()
-    filtered: Dict[str, torch.Tensor] = {}
-    skipped: List[str] = []
+    filtered: dict[str, torch.Tensor] = {}
+    skipped: list[str] = []
     for k, v in state_dict.items():
         if k in target and target[k].shape != v.shape:
             skipped.append(f"{k}: ckpt={tuple(v.shape)} model={tuple(target[k].shape)}")
@@ -318,7 +317,7 @@ class _SPPBottleneck(nn.Module):
         self,
         in_ch: int,
         out_ch: int,
-        kernel_sizes: Tuple[int, ...] = (5, 9, 13),
+        kernel_sizes: tuple[int, ...] = (5, 9, 13),
         act_type: str = "silu",
     ) -> None:
         super().__init__()
@@ -421,7 +420,7 @@ class _CSPDarknet(nn.Module):
             _CSPLayer(base_channels * 16, base_channels * 16, n=base_depth, shortcut=False, **kw),
         )
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self.stem(x)
         x = self.dark2(x)
         out1 = self.dark3(x)   # stride 8
@@ -472,8 +471,8 @@ class _PAFPN(nn.Module):
         self.upsample = nn.Upsample(scale_factor=2, mode="nearest")
 
     def forward(
-        self, inputs: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        self, inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         feat1, feat2, feat3 = inputs  # stride 8, 16, 32
 
         # Top-down
@@ -616,7 +615,7 @@ class YOLOXModel(DetectionModel):
             nn.init.constant_(head.obj_pred.bias, bias_value)
 
     @staticmethod
-    def _remap_official_keys(state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def _remap_official_keys(state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Remap official yolox_m.pth keys to YOLOXModel naming convention.
 
         Official YOLOX wraps CSPDarknet inside YOLOPAFPN (→ backbone.backbone.xxx)
@@ -637,7 +636,7 @@ class YOLOXModel(DetectionModel):
             # Official YOLOX names bottleneck ModuleList "m"; ours is "blocks"
             return key.replace(".m.", ".blocks.")
 
-        remapped: Dict[str, torch.Tensor] = {}
+        remapped: dict[str, torch.Tensor] = {}
         for k, v in state.items():
             if k.startswith("backbone.backbone."):
                 remapped[_fix_blocks(k[len("backbone."):])] = v
@@ -664,7 +663,7 @@ class YOLOXModel(DetectionModel):
                 remapped[k] = v
         return remapped
 
-    def load_state_dict(self, state_dict: Dict[str, torch.Tensor], strict: bool = True):
+    def load_state_dict(self, state_dict: dict[str, torch.Tensor], strict: bool = True):
         """Load state dict, auto-remapping official yolox package key format if detected.
 
         When ``strict=False`` also filters shape-mismatched entries (e.g.
@@ -692,7 +691,7 @@ class YOLOXModel(DetectionModel):
         fpn_outs = self.neck(features)
 
         outputs = []
-        for i, (feat, head) in enumerate(zip(fpn_outs, self.heads)):
+        for i, (feat, head) in enumerate(zip(fpn_outs, self.heads, strict=True)):
             raw = head(feat)  # (B, 5+C, H_i, W_i)
             B, _, H, W = raw.shape
             # Reshape to (B, H*W, 5+C)
@@ -733,13 +732,13 @@ class YOLOXModel(DetectionModel):
         return "yolox"
 
     @property
-    def strides(self) -> List[int]:
+    def strides(self) -> list[int]:
         """Detection strides."""
         return list(self._strides)
 
     def get_param_groups(
         self, lr: float, weight_decay: float
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Return six parameter groups: backbone/neck/head x decay/no_decay.
 
         Args:
@@ -749,7 +748,7 @@ class YOLOXModel(DetectionModel):
         Returns:
             List of six parameter-group dicts.
         """
-        groups: Dict[str, List[nn.Parameter]] = {
+        groups: dict[str, list[nn.Parameter]] = {
             "backbone_decay": [],
             "backbone_no_decay": [],
             "neck_decay": [],

@@ -10,7 +10,6 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 import onnxruntime as ort
@@ -118,7 +117,7 @@ class ModelBenchmark:
         onnx_path: str,
         batch_size: int = 1,
         label: str = "ONNX",
-        providers: Optional[list] = None,
+        providers: list | None = None,
     ) -> dict:
         """Benchmark an ONNX model via onnxruntime.
 
@@ -168,7 +167,7 @@ class ModelBenchmark:
             path=onnx_path,
         )
 
-    def compare(self, results: List[dict]) -> str:
+    def compare(self, results: list[dict]) -> str:
         """Pretty-print a comparison table of benchmark results.
 
         Args:
@@ -213,7 +212,7 @@ class ModelBenchmark:
         table = "\n".join(lines)
         return table
 
-    def save_results(self, results: List[dict], save_path: str) -> None:
+    def save_results(self, results: list[dict], save_path: str) -> None:
         """Save benchmark results as JSON.
 
         Args:
@@ -244,8 +243,8 @@ class ModelBenchmark:
         latencies: list,
         batch_size: int,
         model_size_mb: float,
-        memory_mb: Optional[float] = None,
-        path: Optional[str] = None,
+        memory_mb: float | None = None,
+        path: str | None = None,
     ) -> dict:
         """Build a standardized result dictionary from raw latencies.
 

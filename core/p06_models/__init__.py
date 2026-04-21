@@ -11,10 +11,14 @@ Example::
     model = build_model(config)
 """
 
-from core.p06_models.registry import MODEL_REGISTRY, build_model
+import contextlib
+
+# Import model modules to trigger registration.
+# yolox is always available (only needs torch). HF-backed modules are
+# soft-imported so minimal venvs (e.g. .venv-yolox-official/) that omit
+# transformers / timm still get a usable yolox registry.
+import core.p06_models.yolox  # noqa: F401
 from core.p06_models.base import DetectionModel
-from core.p06_models.pose_base import PoseModel
-from core.p06_models.pose_registry import POSE_MODEL_REGISTRY, build_pose_model
 from core.p06_models.face_base import FaceDetector, FaceEmbedder
 from core.p06_models.face_registry import (
     FACE_DETECTOR_REGISTRY,
@@ -22,47 +26,33 @@ from core.p06_models.face_registry import (
     build_face_detector,
     build_face_embedder,
 )
+from core.p06_models.pose_base import PoseModel
+from core.p06_models.pose_registry import POSE_MODEL_REGISTRY, build_pose_model
+from core.p06_models.registry import MODEL_REGISTRY, build_model
 
-# Import model modules to trigger registration.
-# yolox is always available (only needs torch). HF-backed modules are
-# soft-imported so minimal venvs (e.g. .venv-yolox-official/) that omit
-# transformers / timm still get a usable yolox registry.
-import core.p06_models.yolox  # noqa: F401
-try:
-    import core.p06_models.hf_model  # noqa: F401
+with contextlib.suppress(ImportError):
     import core.p06_models.dfine  # noqa: F401
-    import core.p06_models.rtdetr  # noqa: F401
     import core.p06_models.hf_classification_variants  # noqa: F401
+    import core.p06_models.hf_model  # noqa: F401
     import core.p06_models.hf_segmentation_variants  # noqa: F401
-except ImportError:
-    pass
+    import core.p06_models.rtdetr  # noqa: F401
 
 # Import timm model module to trigger registration (optional dep)
-try:
+with contextlib.suppress(ImportError):
     import core.p06_models.timm_model  # noqa: F401
     import core.p06_models.timm_variants  # noqa: F401
-except ImportError:
-    pass
 
 # Import pose model modules to trigger registration (optional deps)
-try:
+with contextlib.suppress(ImportError):
     import core.p06_models.rtmpose  # noqa: F401
-except ImportError:
-    pass
-try:
+with contextlib.suppress(ImportError):
     import core.p06_models.mediapipe_pose  # noqa: F401
-except ImportError:
-    pass
 
 # Import face model modules to trigger registration (optional deps)
-try:
+with contextlib.suppress(ImportError):
     import core.p06_models.scrfd  # noqa: F401
-except ImportError:
-    pass
-try:
+with contextlib.suppress(ImportError):
     import core.p06_models.mobilefacenet  # noqa: F401
-except ImportError:
-    pass
 
 __all__ = [
     "build_model",

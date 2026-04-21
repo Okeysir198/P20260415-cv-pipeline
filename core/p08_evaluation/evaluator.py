@@ -6,7 +6,6 @@ full evaluation metrics (mAP, per-class AP, confusion matrix, failure cases).
 
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -14,23 +13,21 @@ import torch
 import torch.nn as nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
-from core.p06_training.postprocess import postprocess as _dispatch_postprocess
-
-from utils.config import resolve_path
-from utils.device import get_device
-from utils.metrics import compute_iou
-from core.p08_evaluation.sv_metrics import (
-    _compute_precision_recall_from_iou,
-    compute_map,
-    compute_precision_recall,
-)
-from utils.progress import ProgressBar
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, IMG_EXTENSIONS
 from core.p05_data.classification_dataset import (
     ClassificationDataset,
     build_classification_transforms,
     classification_collate_fn,
 )
+from core.p06_training.postprocess import postprocess as _dispatch_postprocess
+from core.p08_evaluation.sv_metrics import (
+    _compute_precision_recall_from_iou,
+    compute_map,
+)
+from utils.config import resolve_path
+from utils.device import get_device
+from utils.metrics import compute_iou
+from utils.progress import ProgressBar
 
 
 class ModelEvaluator:
@@ -57,12 +54,12 @@ class ModelEvaluator:
         self,
         model: nn.Module,
         data_config: dict,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         conf_threshold: float = 0.5,
         iou_threshold: float = 0.5,
         batch_size: int = 16,
         num_workers: int = 4,
-        output_format: Optional[str] = None,
+        output_format: str | None = None,
     ) -> None:
         self.model = model
         self.data_config = data_config
@@ -81,7 +78,7 @@ class ModelEvaluator:
             self.output_format = "yolox"
 
         self.num_classes = data_config["num_classes"]
-        self.class_names: Dict[int, str] = {
+        self.class_names: dict[int, str] = {
             int(k): v for k, v in data_config["names"].items()
         }
         self.input_size = tuple(data_config["input_size"])
@@ -121,7 +118,8 @@ class ModelEvaluator:
         # pipeline used during training (Resize + ToDtype + ImageNet Normalize).
         # Target tensors are converted to the dict format expected by the
         # mAP matching code in _get_predictions_detection.
-        from core.p05_data.detection_dataset import YOLOXDataset, collate_fn as det_collate
+        from core.p05_data.detection_dataset import YOLOXDataset
+        from core.p05_data.detection_dataset import collate_fn as det_collate
         from core.p05_data.transforms import build_transforms
 
         transforms = build_transforms(
@@ -148,7 +146,7 @@ class ModelEvaluator:
 
     def get_predictions(
         self, split: str = "test"
-    ) -> Tuple[List[Dict], List[Dict]]:
+    ) -> tuple[list[dict], list[dict]]:
         """Run inference and return raw predictions and ground truths.
 
         For detection models, returns box-based predictions and ground truths.
@@ -170,7 +168,7 @@ class ModelEvaluator:
 
     def _get_predictions_classification(
         self, split: str
-    ) -> Tuple[List[Dict], List[Dict]]:
+    ) -> tuple[list[dict], list[dict]]:
         """Run classification inference and collect logits + labels."""
         input_size = self.input_size
         mean = self.data_config.get("mean", IMAGENET_MEAN)
@@ -190,8 +188,8 @@ class ModelEvaluator:
             pin_memory=self.device.type == "cuda",
         )
 
-        all_predictions: List[Dict] = []
-        all_ground_truths: List[Dict] = []
+        all_predictions: list[dict] = []
+        all_ground_truths: list[dict] = []
 
         with ProgressBar(total=len(dataloader), desc=f"Evaluating [{split}]") as pbar:
             with torch.no_grad():
@@ -225,14 +223,14 @@ class ModelEvaluator:
 
     def _get_predictions_detection(
         self, split: str
-    ) -> Tuple[List[Dict], List[Dict]]:
+    ) -> tuple[list[dict], list[dict]]:
         """Run detection inference and collect box predictions + ground truths."""
         dataloader = self._build_dataloader(split)
-        all_predictions: List[Dict] = []
-        all_ground_truths: List[Dict] = []
+        all_predictions: list[dict] = []
+        all_ground_truths: list[dict] = []
         input_h, input_w = self.input_size
 
-        def _gt_to_dict(t: torch.Tensor) -> Dict:
+        def _gt_to_dict(t: torch.Tensor) -> dict:
             """YOLOXDataset emits per-image (N, 5) tensor [cls, cx, cy, w, h]
             normalized [0, 1]. Convert to xyxy pixel-space dict for mAP."""
             arr = t.cpu().numpy() if hasattr(t, "cpu") else np.asarray(t)
@@ -268,7 +266,7 @@ class ModelEvaluator:
                         batch_preds = self.model.postprocess(
                             outputs, self.conf_threshold, target_sizes,
                         )
-                        for pred_dict, gt in zip(batch_preds, targets):
+                        for pred_dict, gt in zip(batch_preds, targets, strict=True):
                             all_predictions.append(pred_dict)
                             all_ground_truths.append(_gt_to_dict(gt))
                         pbar.update()
@@ -283,7 +281,7 @@ class ModelEvaluator:
                     )
 
                     # Collect results (postprocess returns dicts with boxes/scores/labels)
-                    for pred_dict, gt in zip(detections, targets):
+                    for pred_dict, gt in zip(detections, targets, strict=True):
                         all_predictions.append(pred_dict)
                         all_ground_truths.append(_gt_to_dict(gt))
 
@@ -291,7 +289,7 @@ class ModelEvaluator:
 
         return all_predictions, all_ground_truths
 
-    def evaluate(self, split: str = "test") -> Dict:
+    def evaluate(self, split: str = "test") -> dict:
         """Run full evaluation and return metrics.
 
         Dispatches by output_format:
@@ -313,8 +311,8 @@ class ModelEvaluator:
         return self._evaluate_detection(predictions, ground_truths)
 
     def _evaluate_classification(
-        self, predictions: List[Dict], ground_truths: List[Dict]
-    ) -> Dict:
+        self, predictions: list[dict], ground_truths: list[dict]
+    ) -> dict:
         """Compute classification metrics: accuracy, top-5, per-class F1."""
         pred_classes = np.array([p["class_id"] for p in predictions])
         gt_labels = np.array([g["label"] for g in ground_truths])
@@ -355,8 +353,8 @@ class ModelEvaluator:
         }
 
     def _evaluate_detection(
-        self, predictions: List[Dict], ground_truths: List[Dict]
-    ) -> Dict:
+        self, predictions: list[dict], ground_truths: list[dict]
+    ) -> dict:
         """Compute detection metrics: mAP, per-class AP, precision, recall."""
         metrics = compute_map(
             predictions, ground_truths,
@@ -370,14 +368,15 @@ class ModelEvaluator:
 
     def _get_predictions_segmentation(
         self, split: str
-    ) -> Tuple[List[Dict], List[Dict]]:
+    ) -> tuple[list[dict], list[dict]]:
         """Run segmentation inference and collect predicted + GT masks."""
+        import torch.nn.functional as F_seg
+
         from core.p05_data.segmentation_dataset import (
             SegmentationDataset,
             build_segmentation_transforms,
             segmentation_collate_fn,
         )
-        import torch.nn.functional as F_seg
 
         input_size = self.input_size
         mean = self.data_config.get("mean", IMAGENET_MEAN)
@@ -397,8 +396,8 @@ class ModelEvaluator:
             pin_memory=self.device.type == "cuda",
         )
 
-        all_predictions: List[Dict] = []
-        all_ground_truths: List[Dict] = []
+        all_predictions: list[dict] = []
+        all_ground_truths: list[dict] = []
 
         with ProgressBar(total=len(dataloader), desc=f"Evaluating [{split}]") as pbar:
             with torch.no_grad():
@@ -432,8 +431,8 @@ class ModelEvaluator:
         return all_predictions, all_ground_truths
 
     def _evaluate_segmentation(
-        self, predictions: List[Dict], ground_truths: List[Dict]
-    ) -> Dict:
+        self, predictions: list[dict], ground_truths: list[dict]
+    ) -> dict:
         """Compute segmentation metrics: mIoU and per-class IoU."""
         intersection = np.zeros(self.num_classes)
         union = np.zeros(self.num_classes)
@@ -452,7 +451,7 @@ class ModelEvaluator:
                 union[c] = np.logical_or(p, g).sum()
 
         iou = np.where(union > 0, intersection / (union + 1e-10), 0.0)
-        per_class: Dict = {}
+        per_class: dict = {}
         for c in range(self.num_classes):
             name = self.class_names.get(c, f"class_{c}")
             per_class[name] = {"iou": float(iou[c])}
@@ -463,7 +462,7 @@ class ModelEvaluator:
             "num_images": len(predictions),
         }
 
-    def evaluate_per_class(self, split: str = "test") -> Dict:
+    def evaluate_per_class(self, split: str = "test") -> dict:
         """Run evaluation with detailed per-class breakdown.
 
         For classification, returns per-class precision/recall/F1 from evaluate().
@@ -494,15 +493,15 @@ class ModelEvaluator:
         return self._evaluate_per_class_detection(predictions, ground_truths)
 
     def _evaluate_per_class_detection(
-        self, predictions: List[Dict], ground_truths: List[Dict]
-    ) -> Dict:
+        self, predictions: list[dict], ground_truths: list[dict]
+    ) -> dict:
         """Compute per-class AP and PR curves from pre-computed predictions."""
-        result: Dict = {}
+        result: dict = {}
 
         # Pre-compute full per-image IoU matrices once; the per-class PR helper
         # slices class rows/cols instead of recomputing IoU per class.
-        iou_matrices: List[np.ndarray] = []
-        for pred, gt in zip(predictions, ground_truths):
+        iou_matrices: list[np.ndarray] = []
+        for pred, gt in zip(predictions, ground_truths, strict=True):
             pred_boxes = np.asarray(pred["boxes"], dtype=np.float64).reshape(-1, 4)
             gt_boxes = np.asarray(gt["boxes"], dtype=np.float64).reshape(-1, 4)
             if pred_boxes.shape[0] == 0 or gt_boxes.shape[0] == 0:
@@ -560,7 +559,7 @@ class ModelEvaluator:
 
     def get_failure_cases(
         self, split: str = "test", max_cases: int = 50
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Collect false positive and false negative examples.
 
         Args:
@@ -581,7 +580,7 @@ class ModelEvaluator:
             return self._get_misclassifications(split, max_cases)
 
         predictions, ground_truths = self.get_predictions(split)
-        failures: List[Dict] = []
+        failures: list[dict] = []
 
         for img_idx in range(len(predictions)):
             if len(failures) >= max_cases:
@@ -659,11 +658,11 @@ class ModelEvaluator:
 
     def _get_misclassifications(
         self, split: str, max_cases: int
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Collect misclassified samples for classification models."""
         predictions, ground_truths = self.get_predictions(split)
         failures = []
-        for i, (pred, gt) in enumerate(zip(predictions, ground_truths)):
+        for i, (pred, gt) in enumerate(zip(predictions, ground_truths, strict=True)):
             if pred["class_id"] != gt["label"]:
                 failures.append({
                     "image_idx": i,
@@ -692,7 +691,7 @@ class _MinimalDetectionDataset(torch.utils.data.Dataset):
 
     IMAGE_EXTENSIONS = IMG_EXTENSIONS
 
-    def __init__(self, images_dir: Path, input_size: Tuple[int, int]) -> None:
+    def __init__(self, images_dir: Path, input_size: tuple[int, int]) -> None:
         self.images_dir = Path(images_dir)
         self.labels_dir = self.images_dir.parent / "labels"
         self.input_size = input_size  # (H, W)
@@ -704,7 +703,7 @@ class _MinimalDetectionDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return len(self.image_paths)
 
-    def __getitem__(self, idx: int) -> Dict:
+    def __getitem__(self, idx: int) -> dict:
         img_path = self.image_paths[idx]
         img = cv2.imread(str(img_path))
         if img is None:
@@ -767,7 +766,7 @@ class _MinimalDetectionDataset(torch.utils.data.Dataset):
         }
 
 
-def _collate_fn(batch: List[Dict]) -> Dict:
+def _collate_fn(batch: list[dict]) -> dict:
     """Collate function for _MinimalDetectionDataset.
 
     Args:

@@ -7,7 +7,7 @@ to remove overlapping detections.
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 
@@ -41,7 +41,7 @@ class NMSFilter:
         self.cross_class_enabled = cross_class_enabled
         self.cross_class_iou_threshold = cross_class_iou_threshold
 
-    def filter(self, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def filter(self, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Apply NMS filtering to a list of detections.
 
         Args:
@@ -63,7 +63,7 @@ class NMSFilter:
 
         return kept
 
-    def _per_class_nms(self, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _per_class_nms(self, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Apply NMS independently for each class.
 
         Args:
@@ -73,12 +73,12 @@ class NMSFilter:
             Filtered detections after per-class NMS.
         """
         # Group by class
-        by_class: Dict[int, List[int]] = {}
+        by_class: dict[int, list[int]] = {}
         for idx, det in enumerate(detections):
             cls_id = det["class_id"]
             by_class.setdefault(cls_id, []).append(idx)
 
-        kept_indices: List[int] = []
+        kept_indices: list[int] = []
 
         for cls_id, indices in by_class.items():
             if len(indices) <= 1:
@@ -105,7 +105,7 @@ class NMSFilter:
         kept_indices.sort()
         return [detections[i] for i in kept_indices]
 
-    def _cross_class_nms(self, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _cross_class_nms(self, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Apply cross-class NMS (class-agnostic).
 
         Uses a higher IoU threshold to only suppress near-duplicates
@@ -133,10 +133,10 @@ class NMSFilter:
 
     @staticmethod
     def merge_with_existing(
-        new_detections: List[Dict[str, Any]],
-        existing_annotations: List[tuple],
+        new_detections: list[dict[str, Any]],
+        existing_annotations: list[tuple],
         iou_threshold: float = 0.5,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Merge new detections with existing YOLO annotations.
 
         Removes new detections that overlap significantly with existing
@@ -162,7 +162,7 @@ class NMSFilter:
 
         from utils.metrics import compute_iou
 
-        kept: List[Dict[str, Any]] = []
+        kept: list[dict[str, Any]] = []
         for det in new_detections:
             det_xywh = np.array(
                 [[det["cx"], det["cy"], det["w"], det["h"]]],

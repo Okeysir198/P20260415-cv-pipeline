@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import kaleido  # noqa: F401
 import optuna.visualization as vis
@@ -27,7 +27,7 @@ class ResultsManager:
     def __init__(
         self,
         study: Any,  # optuna.Study
-        best_config: Optional[dict],
+        best_config: dict | None,
         save_dir: str,
     ) -> None:
         self.study = study
@@ -35,7 +35,7 @@ class ResultsManager:
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_all(self) -> Dict[str, Path]:
+    def save_all(self) -> dict[str, Path]:
         """Save all results: JSON, best config, and plots.
 
         Returns:
@@ -136,7 +136,7 @@ class ResultsManager:
         logger.info("Best config saved to %s", path)
         return path
 
-    def generate_plots(self) -> Dict[str, Path]:
+    def generate_plots(self) -> dict[str, Path]:
         """Generate visualization plots for the HPO study.
 
         Uses optuna.visualization (plotly) if available, otherwise skips.

@@ -17,31 +17,31 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 # Auto-pick the idle GPU BEFORE torch gets imported so the env var
 # reaches torch's first cuda init.
 from utils.device import auto_select_gpu  # noqa: E402
+
 auto_select_gpu()
 
 import matplotlib.pyplot as plt  # noqa: E402
 import torch  # noqa: E402
 
-from core.p08_evaluation.evaluator import ModelEvaluator  # noqa: E402
-from core.p08_evaluation.error_analysis import ErrorAnalyzer  # noqa: E402
 from core.p06_training.trainer import DetectionTrainer  # noqa: E402
-from utils.config import load_config  # noqa: E402
-from utils.device import get_device
+from core.p08_evaluation.error_analysis import ErrorAnalyzer  # noqa: E402
+from core.p08_evaluation.evaluator import ModelEvaluator  # noqa: E402
 from core.p08_evaluation.visualization import (
-    plot_confusion_matrix,
-    plot_pr_curve,
-    plot_error_breakdown,
     plot_confidence_histogram,
+    plot_confusion_matrix,
+    plot_error_breakdown,
+    plot_pr_curve,
     plot_size_recall,
     plot_threshold_curves,
 )
+from utils.config import load_config  # noqa: E402
+from utils.device import get_device
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def load_model(model_path: str, data_config: dict, device: torch.device) -> torc
     return model
 
 
-def print_metrics_table(metrics: Dict, class_names: Dict[int, str]) -> None:
+def print_metrics_table(metrics: dict, class_names: dict[int, str]) -> None:
     """Print evaluation metrics as a formatted table.
 
     Args:
@@ -146,7 +146,7 @@ def print_metrics_table(metrics: Dict, class_names: Dict[int, str]) -> None:
     print()
 
 
-def save_metrics_json(metrics: Dict, class_names: Dict[int, str],
+def save_metrics_json(metrics: dict, class_names: dict[int, str],
                       save_path: Path) -> None:
     """Save metrics to a JSON file.
 
@@ -206,8 +206,8 @@ def _evaluate_classification(
     correct = 0
     top5_correct = 0
     total = 0
-    per_class_correct: Dict[int, int] = {i: 0 for i in range(num_classes)}
-    per_class_total: Dict[int, int] = {i: 0 for i in range(num_classes)}
+    per_class_correct: dict[int, int] = {i: 0 for i in range(num_classes)}
+    per_class_total: dict[int, int] = {i: 0 for i in range(num_classes)}
 
     with torch.no_grad():
         for batch in loader:
@@ -412,7 +412,7 @@ def main() -> None:
     data_config = load_config(config_path)
     data_config["_config_dir"] = config_path.parent
 
-    class_names: Dict[int, str] = {
+    class_names: dict[int, str] = {
         int(k): v for k, v in data_config["names"].items()
     }
     class_name_list = [class_names[i] for i in range(data_config["num_classes"])]

@@ -9,10 +9,8 @@ vector representation for identity matching against an enrolled gallery.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # ArcFace alignment template — standard 5-point landmark reference positions
@@ -43,7 +41,7 @@ class FaceDetector(ABC):
     @abstractmethod
     def detect_faces(
         self, image: np.ndarray, bbox: np.ndarray
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Detect faces within a bounding box region.
 
         Args:
@@ -62,7 +60,7 @@ class FaceDetector(ABC):
 
     def detect_faces_batch(
         self, image: np.ndarray, bboxes: np.ndarray
-    ) -> List[Dict[str, np.ndarray]]:
+    ) -> list[dict[str, np.ndarray]]:
         """Detect faces in multiple bounding box regions.
 
         Default implementation loops over bboxes. Subclasses may override
@@ -83,7 +81,7 @@ class FaceDetector(ABC):
 
     @property
     @abstractmethod
-    def input_size(self) -> Tuple[int, int]:
+    def input_size(self) -> tuple[int, int]:
         """Expected input size ``(H, W)``."""
 
 
@@ -102,7 +100,7 @@ class FaceEmbedder(ABC):
         self,
         image: np.ndarray,
         face_box: np.ndarray,
-        landmarks: Optional[np.ndarray] = None,
+        landmarks: np.ndarray | None = None,
     ) -> np.ndarray:
         """Extract a face embedding from a detected face region.
 
@@ -122,7 +120,7 @@ class FaceEmbedder(ABC):
         self,
         image: np.ndarray,
         face_boxes: np.ndarray,
-        landmarks_list: Optional[List[Optional[np.ndarray]]] = None,
+        landmarks_list: list[np.ndarray | None] | None = None,
     ) -> np.ndarray:
         """Extract embeddings for multiple detected faces.
 
@@ -152,5 +150,5 @@ class FaceEmbedder(ABC):
 
     @property
     @abstractmethod
-    def input_size(self) -> Tuple[int, int]:
+    def input_size(self) -> tuple[int, int]:
         """Expected aligned face input size ``(H, W)``."""

@@ -5,7 +5,6 @@ and implement the required abstract methods.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List
 
 import torch
 import torch.nn as nn
@@ -41,7 +40,7 @@ class DetectionModel(ABC, nn.Module):
         """String describing the output tensor layout (e.g. ``"yolox"``)."""
 
     @property
-    def strides(self) -> List[int]:
+    def strides(self) -> list[int]:
         """Detection strides (e.g. ``[8, 16, 32]``).
 
         Non-detection models return an empty list (default).
@@ -50,7 +49,7 @@ class DetectionModel(ABC, nn.Module):
 
     def get_param_groups(
         self, lr: float, weight_decay: float
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Return optimizer parameter groups.
 
         The default implementation splits into two groups:
@@ -69,8 +68,8 @@ class DetectionModel(ABC, nn.Module):
             List of parameter-group dicts suitable for
             ``torch.optim.Optimizer``.
         """
-        pg_decay: List[nn.Parameter] = []
-        pg_no_decay: List[nn.Parameter] = []
+        pg_decay: list[nn.Parameter] = []
+        pg_no_decay: list[nn.Parameter] = []
 
         for module in self.modules():
             if isinstance(module, (nn.BatchNorm2d, nn.GroupNorm, nn.LayerNorm)):

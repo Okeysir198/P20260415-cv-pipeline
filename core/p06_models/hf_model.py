@@ -6,18 +6,17 @@ These modules only adapt I/O format between HF and our trainer.
 
 import logging
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import torch
-
 from transformers import (
     AutoImageProcessor,
     AutoModelForObjectDetection,
-    DFineForObjectDetection,
     DFineConfig,
-    RTDetrV2ForObjectDetection,
+    DFineForObjectDetection,
     RTDetrV2Config,
+    RTDetrV2ForObjectDetection,
 )
 
 from core.p06_models.base import DetectionModel
@@ -26,7 +25,7 @@ from core.p06_models.registry import register_model
 logger = logging.getLogger(__name__)
 
 # arch name → (ModelClass, ConfigClass, default_pretrained)
-HF_MODEL_REGISTRY: Dict[str, Tuple[Any, Any, str]] = {
+HF_MODEL_REGISTRY: dict[str, tuple[Any, Any, str]] = {
     "dfine": (DFineForObjectDetection, DFineConfig, "ustc-community/dfine_s_coco"),
     "dfine-s": (DFineForObjectDetection, DFineConfig, "ustc-community/dfine_s_coco"),
     "dfine-n": (DFineForObjectDetection, DFineConfig, "ustc-community/dfine_n_coco"),
@@ -69,13 +68,13 @@ class HFDetectionModel(DetectionModel):
         return "detr"
 
     @property
-    def strides(self) -> List[int]:
+    def strides(self) -> list[int]:
         return [8, 16, 32]
 
     def forward(
         self,
         pixel_values: torch.Tensor,
-        labels: Optional[List[Dict[str, torch.Tensor]]] = None,
+        labels: list[dict[str, torch.Tensor]] | None = None,
         **kwargs,
     ):
         """Two callers:
@@ -108,8 +107,8 @@ class HFDetectionModel(DetectionModel):
         return torch.cat([boxes_px, logits], dim=-1)
 
     def forward_with_loss(
-        self, images: torch.Tensor, targets: List[torch.Tensor],
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        self, images: torch.Tensor, targets: list[torch.Tensor],
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
         """Forward pass with HF built-in loss computation."""
         _, _, H, W = images.shape
         hf_labels = self._format_targets(targets, H, W)
@@ -149,7 +148,7 @@ class HFDetectionModel(DetectionModel):
         predictions: torch.Tensor,
         conf_threshold: float,
         target_sizes: torch.Tensor,
-    ) -> List[Dict[str, np.ndarray]]:
+    ) -> list[dict[str, np.ndarray]]:
         """Decode predictions using HF's built-in post_process_object_detection.
 
         Args:
@@ -192,8 +191,8 @@ class HFDetectionModel(DetectionModel):
         return results
 
     def _format_targets(
-        self, targets: List[torch.Tensor], H: int, W: int,
-    ) -> List[Dict[str, torch.Tensor]]:
+        self, targets: list[torch.Tensor], H: int, W: int,
+    ) -> list[dict[str, torch.Tensor]]:
         """Convert YOLO pixel cxcywh targets to HF normalized cxcywh labels."""
         hf_labels = []
         for tgt in targets:
@@ -298,7 +297,7 @@ class HFClassificationModel(DetectionModel):
 
     def forward_with_loss(
         self, images: torch.Tensor, targets: list,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
         """Forward pass with HF built-in loss."""
         labels = torch.stack(targets).to(images.device)
 
@@ -332,7 +331,7 @@ class HFSegmentationModel(DetectionModel):
 
     def forward_with_loss(
         self, images: torch.Tensor, targets: list,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
         """Forward pass with HF built-in segmentation loss."""
         labels = torch.stack(targets).to(images.device)
 

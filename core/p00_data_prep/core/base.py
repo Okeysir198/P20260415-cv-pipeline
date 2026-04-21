@@ -6,7 +6,7 @@ Defines the interface that all task-specific adapters must implement.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 
 class TaskAdapter(ABC):
@@ -18,7 +18,7 @@ class TaskAdapter(ABC):
     """
 
     @abstractmethod
-    def parse_source(self, source_config: Dict, base_dir: Path) -> List[Dict]:
+    def parse_source(self, source_config: dict, base_dir: Path) -> list[dict]:
         """
         Parse source dataset into unified format.
 
@@ -38,10 +38,10 @@ class TaskAdapter(ABC):
     @abstractmethod
     def convert_annotations(
         self,
-        samples: List[Dict],
-        target_classes: List[str],
+        samples: list[dict],
+        target_classes: list[str],
         class_mapper: Any
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Convert annotations to target format with class mapping.
 
@@ -56,7 +56,7 @@ class TaskAdapter(ABC):
         pass
 
     @abstractmethod
-    def validate_sample(self, image_path: Path, annotation: Dict) -> bool:
+    def validate_sample(self, image_path: Path, annotation: dict) -> bool:
         """
         Validate a single sample.
 
@@ -70,7 +70,7 @@ class TaskAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_class_statistics(self, samples: List[Dict]) -> Dict[str, int]:
+    def get_class_statistics(self, samples: list[dict]) -> dict[str, int]:
         """
         Get per-class statistics.
 
@@ -83,7 +83,7 @@ class TaskAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_primary_label(self, sample: Dict) -> str:
+    def get_primary_label(self, sample: dict) -> str:
         """
         Get primary label for stratified splitting.
 
@@ -101,7 +101,7 @@ class TaskAdapter(ABC):
         pass
 
     @abstractmethod
-    def merge_sources(self, base_dir: Path) -> List[Dict]:
+    def merge_sources(self, base_dir: Path) -> list[dict]:
         """
         Parse all sources and merge into a single sample list.
 

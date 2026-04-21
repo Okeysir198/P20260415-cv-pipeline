@@ -22,10 +22,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.config import load_config
-from core.p05_data.transforms import build_transforms
 from core.p05_data.detection_dataset import YOLOXDataset
-
+from core.p05_data.transforms import build_transforms
+from utils.config import load_config
 
 # ---------------------------------------------------------------------------
 # Drawing helpers

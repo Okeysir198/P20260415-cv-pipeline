@@ -21,16 +21,16 @@ import argparse
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.yolo_io import parse_classes
 from utils.config import load_config, merge_configs, parse_overrides
 from utils.service_health import require_services
+from utils.yolo_io import parse_classes
 
 
-def parse_text_prompts(prompts_str: str) -> Dict[str, str]:
+def parse_text_prompts(prompts_str: str) -> dict[str, str]:
     """Parse CLI text prompts string like 'person=a standing person,car=a vehicle'.
 
     Args:
@@ -39,7 +39,7 @@ def parse_text_prompts(prompts_str: str) -> Dict[str, str]:
     Returns:
         Mapping of class name to text prompt.
     """
-    prompts: Dict[str, str] = {}
+    prompts: dict[str, str] = {}
     for pair in prompts_str.split(","):
         pair = pair.strip()
         if "=" not in pair:
@@ -162,7 +162,7 @@ def main() -> None:
     data_config_path = None
     config_dir = "."
     dataset_name = "unknown"
-    class_names: Dict[int, str] = {}
+    class_names: dict[int, str] = {}
 
     if args.data_config:
         data_config_path = Path(args.data_config).resolve()
@@ -206,7 +206,7 @@ def main() -> None:
         annotate_config = merge_configs(annotate_config, overrides)
 
     # Build text prompts: config defaults < data config < CLI overrides
-    text_prompts: Dict[str, str] = dict(annotate_config.get("text_prompts", {}))
+    text_prompts: dict[str, str] = dict(annotate_config.get("text_prompts", {}))
     if data_config and "text_prompts" in data_config:
         text_prompts.update(data_config["text_prompts"])
     if args.text_prompts:
@@ -234,7 +234,7 @@ def main() -> None:
         }
 
     # Build initial state
-    initial_state: Dict[str, Any] = {
+    initial_state: dict[str, Any] = {
         "data_config": data_config,
         "annotate_config": annotate_config,
         "dataset_name": dataset_name,

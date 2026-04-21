@@ -2,10 +2,10 @@
 
 from core.p08_evaluation.evaluator import ModelEvaluator
 from core.p08_evaluation.sv_metrics import (
+    compute_confusion_matrix,
     compute_map,
     compute_map_coco,
     compute_precision_recall,
-    compute_confusion_matrix,
 )
 
 __all__ = [

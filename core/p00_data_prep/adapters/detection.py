@@ -6,11 +6,10 @@ Handles object detection datasets with bounding box annotations.
 
 import logging
 from pathlib import Path
-from typing import Dict, List
 
 from core.p00_data_prep.core.base import TaskAdapter
+from core.p00_data_prep.parsers import coco, voc, yolo
 from core.p00_data_prep.utils.class_mapper import ClassMapper
-from core.p00_data_prep.parsers import yolo, voc, coco
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ class DetectionAdapter(TaskAdapter):
     Outputs YOLO format (class_id cx cy w h normalized).
     """
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: dict):
         self.config = config
         self.target_classes = config.get("classes", [])
         self.class_mapper = ClassMapper(
@@ -31,8 +30,8 @@ class DetectionAdapter(TaskAdapter):
             self._build_class_map()
         )
 
-    def _build_class_map(self) -> Dict[str, str]:
-        class_map: Dict[str, str] = {}
+    def _build_class_map(self) -> dict[str, str]:
+        class_map: dict[str, str] = {}
         for source in self.config.get("sources", []):
             for src_name, tgt_name in source.get("class_map", {}).items():
                 if src_name in class_map and class_map[src_name] != tgt_name:
@@ -45,7 +44,7 @@ class DetectionAdapter(TaskAdapter):
                 class_map[src_name] = tgt_name
         return class_map
 
-    def parse_source(self, source_config: Dict, base_dir: Path) -> List[Dict]:
+    def parse_source(self, source_config: dict, base_dir: Path) -> list[dict]:
         format_type = source_config.get("format", "yolo")
 
         if format_type == "yolo":
@@ -59,10 +58,10 @@ class DetectionAdapter(TaskAdapter):
 
     def convert_annotations(
         self,
-        samples: List[Dict],
-        target_classes: List[str],
+        samples: list[dict],
+        target_classes: list[str],
         class_mapper: ClassMapper
-    ) -> List[Dict]:
+    ) -> list[dict]:
         converted = []
 
         for sample in samples:
@@ -94,10 +93,10 @@ class DetectionAdapter(TaskAdapter):
 
         return converted
 
-    def validate_sample(self, image_path: Path, annotation: Dict) -> bool:
+    def validate_sample(self, image_path: Path, annotation: dict) -> bool:
         return image_path.exists() and bool(annotation.get("objects"))
 
-    def get_class_statistics(self, samples: List[Dict]) -> Dict[str, int]:
+    def get_class_statistics(self, samples: list[dict]) -> dict[str, int]:
         stats = {name: 0 for name in self.target_classes}
 
         for sample in samples:
@@ -108,7 +107,7 @@ class DetectionAdapter(TaskAdapter):
 
         return stats
 
-    def get_primary_label(self, sample: Dict) -> str:
+    def get_primary_label(self, sample: dict) -> str:
         objects = sample.get("objects", [])
         if objects:
             class_id = objects[0].get("class_id")
@@ -116,7 +115,7 @@ class DetectionAdapter(TaskAdapter):
                 return self.target_classes[class_id]
         return "__unknown__"
 
-    def merge_sources(self, base_dir: Path) -> List[Dict]:
+    def merge_sources(self, base_dir: Path) -> list[dict]:
         all_samples = []
 
         for source_config in self.config.get("sources", []):
@@ -130,7 +129,7 @@ class DetectionAdapter(TaskAdapter):
 
         return self.convert_annotations(all_samples, self.target_classes, self.class_mapper)
 
-    def _apply_filters(self, samples: List[Dict], filters: List[Dict]) -> List[Dict]:
+    def _apply_filters(self, samples: list[dict], filters: list[dict]) -> list[dict]:
         filtered = []
 
         for sample in samples:

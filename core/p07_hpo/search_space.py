@@ -3,7 +3,7 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -21,7 +21,7 @@ class SearchSpace:
         self._config = search_space_config
         self._params = self._parse_params()
 
-    def _parse_params(self) -> List[dict]:
+    def _parse_params(self) -> list[dict]:
         """Flatten nested search space config into a list of parameter definitions.
 
         Each entry has: name (dot-separated), type, and range info.

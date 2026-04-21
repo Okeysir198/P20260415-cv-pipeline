@@ -11,7 +11,7 @@ RT-DETRv2, etc.).
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import cv2
 import numpy as np
@@ -21,9 +21,9 @@ import torch.nn as nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
 from core.p06_models import build_model
 from core.p06_training.postprocess import postprocess as _postprocess_registry
-from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
 from utils.device import get_device
 
 logger = logging.getLogger(__name__)
@@ -134,18 +134,18 @@ class DetectionPredictor:
 
     def __init__(
         self,
-        model_path: Union[str, Path],
+        model_path: str | Path,
         data_config: dict,
         conf_threshold: float = 0.5,
         iou_threshold: float = 0.45,
-        device: Optional[Any] = None,
+        device: Any | None = None,
     ) -> None:
         self.model_path = Path(model_path)
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
 
         # --- Parse data config ---
-        self.class_names: Dict[int, str] = {
+        self.class_names: dict[int, str] = {
             int(k): v for k, v in data_config["names"].items()
         }
         self.num_classes = data_config.get("num_classes", len(self.class_names))
@@ -196,7 +196,7 @@ class DetectionPredictor:
     # Public API
     # ------------------------------------------------------------------
 
-    def predict(self, image: np.ndarray) -> Dict[str, np.ndarray]:
+    def predict(self, image: np.ndarray) -> dict[str, np.ndarray]:
         """Run inference on a single BGR image.
 
         Args:
@@ -245,7 +245,7 @@ class DetectionPredictor:
 
         return results
 
-    def predict_batch(self, images: List[np.ndarray]) -> List[Dict[str, np.ndarray]]:
+    def predict_batch(self, images: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
         """Run inference on a list of BGR images with a batched forward pass.
 
         Preprocesses each image (letterbox/resize handles heterogeneous sizes),
@@ -275,8 +275,8 @@ class DetectionPredictor:
                 for i in range(len(images))]
 
     def _preprocess_batch(
-        self, images: List[np.ndarray]
-    ) -> tuple[np.ndarray, List[tuple[int, int]]]:
+        self, images: list[np.ndarray]
+    ) -> tuple[np.ndarray, list[tuple[int, int]]]:
         """Preprocess a list of images and stack into one batch tensor.
 
         Reuses the single-image :meth:`_preprocess` (which returns
@@ -294,7 +294,7 @@ class DetectionPredictor:
 
     def _postprocess_single(
         self, outputs: np.ndarray, orig_shape: tuple[int, int]
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Postprocess one image's slice of a batched output.
 
         Mirrors the box-scaling + class-name logic from :meth:`predict` so
@@ -321,7 +321,7 @@ class DetectionPredictor:
         ]
         return results
 
-    def predict_file(self, image_path: Union[str, Path]) -> Dict[str, np.ndarray]:
+    def predict_file(self, image_path: str | Path) -> dict[str, np.ndarray]:
         """Load an image from disk and run inference.
 
         Args:
@@ -347,8 +347,8 @@ class DetectionPredictor:
     def visualize(
         self,
         image: np.ndarray,
-        predictions: Dict[str, np.ndarray],
-        save_path: Optional[Union[str, Path]] = None,
+        predictions: dict[str, np.ndarray],
+        save_path: str | Path | None = None,
     ) -> np.ndarray:
         """Draw predictions on an image.
 
@@ -442,7 +442,7 @@ class DetectionPredictor:
     # Postprocessing
     # ------------------------------------------------------------------
 
-    def _postprocess(self, outputs: np.ndarray) -> Dict[str, np.ndarray]:
+    def _postprocess(self, outputs: np.ndarray) -> dict[str, np.ndarray]:
         """Decode model outputs, apply NMS, and format results.
 
         Delegates to :func:`~core.p06_training.postprocess.postprocess`,
@@ -472,7 +472,7 @@ class DetectionPredictor:
         return results[0] if results else self._empty_results()
 
     @staticmethod
-    def _empty_results() -> Dict[str, np.ndarray]:
+    def _empty_results() -> dict[str, np.ndarray]:
         """Return an empty detection results dict."""
         return {
             "boxes": np.empty((0, 4), dtype=np.float32),
@@ -480,7 +480,7 @@ class DetectionPredictor:
             "labels": np.empty((0,), dtype=np.int64),
         }
 
-    def _postprocess_classification(self, outputs: np.ndarray) -> Dict[str, Any]:
+    def _postprocess_classification(self, outputs: np.ndarray) -> dict[str, Any]:
         """Decode classification logits into class prediction.
 
         Args:

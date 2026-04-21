@@ -6,12 +6,11 @@ Parses COCO JSON format annotations.
 
 import json
 from pathlib import Path
-from typing import Dict, List
 
 from core.p00_data_prep.utils.file_ops import resolve_data_root
 
 
-def parse_coco(source_config: Dict, base_dir: Path) -> List[Dict]:
+def parse_coco(source_config: dict, base_dir: Path) -> list[dict]:
     """
     Parse COCO format dataset.
 
@@ -83,7 +82,7 @@ def _parse_coco_split(
     ann_file: Path,
     img_dir: Path,
     source_name: str
-) -> List[Dict]:
+) -> list[dict]:
     """
     Parse a single COCO annotation file.
 
@@ -98,7 +97,7 @@ def _parse_coco_split(
     with open(ann_file) as f:
         data = json.load(f)
 
-    image_id_to_anns: Dict[int, list] = {}
+    image_id_to_anns: dict[int, list] = {}
     for ann in data.get("annotations", []):
         image_id_to_anns.setdefault(ann["image_id"], []).append(ann)
 

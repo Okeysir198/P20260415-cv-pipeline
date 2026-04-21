@@ -3,13 +3,13 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from core.p06_training.callbacks import Callback
-
 import optuna
+
+from core.p06_training.callbacks import Callback
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class OptunaPruningCallback(Callback):
         self.warmup_epochs = warmup_epochs
 
     def on_epoch_end(
-        self, trainer: Any, epoch: int, metrics: Dict[str, float]
+        self, trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> None:
         """Report metric to Optuna and check for pruning.
 

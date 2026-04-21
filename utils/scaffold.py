@@ -266,7 +266,7 @@ def build_export_py(usecase: str) -> str:
         "",
         f'DEFAULT_MODEL = "runs/{usecase}/best.pt"',
         f'DEFAULT_TRAINING_CONFIG = "configs/{usecase}/06_training.yaml"',
-        f'DEFAULT_EXPORT_CONFIG = "configs/_shared/09_export.yaml"',
+        'DEFAULT_EXPORT_CONFIG = "configs/_shared/09_export.yaml"',
         "",
         "",
         "def main():",
@@ -442,7 +442,7 @@ def main() -> None:
     print(f"\n{'Would create' if args.dry_run else 'Created'} {created}/{len(files)} files.")
 
     if not args.dry_run and created:
-        print(f"\nNext steps:")
+        print("\nNext steps:")
         print(f"  1. Add your dataset to dataset_store/{args.usecase}/{{train,val,test}}/{{images,labels}}/")
         print(f"  2. uv run experiments/{args.usecase}/train.py")
         print(f"  3. uv run experiments/{args.usecase}/evaluate.py --split test")

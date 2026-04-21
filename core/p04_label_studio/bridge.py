@@ -45,7 +45,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # pipeline root
 
@@ -68,7 +68,7 @@ _DEFAULT_LS_CONFIG_PATH = _PROJECT_ROOT / "configs" / "_shared" / "04_label_stud
 # Distinct colors for up to 20 class labels in the Label Studio XML config.
 _DEFAULT_LS_URL = "http://localhost:18103"
 
-_LABEL_COLORS: List[str] = [
+_LABEL_COLORS: list[str] = [
     "#e53935", "#43a047", "#1e88e5", "#fb8c00", "#8e24aa",
     "#00acc1", "#ffb300", "#6d4c41", "#546e7a", "#d81b60",
     "#7cb342", "#039be5", "#f4511e", "#3949ab", "#00897b",
@@ -86,11 +86,11 @@ def yolo_to_ls(
     cy: float,
     w: float,
     h: float,
-    class_names: Dict[int, str],
+    class_names: dict[int, str],
     bbox_index: int = 0,
     img_width: int = 0,
     img_height: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Convert a single YOLO bbox to a Label Studio rectanglelabels result.
 
     Args:
@@ -139,9 +139,9 @@ def yolo_to_ls(
 
 
 def ls_to_yolo(
-    result: Dict[str, Any],
-    class_name_to_id: Dict[str, int],
-) -> Optional[Tuple[int, float, float, float, float]]:
+    result: dict[str, Any],
+    class_name_to_id: dict[str, int],
+) -> tuple[int, float, float, float, float] | None:
     """Convert a single Label Studio rectanglelabels result to YOLO format.
 
     Args:
@@ -184,7 +184,7 @@ def ls_to_yolo(
 # ---------------------------------------------------------------------------
 
 
-def read_yolo_labels(label_path: Path) -> List[Tuple[int, float, float, float, float]]:
+def read_yolo_labels(label_path: Path) -> list[tuple[int, float, float, float, float]]:
     """Read a YOLO label file and return list of (class_id, cx, cy, w, h).
 
     Args:
@@ -197,7 +197,7 @@ def read_yolo_labels(label_path: Path) -> List[Tuple[int, float, float, float, f
     if not label_path.exists():
         return []
 
-    annotations: List[Tuple[int, float, float, float, float]] = []
+    annotations: list[tuple[int, float, float, float, float]] = []
     for line_no, line in enumerate(label_path.read_text().strip().splitlines(), start=1):
         parts = line.strip().split()
         if len(parts) < 5:
@@ -214,7 +214,7 @@ def read_yolo_labels(label_path: Path) -> List[Tuple[int, float, float, float, f
 
 def write_yolo_labels(
     label_path: Path,
-    annotations: List[Tuple[int, float, float, float, float]],
+    annotations: list[tuple[int, float, float, float, float]],
 ) -> None:
     """Write annotations in YOLO format to a label file.
 
@@ -255,7 +255,7 @@ class LabelStudioAPI:
         self.url = url.rstrip("/")
         self.api_key = api_key
         self._client = None
-        self._session: Optional[requests.Session] = None
+        self._session: requests.Session | None = None
 
         # Always build a session for endpoints not exposed by the SDK
         # (e.g. local-files storage connector). Use email/password login
@@ -297,7 +297,7 @@ class LabelStudioAPI:
 
     # -- Project operations --------------------------------------------------
 
-    def list_projects(self) -> List[Dict[str, Any]]:
+    def list_projects(self) -> list[dict[str, Any]]:
         """Return a list of all projects (id, title).
 
         Returns:
@@ -317,7 +317,7 @@ class LabelStudioAPI:
         results = data.get("results", data) if isinstance(data, dict) else data
         return [{"id": p["id"], "title": p["title"]} for p in results]
 
-    def find_project(self, name: str) -> Optional[Dict[str, Any]]:
+    def find_project(self, name: str) -> dict[str, Any] | None:
         """Find a project by exact title match.
 
         Args:
@@ -336,7 +336,7 @@ class LabelStudioAPI:
         title: str,
         label_config: str,
         description: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a new project.
 
         Args:
@@ -370,7 +370,7 @@ class LabelStudioAPI:
         data = resp.json()
         return {"id": data["id"], "title": data["title"]}
 
-    def import_tasks(self, project_id: int, tasks: List[Dict[str, Any]]) -> int:
+    def import_tasks(self, project_id: int, tasks: list[dict[str, Any]]) -> int:
         """Import tasks (with optional predictions) into a project.
 
         Args:
@@ -401,7 +401,7 @@ class LabelStudioAPI:
         self,
         project_id: int,
         only_reviewed: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetch all tasks from a project.
 
         Args:
@@ -447,7 +447,7 @@ class LabelStudioAPI:
         project_id: int,
         local_store_path: str,
         title: str = "Dataset",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a local file storage connector for a project.
 
         Args:
@@ -478,9 +478,9 @@ class LabelStudioAPI:
 
     # -- helpers -------------------------------------------------------------
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         """Build HTTP headers for raw requests calls."""
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._session and self._session.cookies.get("csrftoken"):
             headers["X-CSRFToken"] = self._session.cookies["csrftoken"]
         return headers
@@ -497,8 +497,8 @@ class LabelStudioAPI:
 
 
 def resolve_api_key(
-    cli_key: Optional[str],
-    config: Dict[str, Any],
+    cli_key: str | None,
+    config: dict[str, Any],
 ) -> str:
     """Resolve the Label Studio API key from CLI arg, env var, or config.
 
@@ -533,7 +533,7 @@ def resolve_api_key(
     )
 
 
-def load_ls_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def load_ls_config(config_path: str | None = None) -> dict[str, Any]:
     """Load the Label Studio config, falling back to defaults.
 
     Args:
@@ -561,7 +561,7 @@ def load_ls_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def generate_label_config(class_names: Dict[int, str]) -> str:
+def generate_label_config(class_names: dict[int, str]) -> str:
     """Generate Label Studio XML label config for object detection.
 
     Args:
@@ -570,7 +570,7 @@ def generate_label_config(class_names: Dict[int, str]) -> str:
     Returns:
         XML string for the labeling interface.
     """
-    label_lines: List[str] = []
+    label_lines: list[str] = []
     for idx in sorted(class_names.keys()):
         name = class_names[idx]
         color = _LABEL_COLORS[idx % len(_LABEL_COLORS)]
@@ -628,10 +628,7 @@ def _image_path_to_ls_url(
         # Search dataset_base for a file with the same name so the URL
         # includes the correct subdirectory (e.g. val/images/).
         matches = list(dataset_base.resolve().rglob(image_path.name))
-        if matches:
-            rel = matches[0].relative_to(dataset_base.resolve())
-        else:
-            rel = Path(image_path.name)
+        rel = matches[0].relative_to(dataset_base.resolve()) if matches else Path(image_path.name)
 
     # Build path relative to DOCUMENT_ROOT (LS prepends it automatically)
     full_path = f"{dataset_base.name}/{rel.as_posix()}"
@@ -683,10 +680,10 @@ def _ls_url_to_label_path(
 
 
 def gather_dataset_pairs(
-    data_config: Dict[str, Any],
-    splits: List[str],
-    config_dir: Optional[Path] = None,
-) -> List[Tuple[Path, Path, str]]:
+    data_config: dict[str, Any],
+    splits: list[str],
+    config_dir: Path | None = None,
+) -> list[tuple[Path, Path, str]]:
     """Gather (image_path, label_path, split_name) triples from dataset splits.
 
     The split tag is preserved so we can stamp each LS task with its current
@@ -702,7 +699,7 @@ def gather_dataset_pairs(
     """
     base = config_dir if config_dir else _PROJECT_ROOT
     dataset_path = resolve_path(data_config["path"], base)
-    triples: List[Tuple[Path, Path, str]] = []
+    triples: list[tuple[Path, Path, str]] = []
 
     for split in splits:
         split_key = split.strip()
@@ -726,7 +723,7 @@ def gather_dataset_pairs(
 
 def gather_auto_annotate_pairs(
     auto_annotate_dir: Path,
-) -> List[Tuple[Path, Path]]:
+) -> list[tuple[Path, Path]]:
     """Gather (image_path, label_path) pairs from auto-annotate output.
 
     Auto-annotate output directories contain ``labels/`` and optionally
@@ -750,10 +747,10 @@ def gather_auto_annotate_pairs(
         # Look one level up
         images_dir = auto_annotate_dir.parent / "images"
 
-    pairs: List[Tuple[Path, Path]] = []
+    pairs: list[tuple[Path, Path]] = []
     for label_file in sorted(labels_dir.glob("*.txt")):
         stem = label_file.stem
-        img_path: Optional[Path] = None
+        img_path: Path | None = None
         for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp"):
             candidate = images_dir / (stem + ext)
             if candidate.exists():
@@ -769,7 +766,7 @@ def gather_auto_annotate_pairs(
 
 def gather_qa_fixes_pairs(
     fixes_path: Path,
-) -> List[Tuple[Path, Path]]:
+) -> list[tuple[Path, Path]]:
     """Gather (image_path, label_path) pairs from a QA fixes.json file.
 
     Only returns unique image paths that the QA pipeline flagged for review.
@@ -784,11 +781,11 @@ def gather_qa_fixes_pairs(
         logger.error("QA fixes file not found: %s", fixes_path)
         return []
 
-    with open(fixes_path, "r") as f:
+    with open(fixes_path) as f:
         fixes_data = json.load(f)
 
     seen: set[str] = set()
-    pairs: List[Tuple[Path, Path]] = []
+    pairs: list[tuple[Path, Path]] = []
     for fix in fixes_data.get("fixes", []):
         img_path_str = fix.get("image_path", "")
         label_path_str = fix.get("label_path", "")
@@ -810,12 +807,12 @@ def gather_qa_fixes_pairs(
 def build_task(
     image_path: Path,
     label_path: Path,
-    class_names: Dict[int, str],
+    class_names: dict[int, str],
     local_files_root: str,
     dataset_base: Path,
     model_version: str = "auto_annotate_v1",
-    split: Optional[str] = None,
-) -> Dict[str, Any]:
+    split: str | None = None,
+) -> dict[str, Any]:
     """Build a Label Studio task dict with pre-annotations from a YOLO label.
 
     Args:
@@ -832,7 +829,7 @@ def build_task(
     ls_url = _image_path_to_ls_url(image_path, local_files_root, dataset_base)
     annotations = read_yolo_labels(label_path)
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for i, (cid, cx, cy, w, h) in enumerate(annotations):
         results.append(
             yolo_to_ls(
@@ -846,7 +843,7 @@ def build_task(
             )
         )
 
-    task: Dict[str, Any] = {
+    task: dict[str, Any] = {
         "data": {"image": ls_url},
     }
     if split:
@@ -887,7 +884,7 @@ def cmd_import(args: argparse.Namespace) -> None:
     data_config = load_config(args.data_config)
     ls_config = load_ls_config(args.ls_config)
     ls_cfg = ls_config.get("label_studio", {})
-    class_names: Dict[int, str] = {int(k): v for k, v in data_config["names"].items()}
+    class_names: dict[int, str] = {int(k): v for k, v in data_config["names"].items()}
 
     config_dir = Path(args.data_config).resolve().parent
     dataset_name = data_config.get("dataset_name", "dataset")
@@ -896,7 +893,7 @@ def cmd_import(args: argparse.Namespace) -> None:
     local_files_root = ls_cfg.get("local_files_root", "/datasets")
 
     # Gather image-label pairs
-    pairs: List[Tuple[Path, Path]] = []
+    pairs: list[tuple[Path, Path]] = []
     if args.from_auto_annotate:
         aa_dir = Path(args.from_auto_annotate).resolve()
         pairs = gather_auto_annotate_pairs(aa_dir)
@@ -919,7 +916,7 @@ def cmd_import(args: argparse.Namespace) -> None:
         return
 
     # Build tasks
-    tasks: List[Dict[str, Any]] = []
+    tasks: list[dict[str, Any]] = []
     for item in tqdm(pairs, total=len(pairs), desc="Building tasks"):
         if len(item) == 3:
             img_path, lbl_path, split_name = item
@@ -945,7 +942,7 @@ def cmd_import(args: argparse.Namespace) -> None:
         print(f"  Dataset base:     {dataset_base}")
         print(f"  Model version:    {model_version}")
         if tasks:
-            print(f"\n  Sample task (first):")
+            print("\n  Sample task (first):")
             print(f"    image: {tasks[0]['data']['image']}")
             preds = tasks[0].get("predictions", [{}])
             n_bboxes = len(preds[0].get("result", [])) if preds else 0
@@ -1019,7 +1016,7 @@ def cmd_export(args: argparse.Namespace) -> None:
     )
 
     # Resolve dataset root (for split-subdir routing) + legacy output_dir.
-    dataset_root: Optional[Path] = None
+    dataset_root: Path | None = None
     if args.data_config is not None:
         config_dir = Path(args.data_config).resolve().parent
         data_config_for_path = load_config(args.data_config)
@@ -1036,7 +1033,7 @@ def cmd_export(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Find project by name or ID
-    project: Optional[Dict[str, Any]] = None
+    project: dict[str, Any] | None = None
     try:
         project_id = int(args.project)
         project = {"id": project_id, "title": f"project_{project_id}"}
@@ -1059,7 +1056,7 @@ def cmd_export(args: argparse.Namespace) -> None:
 
     # We need to know class_name -> class_id mapping.
     # Build it from the first task's annotations or from data config if provided.
-    class_name_to_id: Dict[str, int] = {}
+    class_name_to_id: dict[str, int] = {}
     if args.data_config:
         dc = load_config(args.data_config)
         class_name_to_id = {v: int(k) for k, v in dc["names"].items()}
@@ -1101,7 +1098,6 @@ def cmd_export(args: argparse.Namespace) -> None:
     # Lazy import so legacy (non-split-aware) export path still works.
     if split_aware:
         from core.p00_data_prep.core.splitter import (
-            SPLIT_NAMES,
             ensure_split_dirs,
             move_sample,
             refresh_audit_snapshot,
@@ -1110,7 +1106,7 @@ def cmd_export(args: argparse.Namespace) -> None:
 
     written = 0
     skipped = 0
-    split_moves: Dict[str, int] = {"train": 0, "val": 0, "test": 0, "drop": 0}
+    split_moves: dict[str, int] = {"train": 0, "val": 0, "test": 0, "drop": 0}
 
     for task in tqdm(tasks, total=len(tasks), desc="Exporting"):
         annotations_list = task.get("annotations", [])
@@ -1122,8 +1118,8 @@ def cmd_export(args: argparse.Namespace) -> None:
         results = annotation.get("result", [])
 
         # Extract split choice (if any) + bbox results separately.
-        new_split: Optional[str] = None
-        yolo_annotations: List[Tuple[int, float, float, float, float]] = []
+        new_split: str | None = None
+        yolo_annotations: list[tuple[int, float, float, float, float]] = []
         for result in results:
             if result.get("type") == "choices" and result.get("from_name") == "split":
                 choices = result.get("value", {}).get("choices") or []
@@ -1199,7 +1195,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
     ls_config = load_ls_config(args.ls_config)
     ls_cfg = ls_config.get("label_studio", {})
 
-    class_names: Dict[int, str] = {int(k): v for k, v in data_config["names"].items()}
+    class_names: dict[int, str] = {int(k): v for k, v in data_config["names"].items()}
     dataset_name = data_config.get("dataset_name", "dataset")
     project_name = args.project or f"{dataset_name}_review"
 

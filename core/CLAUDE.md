@@ -78,7 +78,7 @@ Rule: `core/` may define registries, `features/<name>/code/` may consume them an
 
 ## LangGraph state dicts (p01, p02, p03)
 
-p01/p02/p03 are LangGraph pipelines — each exposes a `pipeline.py` module whose top-level function takes a single `state: Dict[str, Any]` and returns the updated dict. The CLIs build an initial state from CLI args + configs, then call the graph.
+p01/p02/p03 are LangGraph pipelines — each exposes a `pipeline.py` module whose top-level function takes a single `state: dict[str, Any]` and returns the updated dict. The CLIs build an initial state from CLI args + configs, then call the graph.
 
 Shared state keys you'll see across all three:
 

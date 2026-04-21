@@ -14,8 +14,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from core.p10_inference.face_gallery import FaceGallery
 from core.p06_models.face_registry import build_face_detector, build_face_embedder
+from core.p10_inference.face_gallery import FaceGallery
 from utils.config import load_config
 
 logger = logging.getLogger(__name__)

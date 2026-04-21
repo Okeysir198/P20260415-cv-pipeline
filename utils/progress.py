@@ -1,7 +1,7 @@
 """Progress tracking utilities for training and evaluation loops."""
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from tqdm import tqdm
 
@@ -37,7 +37,7 @@ class ProgressBar:
         desc: str = "",
         unit: str = "batch",
         leave: bool = True,
-        ncols: Optional[int] = None,
+        ncols: int | None = None,
     ) -> None:
         self._bar = tqdm(
             total=total,
@@ -48,7 +48,7 @@ class ProgressBar:
             bar_format="{l_bar}{bar:30}{r_bar}",
         )
 
-    def update(self, n: int = 1, metrics: Optional[Dict[str, float]] = None) -> None:
+    def update(self, n: int = 1, metrics: dict[str, float] | None = None) -> None:
         """Advance the progress bar and optionally display metrics.
 
         Args:
@@ -105,7 +105,7 @@ class TrainingProgress:
         self._start_time = time.time()
         self._epoch_start_time: float = 0.0
         self._current_epoch: int = 0
-        self._best_metric: Optional[float] = None
+        self._best_metric: float | None = None
         self._best_epoch: int = 0
 
         self._epoch_bar = tqdm(
@@ -114,7 +114,7 @@ class TrainingProgress:
             unit="epoch",
             bar_format="{l_bar}{bar:30}{r_bar}",
         )
-        self._batch_bar: Optional[tqdm] = None
+        self._batch_bar: tqdm | None = None
 
     @property
     def elapsed_seconds(self) -> float:
@@ -130,7 +130,7 @@ class TrainingProgress:
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
     @property
-    def best_metric(self) -> Optional[float]:
+    def best_metric(self) -> float | None:
         """Best metric value seen so far."""
         return self._best_metric
 
@@ -158,7 +158,7 @@ class TrainingProgress:
                 bar_format="{l_bar}{bar:20}{r_bar}",
             )
 
-    def update_batch(self, n: int = 1, metrics: Optional[Dict[str, float]] = None) -> None:
+    def update_batch(self, n: int = 1, metrics: dict[str, float] | None = None) -> None:
         """Update batch-level progress within the current epoch.
 
         Args:
@@ -172,8 +172,8 @@ class TrainingProgress:
 
     def end_epoch(
         self,
-        metrics: Optional[Dict[str, float]] = None,
-        track_metric: Optional[str] = None,
+        metrics: dict[str, float] | None = None,
+        track_metric: str | None = None,
         mode: str = "max",
     ) -> bool:
         """Signal the end of an epoch and update epoch-level progress.
@@ -195,7 +195,7 @@ class TrainingProgress:
         epoch_time = time.time() - self._epoch_start_time
 
         # Update epoch bar
-        postfix: Dict[str, Any] = {"time": f"{epoch_time:.1f}s", "total": self.elapsed_str}
+        postfix: dict[str, Any] = {"time": f"{epoch_time:.1f}s", "total": self.elapsed_str}
         is_best = False
 
         if metrics:

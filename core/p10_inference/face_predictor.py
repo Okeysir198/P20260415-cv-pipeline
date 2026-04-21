@@ -19,14 +19,14 @@ overhead and CUDA round-trips when there are several violators per frame.
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from core.p10_inference.face_gallery import FaceGallery
 from core.p06_models.face_base import FaceDetector, FaceEmbedder
+from core.p10_inference.face_gallery import FaceGallery
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class FacePredictor:
         face_detector: FaceDetector,
         face_embedder: FaceEmbedder,
         gallery: FaceGallery,
-        violation_class_ids: List[int],
+        violation_class_ids: list[int],
         expand_ratio: float = 1.5,
         face_conf_threshold: float = 0.5,
     ) -> None:
@@ -61,8 +61,8 @@ class FacePredictor:
         self.face_conf_threshold = face_conf_threshold
 
     def identify(
-        self, image: np.ndarray, det_results: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, image: np.ndarray, det_results: dict[str, Any]
+    ) -> dict[str, Any]:
         """Run face recognition on violation detections.
 
         Args:
@@ -82,9 +82,9 @@ class FacePredictor:
         labels = det_results.get("labels", np.empty((0,), dtype=int))
         n_dets = len(boxes)
 
-        identities: List[Optional[str]] = [None] * n_dets
-        identity_scores: List[float] = [0.0] * n_dets
-        face_boxes: List[Optional[np.ndarray]] = [None] * n_dets
+        identities: list[str | None] = [None] * n_dets
+        identity_scores: list[float] = [0.0] * n_dets
+        face_boxes: list[np.ndarray | None] = [None] * n_dets
 
         if n_dets == 0:
             return {
@@ -98,9 +98,9 @@ class FacePredictor:
         # Pass 1 — per-detection face detection. Collect inputs for the
         # batched embedding step; also record which detection each entry
         # maps back to so we can scatter results in pass 3.
-        embed_indices: List[int] = []  # det index per face
-        embed_boxes: List[np.ndarray] = []
-        embed_landmarks: List[Optional[np.ndarray]] = []
+        embed_indices: list[int] = []  # det index per face
+        embed_boxes: list[np.ndarray] = []
+        embed_landmarks: list[np.ndarray | None] = []
 
         for i in range(n_dets):
             if int(labels[i]) not in self.violation_class_ids:
@@ -139,7 +139,7 @@ class FacePredictor:
                 image, face_boxes_arr, embed_landmarks
             )
             matches = self.gallery.match_batch(embeddings)
-            for det_idx, (identity, score) in zip(embed_indices, matches):
+            for det_idx, (identity, score) in zip(embed_indices, matches, strict=True):
                 identities[det_idx] = identity
                 identity_scores[det_idx] = score
 
@@ -153,7 +153,7 @@ class FacePredictor:
         self,
         image: np.ndarray,
         face_boxes: np.ndarray,
-        landmarks_list: List[Optional[np.ndarray]],
+        landmarks_list: list[np.ndarray | None],
     ) -> np.ndarray:
         """Extract embeddings for *N* faces, preferring a batched API.
 

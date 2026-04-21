@@ -7,7 +7,6 @@ controlled via YAML config.
 """
 
 import logging
-from typing import Dict, List, Tuple
 
 import cv2
 import mediapipe as mp
@@ -37,7 +36,7 @@ class MediaPipePoseModel(PoseModel):
     """
 
     # Major joint indices used for overall pose score (shoulders, hips, knees).
-    _MAJOR_JOINTS: List[int] = [11, 12, 23, 24, 25, 26]
+    _MAJOR_JOINTS: list[int] = [11, 12, 23, 24, 25, 26]
 
     def __init__(
         self,
@@ -64,7 +63,7 @@ class MediaPipePoseModel(PoseModel):
 
     def predict_keypoints(
         self, image: np.ndarray, bbox: np.ndarray
-    ) -> Dict[str, np.ndarray | float]:
+    ) -> dict[str, np.ndarray | float]:
         """Estimate 33 keypoints for a single person crop.
 
         Args:
@@ -124,7 +123,7 @@ class MediaPipePoseModel(PoseModel):
         return coco_kpts
 
     @property
-    def keypoint_names(self) -> List[str]:
+    def keypoint_names(self) -> list[str]:
         """Ordered list of 33 MediaPipe landmark names."""
         return MEDIAPIPE_KEYPOINT_NAMES
 
@@ -134,12 +133,12 @@ class MediaPipePoseModel(PoseModel):
         return 33
 
     @property
-    def skeleton(self) -> List[Tuple[int, int]]:
+    def skeleton(self) -> list[tuple[int, int]]:
         """Skeleton bone pairs for MediaPipe 33-landmark topology."""
         return MEDIAPIPE_SKELETON
 
     @property
-    def input_size(self) -> Tuple[int, int]:
+    def input_size(self) -> tuple[int, int]:
         """MediaPipe internal default crop size ``(H, W)``."""
         return (256, 256)
 
@@ -157,7 +156,7 @@ class MediaPipePoseModel(PoseModel):
 # Registry
 # ---------------------------------------------------------------------------
 
-_COMPLEXITY_MAP: Dict[str, int] = {
+_COMPLEXITY_MAP: dict[str, int] = {
     "mediapipe-lite": 0,
     "mediapipe-full": 2,
     "mediapipe_pose": 2,

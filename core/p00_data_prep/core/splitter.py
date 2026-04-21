@@ -12,10 +12,8 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-
 
 SPLIT_NAMES = ("train", "val", "test")
 DROPPED_DIR = "dropped"
@@ -33,7 +31,7 @@ class SplitGenerator:
 
     def __init__(
         self,
-        ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
+        ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
         seed: int = 42,
         stratified: bool = True,
     ):
@@ -45,7 +43,7 @@ class SplitGenerator:
         self.stratified = stratified
         self.rng = np.random.default_rng(seed)
 
-    def assign_splits(self, samples: List[Dict]) -> Dict[str, List[Dict]]:
+    def assign_splits(self, samples: list[dict]) -> dict[str, list[dict]]:
         """Return {'train': [...], 'val': [...], 'test': [...]} assignment.
 
         Does NOT write anything to disk. Use this before copying files so you
@@ -61,10 +59,10 @@ class SplitGenerator:
     # now writes an audit snapshot instead of filename lists.
     def generate_splits(
         self,
-        samples: List[Dict],
+        samples: list[dict],
         output_file: Path,
         task_type: str = "detection",
-    ) -> Dict[str, List[str]]:
+    ) -> dict[str, list[str]]:
         """Compute assignment, write audit snapshot, return {split: [filenames]}.
 
         The written JSON is an audit snapshot only (no filename lists).
@@ -84,7 +82,7 @@ class SplitGenerator:
         )
         return {split: [s["filename"] for s in items] for split, items in assignment.items()}
 
-    def _random_split(self, samples: List[Dict]) -> Dict[str, List[Dict]]:
+    def _random_split(self, samples: list[dict]) -> dict[str, list[dict]]:
         n = len(samples)
         indices = self.rng.permutation(n)
         if n >= 3:
@@ -101,8 +99,8 @@ class SplitGenerator:
             "test": [samples[i] for i in indices[n_train + n_val:]],
         }
 
-    def _stratified_split(self, samples: List[Dict]) -> Dict[str, List[Dict]]:
-        by_class: Dict[str, List[Dict]] = {}
+    def _stratified_split(self, samples: list[dict]) -> dict[str, list[dict]]:
+        by_class: dict[str, list[dict]] = {}
         for sample in samples:
             if sample.get("labels") and len(sample["labels"]) > 0:
                 primary = sample["labels"][0]
@@ -119,7 +117,7 @@ class SplitGenerator:
             self.rng.shuffle(splits[split_name])
         return splits
 
-    def load_existing_splits(self, splits_file: Path) -> Dict[str, List[str]]:
+    def load_existing_splits(self, splits_file: Path) -> dict[str, list[str]]:
         """Back-compat shim. Prefer `rescan_splits()` which reads the filesystem."""
         return rescan_splits(Path(splits_file).parent)
 
@@ -137,13 +135,13 @@ def ensure_split_dirs(feature_root: Path, include_dropped: bool = False) -> None
         (feature_root / DROPPED_DIR / "labels").mkdir(parents=True, exist_ok=True)
 
 
-def rescan_splits(feature_root: Path) -> Dict[str, List[str]]:
+def rescan_splits(feature_root: Path) -> dict[str, list[str]]:
     """Walk `{train,val,test}/images/` and return {split: [filename]}.
 
     Source of truth for split membership. Call after any mv/drop operation.
     """
     feature_root = Path(feature_root)
-    result: Dict[str, List[str]] = {s: [] for s in SPLIT_NAMES}
+    result: dict[str, list[str]] = {s: [] for s in SPLIT_NAMES}
     for split in SPLIT_NAMES:
         img_dir = feature_root / split / "images"
         if not img_dir.is_dir():
@@ -153,7 +151,7 @@ def rescan_splits(feature_root: Path) -> Dict[str, List[str]]:
     return result
 
 
-def find_image_file(feature_root: Path, split: str, stem: str) -> Optional[Path]:
+def find_image_file(feature_root: Path, split: str, stem: str) -> Path | None:
     """Locate the image file for a given stem within a split. Returns None if absent."""
     img_dir = Path(feature_root) / split / "images"
     for ext in IMAGE_EXTS:
@@ -169,7 +167,7 @@ def move_sample(
     from_split: str,
     to_split: str,
     hard_drop: bool = False,
-) -> Tuple[Optional[Path], Optional[Path]]:
+) -> tuple[Path | None, Path | None]:
     """Physically move an image + its label between split subdirs.
 
     - `to_split='drop'` moves into `dropped/` (or deletes when `hard_drop=True`).
@@ -227,12 +225,12 @@ def _atomic_move(src: Path, dst: Path) -> None:
 def write_audit_snapshot(
     snapshot_path: Path,
     *,
-    counts: Dict[str, int],
-    ratios: Tuple[float, float, float],
+    counts: dict[str, int],
+    ratios: tuple[float, float, float],
     seed: int,
     task_type: str = "detection",
     stratified: bool = True,
-    total: Optional[int] = None,
+    total: int | None = None,
 ) -> None:
     """Write `splits.json` as a tiny audit snapshot (no filename lists)."""
     snapshot_path = Path(snapshot_path)
@@ -255,8 +253,8 @@ def write_audit_snapshot(
 
 
 def refresh_audit_snapshot(feature_root: Path, seed: int = 42,
-                           ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
-                           task_type: str = "detection") -> Dict[str, int]:
+                           ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
+                           task_type: str = "detection") -> dict[str, int]:
     """Rescan filesystem and rewrite `<feature>/splits.json`. Returns counts dict."""
     feature_root = Path(feature_root)
     split_files = rescan_splits(feature_root)

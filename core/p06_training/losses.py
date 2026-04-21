@@ -11,8 +11,8 @@ Provides:
 import logging
 import sys
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -20,19 +20,23 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from utils.registry import Registry  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Loss registry
 # ---------------------------------------------------------------------------
 
-LOSS_REGISTRY: Dict[str, Callable] = {}
+LOSS_REGISTRY: dict[str, Callable] = {}
 
 # Maps model arch names to their default loss type.
-_ARCH_LOSS_MAP: Dict[str, str] = {}
+_ARCH_LOSS_MAP: dict[str, str] = {}
+
+_loss_registry = Registry(entity_name="loss", registry=LOSS_REGISTRY)
 
 
-def register_loss(name: str, arch_aliases: Optional[list] = None):
+def register_loss(name: str, arch_aliases: list | None = None):
     """Decorator that registers a loss builder function.
 
     Args:
@@ -43,9 +47,10 @@ def register_loss(name: str, arch_aliases: Optional[list] = None):
     Returns:
         Decorator that stores *cls* in :data:`LOSS_REGISTRY`.
     """
+    base_decorator = _loss_registry.register(name)
 
     def wrapper(cls):
-        LOSS_REGISTRY[name] = cls
+        base_decorator(cls)
         if arch_aliases:
             for alias in arch_aliases:
                 _ARCH_LOSS_MAP[alias] = name
@@ -112,8 +117,8 @@ class DetectionLoss(ABC, nn.Module):
         self,
         predictions: torch.Tensor,
         targets: list,
-        grids: Optional[list] = None,
-    ) -> Tuple[torch.Tensor, dict]:
+        grids: list | None = None,
+    ) -> tuple[torch.Tensor, dict]:
         """Compute loss.
 
         Args:
@@ -328,7 +333,7 @@ class YOLOXLoss(DetectionLoss):
     def __init__(
         self,
         num_classes: int = 80,
-        strides: Optional[list] = None,
+        strides: list | None = None,
         use_focal: bool = False,
         iou_variant: str = "giou",
         cls_weight: float = 1.0,
@@ -367,8 +372,8 @@ class YOLOXLoss(DetectionLoss):
         self,
         predictions: torch.Tensor,
         targets: list,
-        grids: Optional[list] = None,
-    ) -> Tuple[torch.Tensor, dict]:
+        grids: list | None = None,
+    ) -> tuple[torch.Tensor, dict]:
         """Compute YOLOX loss with SimOTA assignment.
 
         Args:
@@ -491,7 +496,7 @@ class YOLOXLoss(DetectionLoss):
         num_anchors: int,
         device: torch.device,
         dtype: torch.dtype,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Build per-anchor cell-center pixel coords + stride.
 
         Assumes a square input shape and anchor ordering stride-ascending
@@ -549,7 +554,7 @@ class YOLOXLoss(DetectionLoss):
         gt_boxes: torch.Tensor,
         gt_classes: torch.Tensor,
         gt_cxcy: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """SimOTA dynamic label assignment with center-prior geometry filter.
 
         Adds the upstream Megvii YOLOXHead.get_geometry_constraint step
@@ -672,8 +677,6 @@ class YOLOXLoss(DetectionLoss):
             IoU matrix of shape (M, N).
         """
         eps = 1e-7
-        m = boxes_a.shape[0]
-        n = boxes_b.shape[0]
 
         # Intersection
         inter_x1 = torch.max(boxes_a[:, 0].unsqueeze(1), boxes_b[:, 0].unsqueeze(0))

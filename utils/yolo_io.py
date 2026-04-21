@@ -3,14 +3,13 @@
 import base64
 import io
 from pathlib import Path
-from typing import List, Tuple
 
 from PIL import Image
 
 IMAGE_EXTENSIONS: set[str] = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
 
-def parse_yolo_label(label_path: Path) -> List[Tuple[int, float, float, float, float]]:
+def parse_yolo_label(label_path: Path) -> list[tuple[int, float, float, float, float]]:
     """Parse a YOLO-format label file.
 
     Args:
@@ -25,7 +24,7 @@ def parse_yolo_label(label_path: Path) -> List[Tuple[int, float, float, float, f
     text = label_path.read_text().strip()
     if not text:
         return []
-    annotations: List[Tuple[int, float, float, float, float]] = []
+    annotations: list[tuple[int, float, float, float, float]] = []
     for line in text.splitlines():
         parts = line.strip().split()
         if len(parts) < 5:

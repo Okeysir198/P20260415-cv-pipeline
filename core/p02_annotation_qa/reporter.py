@@ -7,9 +7,8 @@ worst-image visualizations, and auto-fix suggestion files from QA results.
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List
 
 import numpy as np
 
@@ -52,7 +51,7 @@ class QAReporter:
     # Public API
     # ------------------------------------------------------------------
 
-    def generate_report(self, image_results: List[Dict], summary: Dict) -> str:
+    def generate_report(self, image_results: list[dict], summary: dict) -> str:
         """Generate all report artefacts.
 
         Creates:
@@ -84,24 +83,24 @@ class QAReporter:
         self.save_checkpoint({
             "completed": True,
             "total_checked": summary.get("total_checked", len(image_results)),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
         logger.info("QA report complete: %s", self.report_dir)
         return str(self.report_dir)
 
-    def save_checkpoint(self, state_snapshot: Dict) -> None:
+    def save_checkpoint(self, state_snapshot: dict) -> None:
         """Save a processing checkpoint for resume.
 
         Args:
             state_snapshot: Arbitrary serialisable state dict.
         """
         path = self.report_dir / "checkpoint.json"
-        data = {**state_snapshot, "saved_at": datetime.now(timezone.utc).isoformat()}
+        data = {**state_snapshot, "saved_at": datetime.now(UTC).isoformat()}
         path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         logger.debug("Checkpoint saved to %s", path)
 
-    def load_checkpoint(self, checkpoint_path: str) -> Dict:
+    def load_checkpoint(self, checkpoint_path: str) -> dict:
         """Load a previously saved checkpoint.
 
         Args:
@@ -110,20 +109,20 @@ class QAReporter:
         Returns:
             The deserialised state dict.
         """
-        data: Dict = json.loads(Path(checkpoint_path).read_text(encoding="utf-8"))
+        data: dict = json.loads(Path(checkpoint_path).read_text(encoding="utf-8"))
         return data
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _save_report_json(self, image_results: List[Dict], summary: Dict) -> None:
+    def _save_report_json(self, image_results: list[dict], summary: dict) -> None:
         """Save full results as JSON."""
         path = self.report_dir / "report.json"
         payload = {
             "metadata": {
                 "dataset": self.dataset_name,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
                 "total_images": len(image_results),
             },
             "summary": make_serialisable(summary),
@@ -132,7 +131,7 @@ class QAReporter:
         path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         logger.info("Saved report.json (%d images)", len(image_results))
 
-    def _save_summary_txt(self, summary: Dict) -> None:
+    def _save_summary_txt(self, summary: dict) -> None:
         """Save a human-readable text summary."""
         total = summary.get("total_checked", 0)
         avg_score = summary.get("avg_quality_score", 0.0)
@@ -142,7 +141,7 @@ class QAReporter:
         worst = summary.get("worst_images", [])
 
         sep = "=" * 70
-        lines: List[str] = [
+        lines: list[str] = [
             sep,
             f"  Annotation QA Report: {self.dataset_name}",
             sep,
@@ -196,7 +195,7 @@ class QAReporter:
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         logger.info("Saved summary.txt")
 
-    def _visualize_worst_images(self, image_results: List[Dict], count: int) -> None:
+    def _visualize_worst_images(self, image_results: list[dict], count: int) -> None:
         """Save visualizations of the worst-scoring images.
 
         For each worst image the method:
@@ -279,12 +278,12 @@ class QAReporter:
 
         logger.info("Saved %d worst-image visualizations", min(count, len(sorted_results)))
 
-    def _save_fixes_json(self, image_results: List[Dict]) -> None:
+    def _save_fixes_json(self, image_results: list[dict]) -> None:
         """Save auto-fixable corrections to ``fixes.json``.
 
         Only results that contain ``suggested_fixes`` entries are included.
         """
-        fixes: List[Dict] = []
+        fixes: list[dict] = []
         for result in image_results:
             for fix in result.get("suggested_fixes", []):
                 fixes.append({

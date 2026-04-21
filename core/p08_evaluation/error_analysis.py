@@ -14,15 +14,13 @@ Usage:
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import supervision as sv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from core.p08_evaluation.sv_metrics import _preds_to_sv, _gt_to_sv
-
+from core.p08_evaluation.sv_metrics import _gt_to_sv, _preds_to_sv
 
 # ---------------------------------------------------------------------------
 # COCO size thresholds (pixel area)
@@ -54,20 +52,20 @@ class ErrorCase:
     error_type: str           # background_fp | class_confusion | localization | duplicate | missed
     box: np.ndarray           # xyxy (4,)
     class_id: int             # predicted class (FP) or GT class (FN)
-    score: Optional[float]    # confidence (None for missed)
+    score: float | None    # confidence (None for missed)
     size_category: str        # small | medium | large
     iou: float = 0.0         # best IoU with a GT (0 for missed with no pred)
-    gt_class_id: Optional[int] = None  # for class_confusion: the true class
+    gt_class_id: int | None = None  # for class_confusion: the true class
 
 
 @dataclass
 class ErrorReport:
     """Full error analysis output."""
 
-    errors: List[ErrorCase] = field(default_factory=list)
-    per_image_error_count: Dict[int, int] = field(default_factory=dict)
-    summary: Dict = field(default_factory=dict)
-    optimal_thresholds: Dict[int, Dict] = field(default_factory=dict)
+    errors: list[ErrorCase] = field(default_factory=list)
+    per_image_error_count: dict[int, int] = field(default_factory=dict)
+    summary: dict = field(default_factory=dict)
+    optimal_thresholds: dict[int, dict] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +84,7 @@ class ErrorAnalyzer:
 
     def __init__(
         self,
-        class_names: Dict[int, str],
+        class_names: dict[int, str],
         iou_threshold: float = 0.5,
         localization_iou_low: float = 0.3,
     ) -> None:
@@ -98,9 +96,9 @@ class ErrorAnalyzer:
 
     def analyze(
         self,
-        predictions: List[Dict],
-        ground_truths: List[Dict],
-        image_paths: Optional[List[str]] = None,
+        predictions: list[dict],
+        ground_truths: list[dict],
+        image_paths: list[str] | None = None,
     ) -> ErrorReport:
         """Run full error analysis.
 
@@ -131,9 +129,9 @@ class ErrorAnalyzer:
 
     def classify_errors(
         self,
-        predictions: List[Dict],
-        ground_truths: List[Dict],
-    ) -> List[ErrorCase]:
+        predictions: list[dict],
+        ground_truths: list[dict],
+    ) -> list[ErrorCase]:
         """Classify every detection into an error type.
 
         Uses sv.box_iou_batch() for IoU computation and sv.Detections
@@ -142,9 +140,9 @@ class ErrorAnalyzer:
         Returns:
             List of ErrorCase objects (all FP and FN across all images).
         """
-        all_errors: List[ErrorCase] = []
+        all_errors: list[ErrorCase] = []
 
-        for img_idx, (pred, gt) in enumerate(zip(predictions, ground_truths)):
+        for img_idx, (pred, gt) in enumerate(zip(predictions, ground_truths, strict=True)):
             pred_sv = _preds_to_sv(pred)
             gt_sv = _gt_to_sv(gt)
 
@@ -193,7 +191,7 @@ class ErrorAnalyzer:
             sorted_pred_idx = np.argsort(-scores)
 
             gt_matched = np.full(n_gt, False)
-            pred_errors: List[Optional[ErrorCase]] = [None] * n_pred
+            pred_errors: list[ErrorCase | None] = [None] * n_pred
 
             for pi in sorted_pred_idx:
                 pred_cls = int(pred_sv.class_id[pi])
@@ -304,10 +302,10 @@ class ErrorAnalyzer:
 
     def error_summary(
         self,
-        errors: List[ErrorCase],
-        predictions: List[Dict],
-        ground_truths: List[Dict],
-    ) -> Dict:
+        errors: list[ErrorCase],
+        predictions: list[dict],
+        ground_truths: list[dict],
+    ) -> dict:
         """Aggregate error statistics into a JSON-serializable dict.
 
         Returns:
@@ -317,7 +315,7 @@ class ErrorAnalyzer:
         num_classes = max(self.class_names.keys()) + 1 if self.class_names else 0
 
         # --- Per-class TP/FP/FN ---
-        per_class: Dict[int, Dict] = {}
+        per_class: dict[int, dict] = {}
         for cls_id in range(num_classes):
             per_class[cls_id] = {"tp": 0, "fp": 0, "fn": 0, "n_gt": 0}
 
@@ -330,7 +328,7 @@ class ErrorAnalyzer:
                     per_class[cls_id]["n_gt"] += 1
 
         # Count TP from matched predictions
-        for pred, gt in zip(predictions, ground_truths):
+        for pred, gt in zip(predictions, ground_truths, strict=True):
             pred_sv = _preds_to_sv(pred)
             gt_sv = _gt_to_sv(gt)
             if len(pred_sv) > 0 and len(gt_sv) > 0:
@@ -363,12 +361,12 @@ class ErrorAnalyzer:
                 per_class[cls_id]["fp"] += 1
 
         # --- Error type breakdown ---
-        error_types: Dict[str, int] = {}
+        error_types: dict[str, int] = {}
         for err in errors:
             error_types[err.error_type] = error_types.get(err.error_type, 0) + 1
 
         # --- Confusion pairs ---
-        confusion_pairs: Dict[Tuple[int, int], int] = {}
+        confusion_pairs: dict[tuple[int, int], int] = {}
         for err in errors:
             if err.error_type == "class_confusion" and err.gt_class_id is not None:
                 key = (err.class_id, err.gt_class_id)
@@ -376,7 +374,7 @@ class ErrorAnalyzer:
         sorted_pairs = sorted(confusion_pairs.items(), key=lambda x: -x[1])
 
         # --- Size breakdown ---
-        size_breakdown: Dict[str, Dict[str, int]] = {
+        size_breakdown: dict[str, dict[str, int]] = {
             "small": {"fp": 0, "fn": 0},
             "medium": {"fp": 0, "fn": 0},
             "large": {"fp": 0, "fn": 0},
@@ -389,7 +387,7 @@ class ErrorAnalyzer:
                 size_breakdown[cat]["fp"] += 1
 
         # --- Hardest images ---
-        per_image_errors: Dict[int, int] = {}
+        per_image_errors: dict[int, int] = {}
         for err in errors:
             per_image_errors[err.image_idx] = per_image_errors.get(err.image_idx, 0) + 1
         hardest = sorted(per_image_errors.items(), key=lambda x: -x[1])[:20]
@@ -423,10 +421,10 @@ class ErrorAnalyzer:
 
     def compute_optimal_thresholds(
         self,
-        predictions: List[Dict],
-        ground_truths: List[Dict],
+        predictions: list[dict],
+        ground_truths: list[dict],
         threshold_steps: int = 50,
-    ) -> Dict[int, Dict]:
+    ) -> dict[int, dict]:
         """Find per-class optimal confidence thresholds.
 
         Sweeps thresholds and computes precision/recall/F1 at each point
@@ -444,17 +442,17 @@ class ErrorAnalyzer:
         """
         thresholds = np.linspace(0.05, 0.95, threshold_steps)
         num_classes = max(self.class_names.keys()) + 1 if self.class_names else 0
-        results: Dict[int, Dict] = {}
+        results: dict[int, dict] = {}
 
         # Pre-compute sv objects and per-class IoU matrices (threshold-independent)
-        _cached: List[Tuple[sv.Detections, sv.Detections, Dict[int, Tuple]]] = []
-        for pred, gt in zip(predictions, ground_truths):
+        _cached: list[tuple[sv.Detections, sv.Detections, dict[int, tuple]]] = []
+        for pred, gt in zip(predictions, ground_truths, strict=True):
             pred_sv = _preds_to_sv(pred)
             gt_sv = _gt_to_sv(gt)
-            per_cls_iou: Dict[int, Tuple] = {}
+            per_cls_iou: dict[int, tuple] = {}
             for cls_id in range(num_classes):
                 pred_mask = (
-                    (pred_sv.class_id == cls_id)
+                    pred_sv.class_id == cls_id
                 ) if len(pred_sv) > 0 else np.array([], dtype=bool)
                 gt_mask = gt_sv.class_id == cls_id if len(gt_sv) > 0 else np.array([], dtype=bool)
                 n_pred = int(pred_mask.sum()) if pred_mask.size > 0 else 0

@@ -21,7 +21,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 import torch
@@ -31,9 +31,9 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+import os as _os
 from types import SimpleNamespace
 
-import os as _os
 from transformers import (
     EarlyStoppingCallback,
     Trainer,
@@ -217,8 +217,8 @@ class _DetectionTrainer(Trainer):
 
         torch.save(self.args, _os.path.join(output_dir, "training_args.bin"))
 
-from core.p06_models import build_model
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
+from core.p06_models import build_model
 from utils.config import generate_run_dir, load_config, merge_configs
 
 logger = logging.getLogger(__name__)
@@ -304,7 +304,7 @@ def _build_detection_compute_metrics(image_processor, input_size, id2label=None)
         evaluator = MeanAveragePrecision(box_format="xyxy", class_metrics=True)
         predictions, label_ids = eval_pred.predictions, eval_pred.label_ids
 
-        for batch_pred, batch_labels in zip(predictions, label_ids):
+        for batch_pred, batch_labels in zip(predictions, label_ids, strict=True):
             # HF wraps `ModelOutput(loss, logits, pred_boxes, ...)` into a tuple
             # per-batch when `eval_do_concat_batches=False`. Index 0 is loss,
             # index 1 = logits (B, Q, C), index 2 = pred_boxes (B, Q, 4) in
@@ -340,7 +340,7 @@ def _build_detection_compute_metrics(image_processor, input_size, id2label=None)
         raw = evaluator.compute()
         classes = raw.get("classes")  # LongTensor of present class ids
 
-        out: Dict[str, float] = {}
+        out: dict[str, float] = {}
         for metric_name, value in raw.items():
             if metric_name == "classes":
                 continue
@@ -354,7 +354,7 @@ def _build_detection_compute_metrics(image_processor, input_size, id2label=None)
                     # The `classes` tensor says which class id each entry
                     # corresponds to (only classes seen in eval show up).
                     ids = classes.tolist() if classes is not None else list(range(value.numel()))
-                    for cid, v in zip(ids, value.tolist()):
+                    for cid, v in zip(ids, value.tolist(), strict=True):
                         class_name = (id2label.get(int(cid), str(int(cid)))
                                        if id2label else str(int(cid)))
                         out[f"{metric_name}_{class_name}"] = float(v)
@@ -372,9 +372,9 @@ def _build_detection_compute_metrics(image_processor, input_size, id2label=None)
 
 def train_with_hf(
     config_path: str,
-    overrides: Optional[dict] = None,
-    resume_from: Optional[str] = None,
-) -> Dict[str, Any]:
+    overrides: dict | None = None,
+    resume_from: str | None = None,
+) -> dict[str, Any]:
     """Train a model using HF Trainer with our YAML config.
 
     Args:
@@ -822,7 +822,7 @@ def _build_compute_metrics(output_format: str, config: dict):
             preds = np.argmax(logits, axis=1)  # (N, H, W)
             intersection = np.zeros(num_classes)
             union = np.zeros(num_classes)
-            for pred, gt in zip(preds, masks):
+            for pred, gt in zip(preds, masks, strict=True):
                 for c in range(num_classes):
                     p = pred == c
                     g = gt == c
@@ -849,9 +849,9 @@ def _build_callbacks(
     config: dict,
     output_format: str = "yolox",
     model=None,
-    data_config: Optional[dict] = None,
-    base_dir: Optional[str] = None,
-    save_dir: Optional[str] = None,
+    data_config: dict | None = None,
+    base_dir: str | None = None,
+    save_dir: str | None = None,
 ) -> list:
     """Build HF Trainer callbacks from our config.
 
@@ -954,7 +954,7 @@ def _save_configs(
     output_dir: str,
     config_path: Path,
     data_config: dict,
-    dataset_config_path: Optional[str],
+    dataset_config_path: str | None,
     resolved_config: dict,
 ) -> None:
     """Save our YAML configs to the HF output directory for lineage.

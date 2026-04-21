@@ -23,9 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # projec
 import torch
 
 from core.p05_data.detection_dataset import build_dataloader
+from core.p06_models import build_model
 from core.p09_export.exporter import ModelExporter
 from core.p09_export.quantize import ModelQuantizer
-from core.p06_models import build_model
 from utils.config import load_config
 from utils.device import get_device
 
@@ -182,7 +182,7 @@ def _load_model_from_checkpoint(
         state_dict = checkpoint
 
     # Handle DataParallel/DistributedDataParallel prefixes
-    if isinstance(state_dict, dict) and any(k.startswith("module.") for k in state_dict.keys()):
+    if isinstance(state_dict, dict) and any(k.startswith("module.") for k in state_dict):
         state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
 
     # Build model from checkpoint config or training config

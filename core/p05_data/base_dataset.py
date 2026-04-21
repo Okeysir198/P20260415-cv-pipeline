@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 
 import cv2
 import numpy as np
@@ -27,7 +27,7 @@ class BaseDataset(Dataset, ABC):
         self,
         data_dir: Path,
         split: str = "train",
-        input_size: Tuple[int, int] = (640, 640),
+        input_size: tuple[int, int] = (640, 640),
         transform=None,
     ):
         self.split = split
@@ -71,7 +71,7 @@ class BaseDataset(Dataset, ABC):
 
     @abstractmethod
     def format_target(
-        self, raw_target: Any, image_size: Tuple[int, int]
+        self, raw_target: Any, image_size: tuple[int, int]
     ) -> Any:
         """Convert raw label data to model-ready target format.
 

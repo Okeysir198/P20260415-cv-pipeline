@@ -19,7 +19,6 @@ Typical usage::
 """
 
 import logging
-from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -191,7 +190,7 @@ class MobileFaceNetModel(FaceEmbedder):
         self,
         image: np.ndarray,
         face_box: np.ndarray,
-        landmarks: Optional[np.ndarray] = None,
+        landmarks: np.ndarray | None = None,
     ) -> np.ndarray:
         """Extract a face embedding from a detected face region.
 
@@ -230,7 +229,7 @@ class MobileFaceNetModel(FaceEmbedder):
         self,
         image: np.ndarray,
         face_boxes: np.ndarray,
-        landmarks_list: Optional[List[Optional[np.ndarray]]] = None,
+        landmarks_list: list[np.ndarray | None] | None = None,
     ) -> np.ndarray:
         """Extract embeddings for multiple faces in a single ONNX call.
 
@@ -283,7 +282,7 @@ class MobileFaceNetModel(FaceEmbedder):
         return 512
 
     @property
-    def input_size(self) -> Tuple[int, int]:
+    def input_size(self) -> tuple[int, int]:
         """Expected aligned face input size ``(H, W)``."""
         return (self._input_h, self._input_w)
 

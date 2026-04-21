@@ -19,14 +19,14 @@ from typing import TYPE_CHECKING
 from .config import load_config, merge_configs, validate_config
 
 if TYPE_CHECKING:
-    from .device import get_device, set_seed, get_gpu_info  # noqa: F401
+    from .device import get_device, get_gpu_info, set_seed  # noqa: F401
     from .metrics import (  # noqa: F401
         compute_iou,
-        xywh_to_xyxy,
         cxcywh_to_xyxy,
-        xyxy_to_xywh,
         nms_numpy,
         nms_torch,
+        xywh_to_xyxy,
+        xyxy_to_xywh,
     )
     from .progress import ProgressBar, TrainingProgress  # noqa: F401
 

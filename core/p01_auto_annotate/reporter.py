@@ -7,14 +7,12 @@ and preview visualizations from auto-annotation results.
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List
-
-import numpy as np
 
 import cv2
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 
@@ -44,7 +42,7 @@ class AutoAnnotateReporter:
         self.preview_count: int = int(config.get("preview_count", 20))
         self.save_previews: bool = bool(config.get("save_previews", True))
 
-    def generate_report(self, image_results: List[Dict], summary: Dict) -> str:
+    def generate_report(self, image_results: list[dict], summary: dict) -> str:
         """Generate all report artefacts.
 
         Creates:
@@ -70,13 +68,13 @@ class AutoAnnotateReporter:
         logger.info("Auto-annotation report complete: %s", self.report_dir)
         return str(self.report_dir)
 
-    def _save_report_json(self, image_results: List[Dict], summary: Dict) -> None:
+    def _save_report_json(self, image_results: list[dict], summary: dict) -> None:
         """Save full results as JSON."""
         path = self.report_dir / "report.json"
         payload = {
             "metadata": {
                 "dataset": self.dataset_name,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
                 "total_images": len(image_results),
             },
             "summary": make_serialisable(summary),
@@ -85,10 +83,10 @@ class AutoAnnotateReporter:
         path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         logger.info("Saved report.json (%d images)", len(image_results))
 
-    def _save_summary_txt(self, summary: Dict) -> None:
+    def _save_summary_txt(self, summary: dict) -> None:
         """Save a human-readable text summary."""
         sep = "=" * 70
-        lines: List[str] = [
+        lines: list[str] = [
             sep,
             f"  Auto-Annotation Report: {self.dataset_name}",
             sep,
@@ -133,7 +131,7 @@ class AutoAnnotateReporter:
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         logger.info("Saved summary.txt")
 
-    def _visualize_previews(self, image_results: List[Dict], count: int) -> None:
+    def _visualize_previews(self, image_results: list[dict], count: int) -> None:
         """Save visualizations of annotated images.
 
         Draws generated bboxes on sample images for visual review.

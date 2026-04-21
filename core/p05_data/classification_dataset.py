@@ -6,7 +6,7 @@ Supports folder-based (ImageFolder) and label-file-based (YOLO-style) layouts.
 import logging
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
 import cv2
 import numpy as np
@@ -18,9 +18,8 @@ from torch.utils.data import DataLoader, Dataset
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, IMG_EXTENSIONS
 from utils.config import resolve_path
-
-from core.p05_data.base_dataset import IMG_EXTENSIONS, IMAGENET_MEAN, IMAGENET_STD
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +45,8 @@ class ClassificationDataset(Dataset):
         self,
         data_config: dict,
         split: str = "train",
-        transforms: Optional[Any] = None,
-        base_dir: Optional[Union[str, Path]] = None,
+        transforms: Any | None = None,
+        base_dir: str | Path | None = None,
     ) -> None:
         if split not in ("train", "val", "test"):
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
@@ -97,9 +96,9 @@ class ClassificationDataset(Dataset):
             return "folder"
         return "yolo"
 
-    def _load_folder_samples(self) -> List[Tuple[Path, int]]:
+    def _load_folder_samples(self) -> list[tuple[Path, int]]:
         """Load samples from folder-based layout (class_name/image.jpg)."""
-        samples: List[Tuple[Path, int]] = []
+        samples: list[tuple[Path, int]] = []
         name_to_idx: dict[str, int] = {}
         if isinstance(self.class_names, dict):
             # {0: "fire", 1: "smoke"} -> {"fire": 0, "smoke": 1}
@@ -131,7 +130,7 @@ class ClassificationDataset(Dataset):
 
         return samples
 
-    def _load_label_file_samples(self) -> List[Tuple[Path, int]]:
+    def _load_label_file_samples(self) -> list[tuple[Path, int]]:
         """Load samples from label-file layout (images/ + labels/)."""
         images_subdir = self.split_dir / "images"
         img_dir = images_subdir if images_subdir.exists() else self.split_dir
@@ -139,7 +138,7 @@ class ClassificationDataset(Dataset):
         labels_subdir = self.split_dir / "labels"
         label_dir = labels_subdir if labels_subdir.exists() else self.split_dir.parent / "labels"
 
-        samples: List[Tuple[Path, int]] = []
+        samples: list[tuple[Path, int]] = []
         for img_path in sorted(img_dir.iterdir()):
             if img_path.suffix.lower() not in IMG_EXTENSIONS:
                 continue
@@ -159,7 +158,7 @@ class ClassificationDataset(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, str]:
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, str]:
         """Get a sample: (image_tensor, class_label, image_path).
 
         Returns:
@@ -211,9 +210,9 @@ class _ClassificationTransform:
 
 def build_classification_transforms(
     is_train: bool,
-    input_size: Tuple[int, int] = (224, 224),
-    mean: Optional[list] = None,
-    std: Optional[list] = None,
+    input_size: tuple[int, int] = (224, 224),
+    mean: list | None = None,
+    std: list | None = None,
 ) -> _ClassificationTransform:
     """Build standard classification transforms.
 
@@ -263,7 +262,7 @@ def build_classification_transforms(
 
 
 def classification_collate_fn(
-    batch: List[Tuple[torch.Tensor, torch.Tensor, str]],
+    batch: list[tuple[torch.Tensor, torch.Tensor, str]],
 ) -> dict:
     """Collate for classification: stack images and labels.
 
@@ -271,7 +270,7 @@ def classification_collate_fn(
         Dict with ``"images"`` (B, C, H, W), ``"targets"`` list of scalar
         tensors, ``"paths"`` list of strings.
     """
-    images, labels, paths = zip(*batch)
+    images, labels, paths = zip(*batch, strict=True)
     images = torch.stack(images, dim=0)
     targets = list(labels)
     return {"images": images, "targets": targets, "paths": list(paths)}
@@ -286,7 +285,7 @@ def build_classification_dataloader(
     data_config: dict,
     split: str,
     training_config: dict,
-    base_dir: Optional[Union[str, Path]] = None,
+    base_dir: str | Path | None = None,
 ) -> DataLoader:
     """Build a classification DataLoader.
 

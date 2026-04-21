@@ -6,10 +6,13 @@ builds annotator instances from config, and provides a single-call annotate func
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import supervision as sv
+
+if TYPE_CHECKING:
+    from trackers import ByteTrackTracker
 
 # `trackers` is only used by create_tracker/update_tracker (video inference).
 # Imported lazily so training workflows that only need annotate_gt_pred
@@ -24,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # ---------------------------------------------------------------------------
 
 
-def to_sv_detections(predictions: Dict[str, Any]) -> sv.Detections:
+def to_sv_detections(predictions: dict[str, Any]) -> sv.Detections:
     """Convert predictor output to sv.Detections.
 
     Args:
@@ -47,8 +50,8 @@ def to_sv_detections(predictions: Dict[str, Any]) -> sv.Detections:
 
 def from_sv_detections(
     detections: sv.Detections,
-    class_names: Dict[int, str],
-) -> Dict[str, Any]:
+    class_names: dict[int, str],
+) -> dict[str, Any]:
     """Convert sv.Detections back to predictor output format.
 
     Args:
@@ -85,7 +88,7 @@ def from_sv_detections(
 # ---------------------------------------------------------------------------
 
 
-def build_annotators(config: Optional[Dict] = None) -> Dict[str, Any]:
+def build_annotators(config: dict | None = None) -> dict[str, Any]:
     """Create supervision annotator instances from config.
 
     Args:
@@ -129,8 +132,8 @@ def build_annotators(config: Optional[Dict] = None) -> Dict[str, Any]:
 
 def build_labels(
     detections: sv.Detections,
-    class_names: Dict[int, str],
-) -> List[str]:
+    class_names: dict[int, str],
+) -> list[str]:
     """Build label strings for each detection.
 
     Format: ``"class_name 0.85"`` or ``"class_name #5 0.85"`` if tracker_id present.
@@ -166,8 +169,8 @@ def build_labels(
 def annotate_frame(
     frame: np.ndarray,
     detections: sv.Detections,
-    class_names: Dict[int, str],
-    annotators: Dict[str, Any],
+    class_names: dict[int, str],
+    annotators: dict[str, Any],
     draw_traces: bool = False,
     draw_heatmap: bool = False,
 ) -> np.ndarray:
@@ -209,10 +212,10 @@ _DEFAULT_PRED_COLOR = sv.Color(r=0, g=200, b=0)      # green
 
 def annotate_gt_pred(
     image: np.ndarray,
-    gt_xyxy: Optional[np.ndarray],
-    gt_class_ids: Optional[np.ndarray],
+    gt_xyxy: np.ndarray | None,
+    gt_class_ids: np.ndarray | None,
     pred_dets: sv.Detections,
-    class_names: Dict[int, str],
+    class_names: dict[int, str],
     gt_color: sv.Color = _DEFAULT_GT_COLOR,
     pred_color: sv.Color = _DEFAULT_PRED_COLOR,
     gt_thickness: int = 2,
@@ -306,7 +309,7 @@ def draw_gt_pred_legend(image: np.ndarray, gt_bgr: tuple, pred_bgr: tuple) -> np
 # ---------------------------------------------------------------------------
 
 
-def create_tracker(config: Optional[Dict] = None) -> "ByteTrackTracker":
+def create_tracker(config: dict | None = None) -> "ByteTrackTracker":
     """Create a ByteTrackTracker from config.
 
     Args:

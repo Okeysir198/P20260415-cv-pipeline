@@ -7,15 +7,15 @@ each person crop using any PoseModel from the registry.
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from core.p10_inference.predictor import DetectionPredictor
 from core.p06_models.pose_base import PoseModel
+from core.p10_inference.predictor import DetectionPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +35,14 @@ class PosePredictor:
         detector: DetectionPredictor,
         pose_model: PoseModel,
         person_conf_threshold: float = 0.5,
-        person_class_ids: Optional[List[int]] = None,
+        person_class_ids: list[int] | None = None,
     ) -> None:
         self.detector = detector
         self.pose_model = pose_model
         self.person_conf_threshold = person_conf_threshold
         self.person_class_ids = person_class_ids if person_class_ids is not None else [0]
 
-    def predict(self, image: np.ndarray) -> Dict[str, Any]:
+    def predict(self, image: np.ndarray) -> dict[str, Any]:
         """Run detection + pose estimation on a single BGR image.
 
         Returns:
@@ -89,7 +89,7 @@ class PosePredictor:
             "skeleton": self.pose_model.skeleton,
         }
 
-    def predict_coco(self, image: np.ndarray) -> Dict[str, Any]:
+    def predict_coco(self, image: np.ndarray) -> dict[str, Any]:
         """Same as predict() but keypoints are always COCO 17-format.
 
         Calls ``pose_model.to_coco()`` internally for non-COCO models.
@@ -109,7 +109,7 @@ class PosePredictor:
 
         return results
 
-    def predict_file(self, image_path: Union[str, Path]) -> Dict[str, Any]:
+    def predict_file(self, image_path: str | Path) -> dict[str, Any]:
         """Load an image from disk and run pose estimation."""
         image_path = Path(image_path)
         if not image_path.exists():
@@ -122,8 +122,8 @@ class PosePredictor:
     def visualize(
         self,
         image: np.ndarray,
-        predictions: Dict[str, Any],
-        save_path: Optional[Union[str, Path]] = None,
+        predictions: dict[str, Any],
+        save_path: str | Path | None = None,
         keypoint_threshold: float = 0.3,
     ) -> np.ndarray:
         """Draw skeletons, keypoints, and person boxes on image.
@@ -179,7 +179,7 @@ class PosePredictor:
 
         return vis
 
-    def _empty_results(self) -> Dict[str, Any]:
+    def _empty_results(self) -> dict[str, Any]:
         """Return empty pose results dict."""
         return {
             "boxes": np.empty((0, 4), dtype=np.float32),

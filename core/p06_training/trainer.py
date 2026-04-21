@@ -14,19 +14,19 @@ import logging
 import math
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.config import load_config, merge_configs, validate_config
-from utils.device import get_device, set_seed
-from utils.progress import TrainingProgress
-
+from core.p05_data.detection_dataset import build_dataloader as _build_detection_dataloader
+from core.p05_data.transforms import build_gpu_transforms
+from core.p06_models import build_model
 from core.p06_training.callbacks import (
     AugLabelGridLogger,
     CallbackRunner,
@@ -38,12 +38,12 @@ from core.p06_training.callbacks import (
     WandBLogger,
 )
 from core.p06_training.losses import build_loss
-from core.p06_training.metrics_registry import compute_metrics
 from core.p06_training.lr_scheduler import build_scheduler
+from core.p06_training.metrics_registry import compute_metrics
 from core.p06_training.postprocess import postprocess as _postprocess_registry
-from core.p06_models import build_model
-from core.p05_data.detection_dataset import build_dataloader as _build_detection_dataloader
-from core.p05_data.transforms import build_gpu_transforms
+from utils.config import load_config, merge_configs, validate_config
+from utils.device import get_device, set_seed
+from utils.progress import TrainingProgress
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ class DetectionTrainer:
         overrides: Optional dictionary of config overrides (key=value).
     """
 
-    def __init__(self, config_path: str, overrides: Optional[dict] = None) -> None:
+    def __init__(self, config_path: str, overrides: dict | None = None) -> None:
         self.config_path = Path(config_path)
         self.config = load_config(config_path)
 
@@ -151,16 +151,16 @@ class DetectionTrainer:
         logger.info("Using device: %s", self.device)
 
         # Placeholders (built in train())
-        self.model: Optional[nn.Module] = None
-        self.optimizer: Optional[optim.Optimizer] = None
-        self.scheduler: Optional[Any] = None
-        self.scaler: Optional[torch.amp.GradScaler] = None
-        self.train_loader: Optional[DataLoader] = None
-        self.val_loader: Optional[DataLoader] = None
-        self.gpu_transform: Optional[Any] = None
-        self.loss_fn: Optional[nn.Module] = None
-        self.callback_runner: Optional[CallbackRunner] = None
-        self.ema: Optional[ModelEMA] = None
+        self.model: nn.Module | None = None
+        self.optimizer: optim.Optimizer | None = None
+        self.scheduler: Any | None = None
+        self.scaler: torch.amp.GradScaler | None = None
+        self.train_loader: DataLoader | None = None
+        self.val_loader: DataLoader | None = None
+        self.gpu_transform: Any | None = None
+        self.loss_fn: nn.Module | None = None
+        self.callback_runner: CallbackRunner | None = None
+        self.ema: ModelEMA | None = None
         self._start_epoch: int = 0
 
     @property
@@ -351,7 +351,7 @@ class DetectionTrainer:
 
         return data_config, base_dir, build_fn
 
-    def _build_dataloaders(self) -> Tuple[DataLoader, Optional[DataLoader]]:
+    def _build_dataloaders(self) -> tuple[DataLoader, DataLoader | None]:
         """Build training and validation data loaders from config.
 
         When ``training.val_full_interval > 0``, the quick val loader uses
@@ -382,7 +382,7 @@ class DetectionTrainer:
         self._loaded_data_cfg = data_config
         return train_loader, val_loader
 
-    def _build_full_val_loader(self) -> Optional[Any]:
+    def _build_full_val_loader(self) -> Any | None:
         """Build val loader on the full val set (no subset) for periodic full evaluation."""
         import copy
         data_config, base_dir, build_fn = self._get_data_components()
@@ -561,7 +561,7 @@ class DetectionTrainer:
     # Training loop
     # ------------------------------------------------------------------
 
-    def train(self) -> Dict[str, Any]:
+    def train(self) -> dict[str, Any]:
         """Execute the full training loop.
 
         Builds all components, runs epochs, handles callbacks, and
@@ -640,8 +640,8 @@ class DetectionTrainer:
 
         self.callback_runner.on_train_start(self)
 
-        best_metrics: Dict[str, float] = {}
-        final_metrics: Dict[str, float] = {}
+        best_metrics: dict[str, float] = {}
+        final_metrics: dict[str, float] = {}
         epoch = self._start_epoch - 1  # in case total_epochs == 0
 
         # Build full val loader once if val_full_interval is configured
@@ -742,7 +742,7 @@ class DetectionTrainer:
         progress: TrainingProgress,
         grad_clip: float,
         use_amp: bool,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Run one training epoch.
 
         Args:
@@ -877,7 +877,7 @@ class DetectionTrainer:
         return epoch_metrics
 
     @torch.no_grad()
-    def _validate(self, loader: Optional[Any] = None) -> Dict[str, float]:
+    def _validate(self, loader: Any | None = None) -> dict[str, float]:
         """Run validation and compute task-appropriate metrics.
 
         Dispatches metrics computation based on the model's ``output_format``:
@@ -986,7 +986,7 @@ class DetectionTrainer:
         if num_batches == 0:
             return {}
 
-        metrics: Dict[str, float] = {"val/loss": running_loss / num_batches}
+        metrics: dict[str, float] = {"val/loss": running_loss / num_batches}
         # Add detection-specific loss components if non-zero
         if running_cls > 0:
             metrics["val/cls_loss"] = running_cls / num_batches
@@ -1076,7 +1076,7 @@ class DetectionTrainer:
             target_sizes=target_sizes,
         )
 
-    def _full_evaluate(self) -> Dict[str, float]:
+    def _full_evaluate(self) -> dict[str, float]:
         """Run full evaluation using ModelEvaluator (optional periodic eval).
 
         Provides confusion matrix, per-class AP, and failure case analysis
@@ -1086,7 +1086,9 @@ class DetectionTrainer:
         Returns:
             Dictionary of metrics with ``val/full_`` prefix.
         """
-        from core.p08_evaluation.evaluator import ModelEvaluator  # lazy import to avoid circular dependency
+        from core.p08_evaluation.evaluator import (
+            ModelEvaluator,  # lazy import to avoid circular dependency
+        )
 
         base_model = self._base_model
         try:
@@ -1108,7 +1110,7 @@ class DetectionTrainer:
     # Checkpoint management
     # ------------------------------------------------------------------
 
-    def save_checkpoint(self, path: str, epoch: int, metrics: Dict[str, float]) -> None:
+    def save_checkpoint(self, path: str, epoch: int, metrics: dict[str, float]) -> None:
         """Save a training checkpoint manually.
 
         Args:

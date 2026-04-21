@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from utils.device import auto_select_gpu  # noqa: E402
+
 auto_select_gpu()
 
 from utils.config import parse_overrides  # noqa: E402
@@ -138,7 +139,6 @@ def main() -> None:
     # Import HPO modules (after optuna check)
     from core.p07_hpo.optimizer import HPOOptimizer
     from core.p07_hpo.results import ResultsManager
-    from utils.config import load_config
 
     # Handle trial-epochs override
     if args.trial_epochs is not None:
@@ -176,9 +176,7 @@ def main() -> None:
 
     # Save results
     # Determine save dir — auto-generate timestamped path
-    from utils.config import generate_run_dir
-
-    from utils.config import feature_name_from_config_path
+    from utils.config import feature_name_from_config_path, generate_run_dir
     save_dir = str(generate_run_dir(
         feature_name_from_config_path(args.config), "08_hyperparameter_tuning"
     ))

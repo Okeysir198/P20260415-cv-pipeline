@@ -132,7 +132,7 @@ def infer_yolox(model, image_bgr: np.ndarray, device: torch.device, conf: float)
 # ---------------------------------------------------------------------------
 
 def _load_hf(model_id: str, device: torch.device):
-    from transformers import AutoModelForObjectDetection, AutoImageProcessor
+    from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
     logger.info("Loading HF model: %s", model_id)
     processor = AutoImageProcessor.from_pretrained(model_id)
@@ -167,7 +167,7 @@ def infer_hf(model, processor, image_bgr: np.ndarray, device: torch.device, conf
 
 def _draw_panel(image_bgr: np.ndarray, result: dict, class_names: list[str], title: str) -> np.ndarray:
     img = image_bgr.copy()
-    for box, score, label in zip(result["boxes"], result["scores"], result["labels"]):
+    for box, score, label in zip(result["boxes"], result["scores"], result["labels"], strict=True):
         x1, y1, x2, y2 = map(int, box)
         color = _PALETTE[int(label) % len(_PALETTE)]
         name = class_names[int(label)] if int(label) < len(class_names) else str(label)

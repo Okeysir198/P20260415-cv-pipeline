@@ -14,7 +14,7 @@ Usage (as library):
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
@@ -49,8 +49,8 @@ class QualityScorer:
                 review: 0.60
         """
         scoring = config["scoring"]
-        self.weights: Dict[str, float] = dict(scoring["weights"])
-        self.thresholds: Dict[str, float] = dict(scoring["thresholds"])
+        self.weights: dict[str, float] = dict(scoring["weights"])
+        self.thresholds: dict[str, float] = dict(scoring["thresholds"])
 
     # ------------------------------------------------------------------
     # Public API
@@ -104,7 +104,7 @@ class QualityScorer:
         image_result["suggested_fixes"] = fixes
         return image_result
 
-    def generate_fixes(self, image_result: dict) -> List[Dict[str, Any]]:
+    def generate_fixes(self, image_result: dict) -> list[dict[str, Any]]:
         """Generate auto-fixable suggestions for an image.
 
         Fix types:
@@ -126,7 +126,7 @@ class QualityScorer:
                 - ``suggested`` (tuple or None)
                 - ``reason`` (str)
         """
-        fixes: List[Dict[str, Any]] = []
+        fixes: list[dict[str, Any]] = []
         annotations = image_result.get("annotations", [])
         issues = image_result.get("validation_issues", [])
         sam3 = image_result.get("sam3_verification", {})
@@ -259,7 +259,7 @@ class QualityScorer:
     @staticmethod
     def _get_annotation(
         annotations: list, idx: int
-    ) -> Optional[Tuple[int, float, float, float, float]]:
+    ) -> tuple[int, float, float, float, float] | None:
         """Safely retrieve an annotation by index.
 
         Args:
@@ -275,8 +275,8 @@ class QualityScorer:
 
     @staticmethod
     def _clip_annotation(
-        ann: Tuple[int, float, float, float, float],
-    ) -> Tuple[int, float, float, float, float]:
+        ann: tuple[int, float, float, float, float],
+    ) -> tuple[int, float, float, float, float]:
         """Clip annotation coordinates to the [0, 1] range.
 
         Adjusts center and size so that the resulting box lies entirely

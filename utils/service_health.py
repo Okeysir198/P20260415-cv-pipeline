@@ -2,10 +2,9 @@
 
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 
 _START_COMMANDS: dict[str, str] = {
     "SAM3 :18100": "cd services/s18100_sam3_service && docker compose up -d",

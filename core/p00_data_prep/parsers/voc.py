@@ -6,12 +6,11 @@ Parses Pascal VOC XML annotation files.
 
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List
 
 from core.p00_data_prep.utils.file_ops import resolve_data_root
 
 
-def parse_voc(source_config: Dict, base_dir: Path) -> List[Dict]:
+def parse_voc(source_config: dict, base_dir: Path) -> list[dict]:
     """
     Parse Pascal VOC format dataset.
 
@@ -86,7 +85,7 @@ def parse_voc(source_config: Dict, base_dir: Path) -> List[Dict]:
     return samples
 
 
-def _parse_voc_xml(xml_path: Path, img_path: Path = None) -> List[Dict]:
+def _parse_voc_xml(xml_path: Path, img_path: Path = None) -> list[dict]:
     """
     Parse Pascal VOC XML annotation file.
 
@@ -141,7 +140,7 @@ def _parse_voc_xml(xml_path: Path, img_path: Path = None) -> List[Dict]:
     return objects
 
 
-def voc_to_yolo_bbox(voc_bbox: List[float], img_w: int, img_h: int) -> List[float]:
+def voc_to_yolo_bbox(voc_bbox: list[float], img_w: int, img_h: int) -> list[float]:
     """
     Convert VOC bbox [xmin, ymin, xmax, ymax] to YOLO [cx, cy, w, h] (normalized).
     """

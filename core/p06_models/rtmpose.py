@@ -19,7 +19,6 @@ Typical usage::
 """
 
 import logging
-from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
@@ -32,7 +31,7 @@ from core.p06_models.pose_registry import _POSE_VARIANT_MAP, register_pose_model
 logger = logging.getLogger(__name__)
 
 # Default ONNX paths per variant
-_DEFAULT_ONNX_PATHS: Dict[str, str] = {
+_DEFAULT_ONNX_PATHS: dict[str, str] = {
     "rtmpose-s": "pretrained/rtmpose_s_256x192.onnx",
     "rtmpose-t": "pretrained/rtmpose_t_256x192.onnx",
 }
@@ -46,7 +45,7 @@ _BBOX_PADDING = 1.25
 
 
 def _get_warp_matrix(
-    center: np.ndarray, scale: np.ndarray, output_size: Tuple[int, int]
+    center: np.ndarray, scale: np.ndarray, output_size: tuple[int, int]
 ) -> np.ndarray:
     """Get affine transform matrix for top-down pose estimation.
 
@@ -79,7 +78,7 @@ def _get_warp_matrix(
 
 def _decode_simcc(
     simcc_x: np.ndarray, simcc_y: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Decode SimCC coordinate representations.
 
     The model outputs logits over discretized x and y bins at 2x the input
@@ -162,7 +161,7 @@ class RTMPoseModel(PoseModel):
 
     def _preprocess(
         self, image: np.ndarray, bbox: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Crop, resize, and normalize a single person region.
 
         Args:
@@ -206,7 +205,7 @@ class RTMPoseModel(PoseModel):
 
     def predict_keypoints(
         self, image: np.ndarray, bbox: np.ndarray
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Estimate keypoints for a single person.
 
         Args:
@@ -247,7 +246,7 @@ class RTMPoseModel(PoseModel):
 
     def predict_keypoints_batch(
         self, image: np.ndarray, bboxes: np.ndarray
-    ) -> List[Dict[str, np.ndarray]]:
+    ) -> list[dict[str, np.ndarray]]:
         """Estimate keypoints for multiple persons in a single ONNX call.
 
         Stacks all person crops into one batch tensor for efficient GPU/CPU
@@ -309,7 +308,7 @@ class RTMPoseModel(PoseModel):
         return results
 
     @property
-    def keypoint_names(self) -> List[str]:
+    def keypoint_names(self) -> list[str]:
         """Ordered list of COCO 17 keypoint names."""
         return COCO_KEYPOINT_NAMES
 
@@ -319,12 +318,12 @@ class RTMPoseModel(PoseModel):
         return 17
 
     @property
-    def skeleton(self) -> List[Tuple[int, int]]:
+    def skeleton(self) -> list[tuple[int, int]]:
         """COCO skeleton bone connectivity."""
         return COCO_SKELETON
 
     @property
-    def input_size(self) -> Tuple[int, int]:
+    def input_size(self) -> tuple[int, int]:
         """Expected crop input size ``(H, W)``."""
         return (self._input_h, self._input_w)
 

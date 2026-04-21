@@ -16,17 +16,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 def actual_image_dims(
-    image_path: Optional[Path],
+    image_path: Path | None,
     fallback_w: int = 0,
     fallback_h: int = 0,
     warn_on_mismatch: bool = True,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """Return `(width, height)` from the image file on disk.
 
     Args:

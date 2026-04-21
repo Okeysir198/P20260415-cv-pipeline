@@ -5,12 +5,12 @@ Reads image files and corresponding YOLO-pose format label ``.txt`` files
 normalised 0-1, visibility: 0=not labeled, 1=occluded, 2=visible).
 """
 
+import logging
 import random
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
-
-import logging
+from typing import Any
 
 import cv2
 import numpy as np
@@ -21,7 +21,7 @@ from torchvision.transforms import v2
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from core.p05_data.base_dataset import BaseDataset, IMAGENET_MEAN, IMAGENET_STD  # noqa: F401
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, BaseDataset  # noqa: F401
 from utils.config import resolve_path
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class KeypointTransform:
 
     def __init__(
         self,
-        input_size: Tuple[int, int],
+        input_size: tuple[int, int],
         mean: Sequence[float],
         std: Sequence[float],
         is_train: bool = True,
@@ -67,7 +67,7 @@ class KeypointTransform:
         hsv_s: float = 0.7,
         hsv_v: float = 0.4,
         fliplr: float = 0.0,
-        flip_indices: Optional[List[int]] = None,
+        flip_indices: list[int] | None = None,
     ) -> None:
         self.target_h, self.target_w = input_size
         self.mean = np.array(mean, dtype=np.float32).reshape(1, 1, 3)
@@ -93,8 +93,8 @@ class KeypointTransform:
     def __call__(
         self,
         image: np.ndarray,
-        targets_dict: Dict[str, np.ndarray],
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        targets_dict: dict[str, np.ndarray],
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Apply transforms to image and keypoint targets.
 
         Args:
@@ -182,10 +182,10 @@ class KeypointTransform:
 
 def build_keypoint_transforms(
     is_train: bool,
-    input_size: Tuple[int, int],
+    input_size: tuple[int, int],
     mean: Sequence[float],
     std: Sequence[float],
-    aug_config: Optional[dict] = None,
+    aug_config: dict | None = None,
 ) -> KeypointTransform:
     """Build a keypoint transform pipeline.
 
@@ -257,8 +257,8 @@ class KeypointDataset(BaseDataset):
         self,
         data_config: dict,
         split: str = "train",
-        transforms: Optional[Any] = None,
-        base_dir: Optional[Union[str, Path]] = None,
+        transforms: Any | None = None,
+        base_dir: str | Path | None = None,
     ) -> None:
         if split not in ("train", "val", "test"):
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
@@ -280,7 +280,7 @@ class KeypointDataset(BaseDataset):
         self.label_dir = self.img_dir.parent / "labels"
 
         # Collect image paths
-        self.img_paths: List[Path] = sorted(
+        self.img_paths: list[Path] = sorted(
             p for p in self.img_dir.iterdir()
             if p.suffix.lower() in _IMG_EXTENSIONS
         )
@@ -306,7 +306,7 @@ class KeypointDataset(BaseDataset):
 
     def _load_label(
         self, img_path: Path
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Load a YOLO-pose label file corresponding to an image path.
 
         Returns:
@@ -393,7 +393,7 @@ class KeypointDataset(BaseDataset):
     # BaseDataset abstract method implementations
     # ------------------------------------------------------------------
 
-    def load_target(self, label_path: Path) -> Dict[str, np.ndarray]:
+    def load_target(self, label_path: Path) -> dict[str, np.ndarray]:
         """Load and validate a YOLO-pose format label file.
 
         Delegates to :meth:`_load_label` using the image path derived
@@ -415,9 +415,9 @@ class KeypointDataset(BaseDataset):
 
     def format_target(
         self,
-        raw_target: Dict[str, np.ndarray],
-        image_size: Tuple[int, int],  # noqa: ARG002
-    ) -> Dict[str, np.ndarray]:
+        raw_target: dict[str, np.ndarray],
+        image_size: tuple[int, int],  # noqa: ARG002
+    ) -> dict[str, np.ndarray]:
         """Return raw YOLO-pose targets as-is (already normalised 0-1).
 
         Args:
@@ -436,7 +436,7 @@ class KeypointDataset(BaseDataset):
     def __len__(self) -> int:
         return len(self.img_paths)
 
-    def get_raw_item(self, idx: int) -> Dict[str, Any]:
+    def get_raw_item(self, idx: int) -> dict[str, Any]:
         """Return raw image and targets without any transforms.
 
         Args:
@@ -464,7 +464,7 @@ class KeypointDataset(BaseDataset):
 
     def __getitem__(
         self, idx: int
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], str]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], str]:
         """Get a single sample.
 
         Args:
@@ -523,8 +523,8 @@ class KeypointDataset(BaseDataset):
 # ---------------------------------------------------------------------------
 
 def keypoint_collate_fn(
-    batch: List[Tuple[torch.Tensor, Dict[str, torch.Tensor], str]],
-) -> Dict[str, Any]:
+    batch: list[tuple[torch.Tensor, dict[str, torch.Tensor], str]],
+) -> dict[str, Any]:
     """Custom collate for variable-length keypoint targets.
 
     Args:
@@ -538,7 +538,7 @@ def keypoint_collate_fn(
           and ``"keypoints"`` (N_i, K, 3).
         - ``paths``: list of B image path strings.
     """
-    images, targets_list, paths = zip(*batch)
+    images, targets_list, paths = zip(*batch, strict=True)
     images = torch.stack(images, dim=0)
     return {
         "images": images,
@@ -555,7 +555,7 @@ def build_keypoint_dataloader(
     data_config: dict,
     split: str,
     training_config: dict,
-    base_dir: Optional[Union[str, Path]] = None,
+    base_dir: str | Path | None = None,
 ) -> DataLoader:
     """Build a DataLoader for keypoint/pose data from config dicts.
 

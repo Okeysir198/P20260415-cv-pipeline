@@ -7,13 +7,11 @@ Handles copying, renaming, and duplicate detection for data preparation.
 import hashlib
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional
-
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
 
-def resolve_data_root(source_config: Dict, base_dir: Path) -> Path:
+def resolve_data_root(source_config: dict, base_dir: Path) -> Path:
     """Resolve dataset root from source config, supporting absolute and relative paths."""
     path = source_config.get("resolved_path") or source_config["path"]
     if Path(path).is_absolute():
@@ -46,7 +44,7 @@ class FileOps:
                 f"got '{handle_duplicates}'"
             )
         self.handle_duplicates = handle_duplicates
-        self.copied_files: Dict[str, Path] = {}  # original_name -> output_path
+        self.copied_files: dict[str, Path] = {}  # original_name -> output_path
 
     def is_image_file(self, path: Path) -> bool:
         """
@@ -83,7 +81,7 @@ class FileOps:
         filename: str,
         source_name: str,
         output_dir: Path
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Generate unique filename to avoid conflicts.
 
@@ -127,9 +125,9 @@ class FileOps:
         self,
         src: Path,
         dst_dir: Path,
-        dst_name: Optional[str] = None,
+        dst_name: str | None = None,
         source_name: str = "source"
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """
         Copy a file to destination directory.
 
@@ -168,11 +166,11 @@ class FileOps:
 
     def copy_images(
         self,
-        image_files: List[Path],
+        image_files: list[Path],
         output_dir: Path,
         source_name: str = "source",
         progress_callback=None
-    ) -> Dict[str, Path]:
+    ) -> dict[str, Path]:
         """
         Copy multiple images to output directory.
 

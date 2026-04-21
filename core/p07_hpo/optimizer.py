@@ -8,14 +8,14 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.config import load_config, merge_configs
-from core.p06_training.trainer import DetectionTrainer
-from core.p07_hpo.search_space import SearchSpace
-from core.p07_hpo.pruning_callback import OptunaPruningCallback
-
 import optuna
-from optuna.samplers import TPESampler, RandomSampler, CmaEsSampler
-from optuna.pruners import MedianPruner, PercentilePruner, HyperbandPruner
+from optuna.pruners import HyperbandPruner, MedianPruner, PercentilePruner
+from optuna.samplers import CmaEsSampler, RandomSampler, TPESampler
+
+from core.p06_training.trainer import DetectionTrainer
+from core.p07_hpo.pruning_callback import OptunaPruningCallback
+from core.p07_hpo.search_space import SearchSpace
+from utils.config import load_config, merge_configs
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class HPOOptimizer:
         self,
         training_config_path: str,
         hpo_config_path: str = "configs/_shared/08_hyperparameter_tuning.yaml",
-        training_overrides: Optional[dict] = None,
+        training_overrides: dict | None = None,
     ) -> None:
         self.training_config_path = Path(training_config_path)
         self.base_config = load_config(training_config_path)
@@ -55,7 +55,7 @@ class HPOOptimizer:
         self._best_trial = None
         self._study = None
 
-    def _create_study(self, storage: Optional[str] = None) -> "optuna.Study":
+    def _create_study(self, storage: str | None = None) -> "optuna.Study":
         """Create an Optuna study with configured sampler and pruner.
 
         Args:
@@ -164,9 +164,7 @@ class HPOOptimizer:
             }
 
         # Trial-specific save dir
-        from utils.config import generate_run_dir
-
-        from utils.config import feature_name_from_config_path
+        from utils.config import feature_name_from_config_path, generate_run_dir
         trial_overrides["logging"]["save_dir"] = str(
             generate_run_dir(
                 feature_name_from_config_path(self.training_config_path),
@@ -264,9 +262,9 @@ class HPOOptimizer:
 
     def optimize(
         self,
-        n_trials: Optional[int] = None,
-        timeout: Optional[int] = None,
-        storage: Optional[str] = None,
+        n_trials: int | None = None,
+        timeout: int | None = None,
+        storage: str | None = None,
     ) -> "optuna.Study":
         """Run the full HPO optimization.
 
@@ -303,7 +301,7 @@ class HPOOptimizer:
         return self._study
 
     @property
-    def best_config(self) -> Optional[dict]:
+    def best_config(self) -> dict | None:
         """Reconstruct the full training config with best trial parameters.
 
         Returns:

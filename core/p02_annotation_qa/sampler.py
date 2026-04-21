@@ -15,7 +15,6 @@ import random
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Set
 
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
@@ -49,13 +48,13 @@ class StratifiedSampler:
         self.strategy: str = str(sampling.get("strategy", "stratified"))
         self.min_per_class: int = int(sampling.get("min_per_class", 10))
         self.seed: int = int(sampling.get("seed", 42))
-        self.splits: List[str] = list(sampling.get("splits", ["train", "val"]))
+        self.splits: list[str] = list(sampling.get("splits", ["train", "val"]))
 
         self.data_config = data_config
         self.config_dir = Path(config_dir)
 
         # Build class-id -> name mapping
-        self.class_names: Dict[int, str] = {
+        self.class_names: dict[int, str] = {
             int(k): v for k, v in data_config["names"].items()
         }
         self.num_classes: int = int(data_config["num_classes"])
@@ -64,7 +63,7 @@ class StratifiedSampler:
     # Public API
     # ------------------------------------------------------------------
 
-    def sample(self) -> Dict[str, List[Path]]:
+    def sample(self) -> dict[str, list[Path]]:
         """Sample image paths per split.
 
         Returns:
@@ -81,7 +80,7 @@ class StratifiedSampler:
                   remaining (unselected) images.
                f. Seed the RNG for reproducibility.
         """
-        results: Dict[str, List[Path]] = {}
+        results: dict[str, list[Path]] = {}
 
         for split in self.splits:
             images_dir = self._resolve_split_dir(split)
@@ -107,7 +106,7 @@ class StratifiedSampler:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _resolve_split_dir(self, split: str) -> Optional[Path]:
+    def _resolve_split_dir(self, split: str) -> Path | None:
         """Resolve the images directory for a split.
 
         Args:
@@ -123,8 +122,8 @@ class StratifiedSampler:
         return base_path / self.data_config[split]
 
     def _group_by_class(
-        self, image_paths: List[Path]
-    ) -> Dict[int, List[Path]]:
+        self, image_paths: list[Path]
+    ) -> dict[int, list[Path]]:
         """Group images by which classes appear in their labels.
 
         Args:
@@ -134,18 +133,18 @@ class StratifiedSampler:
             Mapping of class_id to list of image paths containing
             that class.
         """
-        class_to_images: Dict[int, List[Path]] = defaultdict(list)
+        class_to_images: dict[int, list[Path]] = defaultdict(list)
 
         for img_path in image_paths:
             label_path = image_to_label_path(img_path)
             annotations = parse_yolo_label(label_path)
-            classes_present: Set[int] = {ann[0] for ann in annotations}
+            classes_present: set[int] = {ann[0] for ann in annotations}
             for cls_id in classes_present:
                 class_to_images[cls_id].append(img_path)
 
         return class_to_images
 
-    def _stratified_sample(self, all_images: List[Path]) -> List[Path]:
+    def _stratified_sample(self, all_images: list[Path]) -> list[Path]:
         """Perform stratified sampling to build the subset.
 
         Ensures at least ``min_per_class`` images per class, then fills
@@ -161,7 +160,7 @@ class StratifiedSampler:
 
         class_to_images = self._group_by_class(all_images)
 
-        selected: Set[Path] = set()
+        selected: set[Path] = set()
 
         # Phase 1: guarantee min_per_class coverage
         for cls_id in range(self.num_classes):

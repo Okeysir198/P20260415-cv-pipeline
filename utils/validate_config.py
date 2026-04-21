@@ -49,12 +49,11 @@ def _red(text: str) -> str:
 # --- Registry loader (lazy, cached) ---
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _load_registry() -> frozenset[str]:
     """Return all registered model arch names. Cached after first call."""
     try:
-        import core.p06_models  # triggers all @register_model decorators
-        from core.p06_models.registry import MODEL_REGISTRY, _VARIANT_MAP
+        from core.p06_models.registry import _VARIANT_MAP, MODEL_REGISTRY
 
         return frozenset(MODEL_REGISTRY.keys()) | frozenset(_VARIANT_MAP.keys())
     except Exception:

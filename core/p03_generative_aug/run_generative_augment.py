@@ -25,7 +25,6 @@ import argparse
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -33,7 +32,7 @@ from utils.config import generate_run_dir, load_config, merge_configs, parse_ove
 from utils.service_health import require_services
 
 
-def _resolve_class_id(class_name: str, class_names: Dict[int, str]) -> int:
+def _resolve_class_id(class_name: str, class_names: dict[int, str]) -> int:
     """Resolve a class name to its integer ID.
 
     Args:
@@ -147,7 +146,7 @@ def main() -> None:
     data_config = load_config(data_config_path)
     config_dir = str(data_config_path.parent)
     dataset_name = data_config.get("dataset_name", "unknown")
-    class_names: Dict[int, str] = {int(k): v for k, v in data_config["names"].items()}
+    class_names: dict[int, str] = {int(k): v for k, v in data_config["names"].items()}
 
     # Load augment config
     augment_config_path = args.config
@@ -167,7 +166,7 @@ def main() -> None:
     # Service health checks
     sam3_url = augment_config.get("sam3", {}).get("service_url", "http://localhost:18100")
     inpainting = augment_config.get("inpainting", {})
-    services_to_check: Dict[str, str] = {"SAM3 :18100": f"{sam3_url}/health"}
+    services_to_check: dict[str, str] = {"SAM3 :18100": f"{sam3_url}/health"}
     if inpainting.get("mode") == "service":
         flux_url = inpainting.get("service_url", "http://localhost:8002")
         services_to_check["Flux inpainting"] = f"{flux_url}/health"

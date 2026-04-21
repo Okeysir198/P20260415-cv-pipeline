@@ -9,14 +9,18 @@ New frameworks can register their own metrics without editing trainer.py:
         return {"val/mAP50": ...}
 """
 
-from typing import Callable, Dict, Any, List
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import torch
 
 from core.p08_evaluation.sv_metrics import compute_map
+from utils.registry import Registry
 
-METRICS_REGISTRY: Dict[str, Callable] = {}
+METRICS_REGISTRY: dict[str, Callable] = {}
+
+_metrics_registry = Registry(entity_name="metrics", registry=METRICS_REGISTRY)
 
 
 def register_metrics(output_format: str) -> Callable:
@@ -29,18 +33,15 @@ def register_metrics(output_format: str) -> Callable:
     Returns:
         Decorator that stores the function in :data:`METRICS_REGISTRY`.
     """
-    def decorator(fn: Callable) -> Callable:
-        METRICS_REGISTRY[output_format] = fn
-        return fn
-    return decorator
+    return _metrics_registry.register(output_format)
 
 
 def compute_metrics(
     output_format: str,
-    predictions: List,
-    targets: List,
+    predictions: list,
+    targets: list,
     **kwargs: Any,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Dispatch to the registered metrics function for this output_format.
 
     Args:
@@ -76,11 +77,11 @@ def compute_metrics(
 
 
 def _detection_metrics(
-    all_predictions: List[Dict],
-    all_ground_truths: List[Dict],
+    all_predictions: list[dict],
+    all_ground_truths: list[dict],
     num_classes: int = 2,
     **kwargs: Any,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Compute COCO-style mAP@0.5 for detection models.
 
     Args:
@@ -103,7 +104,7 @@ def _detection_metrics(
         iou_threshold=0.5,
         num_classes=num_classes,
     )
-    metrics: Dict[str, float] = {"val/mAP50": map_results["mAP"]}
+    metrics: dict[str, float] = {"val/mAP50": map_results["mAP"]}
     for cls_id, ap in map_results.get("per_class_ap", {}).items():
         metrics[f"val/AP50_cls{cls_id}"] = ap
     prec_vals = list(map_results.get("precision", {}).values())
@@ -121,10 +122,10 @@ METRICS_REGISTRY["detr"] = _detection_metrics
 
 @register_metrics("classification")
 def _classification_metrics(
-    predictions: List,
-    targets: List,
+    predictions: list,
+    targets: list,
     **_kwargs: Any,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Classification metrics: top-1 accuracy and top-5 accuracy.
 
     Args:
@@ -142,7 +143,7 @@ def _classification_metrics(
 
     pred_classes = all_preds_cat.argmax(dim=1)
     correct = (pred_classes == all_gts_cat).float()
-    metrics: Dict[str, float] = {"val/accuracy": correct.mean().item()}
+    metrics: dict[str, float] = {"val/accuracy": correct.mean().item()}
 
     num_classes = all_preds_cat.shape[1]
     if num_classes >= 5:
@@ -155,10 +156,10 @@ def _classification_metrics(
 
 @register_metrics("segmentation")
 def _segmentation_metrics(
-    predictions: List,
-    targets: List,
+    predictions: list,
+    targets: list,
     **kwargs: Any,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Segmentation metrics: mean IoU.
 
     Args:
@@ -175,7 +176,7 @@ def _segmentation_metrics(
     intersection_sum = np.zeros(num_classes)
     union_sum = np.zeros(num_classes)
 
-    for pred, target in zip(predictions, targets):
+    for pred, target in zip(predictions, targets, strict=True):
         if isinstance(pred, torch.Tensor):
             pred = pred.cpu().numpy()
         if isinstance(target, torch.Tensor):
@@ -192,7 +193,7 @@ def _segmentation_metrics(
         intersection_sum / (union_sum + 1e-10),
         0.0,
     )
-    metrics: Dict[str, float] = {"val/mIoU": float(np.mean(iou_per_class))}
+    metrics: dict[str, float] = {"val/mIoU": float(np.mean(iou_per_class))}
     for cls_id in range(num_classes):
         metrics[f"val/IoU_cls{cls_id}"] = float(iou_per_class[cls_id])
     return metrics

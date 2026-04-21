@@ -17,7 +17,6 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import onnxruntime as ort
@@ -63,13 +62,13 @@ def _require_optimum():
         from optimum.onnxruntime.configuration import AutoOptimizationConfig
 
         return ORTOptimizer, AutoOptimizationConfig
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             "Install optimum[onnxruntime]: pip install optimum[onnxruntime]"
-        )
+        ) from err
 
 
-def _resolve_preset(preset_name: Optional[str]) -> dict:
+def _resolve_preset(preset_name: str | None) -> dict:
     """Resolve a preset name to ORT quantization parameters.
 
     Args:
@@ -145,10 +144,7 @@ class _CalibrationDataReaderWrapper(CalibrationDataReader):
             return None
 
         # Handle both (images,) and (images, targets) batches
-        if isinstance(batch, (tuple, list)):
-            images = batch[0]
-        else:
-            images = batch
+        images = batch[0] if isinstance(batch, (tuple, list)) else batch
 
         # Convert to numpy if needed
         if hasattr(images, "numpy"):
@@ -178,7 +174,7 @@ class ModelQuantizer:
         config: Optional config dict with quantization settings.
     """
 
-    def __init__(self, onnx_path: str, config: Optional[dict] = None):
+    def __init__(self, onnx_path: str, config: dict | None = None):
         self.onnx_path = str(Path(onnx_path).resolve())
         self.config = config or {}
 
@@ -187,8 +183,8 @@ class ModelQuantizer:
 
     def quantize_dynamic(
         self,
-        save_path: Optional[str] = None,
-        quantization_preset: Optional[str] = None,
+        save_path: str | None = None,
+        quantization_preset: str | None = None,
     ) -> str:
         """Apply dynamic quantization (weight-only, no calibration data).
 
@@ -230,9 +226,9 @@ class ModelQuantizer:
     def quantize_static(
         self,
         calibration_loader,
-        save_path: Optional[str] = None,
+        save_path: str | None = None,
         max_calibration_samples: int = 100,
-        quantization_preset: Optional[str] = None,
+        quantization_preset: str | None = None,
     ) -> str:
         """Apply static INT8 quantization with calibration data.
 
@@ -297,7 +293,7 @@ class ModelQuantizer:
 
     def optimize(
         self,
-        save_path: Optional[str] = None,
+        save_path: str | None = None,
         level: str = "O2",
     ) -> str:
         """Apply graph optimization using HuggingFace Optimum ORTOptimizer.
@@ -406,10 +402,7 @@ class ModelQuantizer:
             if count >= max_samples:
                 break
 
-            if isinstance(batch, (tuple, list)):
-                images = batch[0]
-            else:
-                images = batch
+            images = batch[0] if isinstance(batch, (tuple, list)) else batch
 
             if hasattr(images, "numpy"):
                 images = images.numpy()

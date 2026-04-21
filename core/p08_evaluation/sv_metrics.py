@@ -10,7 +10,6 @@ change the import path.
 
 import sys
 from pathlib import Path
-from typing import Dict, List
 
 import numpy as np
 import supervision as sv
@@ -25,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # ---------------------------------------------------------------------------
 
 
-def _preds_to_sv(pred: Dict) -> sv.Detections:
+def _preds_to_sv(pred: dict) -> sv.Detections:
     """Convert a single image's prediction dict to sv.Detections."""
     boxes = np.asarray(pred["boxes"], dtype=np.float32).reshape(-1, 4)
     scores = np.asarray(pred["scores"], dtype=np.float32).ravel()
@@ -37,7 +36,7 @@ def _preds_to_sv(pred: Dict) -> sv.Detections:
     )
 
 
-def _gt_to_sv(gt: Dict) -> sv.Detections:
+def _gt_to_sv(gt: dict) -> sv.Detections:
     """Convert a single image's ground-truth dict to sv.Detections."""
     boxes = np.asarray(gt["boxes"], dtype=np.float32).reshape(-1, 4)
     labels = np.asarray(gt["labels"], dtype=np.int64).ravel()
@@ -53,10 +52,10 @@ def _gt_to_sv(gt: Dict) -> sv.Detections:
 
 
 def compute_map_coco(
-    predictions: List[Dict],
-    ground_truths: List[Dict],
+    predictions: list[dict],
+    ground_truths: list[dict],
     num_classes: int = 2,
-) -> Dict:
+) -> dict:
     """Compute COCO-standard mAP@[0.5:0.95] averaged over 10 IoU thresholds.
 
     Uses supervision's MeanAveragePrecision with IoU thresholds from
@@ -77,14 +76,14 @@ def compute_map_coco(
             - ``per_class_ap_50_95``: Dict[int, float] per-class AP@[0.5:0.95]
     """
     map_metric = MeanAveragePrecision(metric_target=sv.metrics.MetricTarget.BOXES)
-    for pred, gt in zip(predictions, ground_truths):
+    for pred, gt in zip(predictions, ground_truths, strict=True):
         map_metric.update(_preds_to_sv(pred), _gt_to_sv(gt))
     map_result = map_metric.compute()
 
     # Per-class AP averaged across all IoU thresholds
-    per_class_ap_50_95: Dict[int, float] = {}
-    per_class_ap_50: Dict[int, float] = {}
-    per_class_ap_75: Dict[int, float] = {}
+    per_class_ap_50_95: dict[int, float] = {}
+    per_class_ap_50: dict[int, float] = {}
+    per_class_ap_75: dict[int, float] = {}
 
     # Find IoU indices for 0.5 and 0.75
     iou_idx_50 = 0
@@ -120,11 +119,11 @@ def compute_map_coco(
 
 
 def compute_map(
-    predictions: List[Dict],
-    ground_truths: List[Dict],
+    predictions: list[dict],
+    ground_truths: list[dict],
     iou_threshold: float = 0.5,
     num_classes: int = 2,
-) -> Dict:
+) -> dict:
     """Compute mean Average Precision and per-class metrics using supervision.
 
     Drop-in replacement for ``utils.metrics.compute_map()``.
@@ -147,14 +146,14 @@ def compute_map(
     """
     # --- mAP via supervision ---
     map_metric = MeanAveragePrecision(metric_target=sv.metrics.MetricTarget.BOXES)
-    for pred, gt in zip(predictions, ground_truths):
+    for pred, gt in zip(predictions, ground_truths, strict=True):
         map_metric.update(_preds_to_sv(pred), _gt_to_sv(gt))
     map_result = map_metric.compute()
 
     # Extract per-class AP at the requested IoU threshold
-    per_class_ap: Dict[int, float] = {}
-    per_class_precision: Dict[int, float] = {}
-    per_class_recall: Dict[int, float] = {}
+    per_class_ap: dict[int, float] = {}
+    per_class_precision: dict[int, float] = {}
+    per_class_recall: dict[int, float] = {}
 
     # Find which IoU index corresponds to our threshold
     iou_idx = 0  # default to first (0.5)
@@ -210,8 +209,8 @@ def compute_map(
 
 
 def compute_confusion_matrix(
-    predictions: List[Dict],
-    ground_truths: List[Dict],
+    predictions: list[dict],
+    ground_truths: list[dict],
     iou_threshold: float = 0.5,
     num_classes: int = 2,
 ) -> np.ndarray:
@@ -242,9 +241,9 @@ def compute_confusion_matrix(
 
 
 def _compute_precision_recall_from_iou(
-    predictions: List[Dict],
-    ground_truths: List[Dict],
-    iou_matrices: List[np.ndarray],
+    predictions: list[dict],
+    ground_truths: list[dict],
+    iou_matrices: list[np.ndarray],
     class_id: int,
     iou_threshold: float = 0.5,
 ) -> tuple:
@@ -257,7 +256,7 @@ def _compute_precision_recall_from_iou(
     all_tp = []
     n_gt = 0
 
-    for pred, gt, iou_full in zip(predictions, ground_truths, iou_matrices):
+    for pred, gt, iou_full in zip(predictions, ground_truths, iou_matrices, strict=True):
         pred_scores = np.asarray(pred["scores"], dtype=np.float64).ravel()
         pred_labels = np.asarray(pred["labels"], dtype=np.int64).ravel()
         gt_labels = np.asarray(gt["labels"], dtype=np.int64).ravel()
@@ -318,8 +317,8 @@ def _compute_precision_recall_from_iou(
 
 
 def compute_precision_recall(
-    predictions: List[Dict],
-    ground_truths: List[Dict],
+    predictions: list[dict],
+    ground_truths: list[dict],
     class_id: int,
     iou_threshold: float = 0.5,
 ) -> tuple:
@@ -340,7 +339,7 @@ def compute_precision_recall(
     all_tp = []
     n_gt = 0
 
-    for pred, gt in zip(predictions, ground_truths):
+    for pred, gt in zip(predictions, ground_truths, strict=True):
         pred_boxes = np.asarray(pred["boxes"], dtype=np.float64).reshape(-1, 4)
         pred_scores = np.asarray(pred["scores"], dtype=np.float64).ravel()
         pred_labels = np.asarray(pred["labels"], dtype=np.int64).ravel()

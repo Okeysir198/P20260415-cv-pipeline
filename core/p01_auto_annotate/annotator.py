@@ -11,7 +11,7 @@ import base64
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 import requests
@@ -29,7 +29,7 @@ DEFAULT_TIMEOUT = 120
 
 def mask_to_polygon(mask: np.ndarray, img_h: int, img_w: int,
                     simplify_tolerance: float = 2.0,
-                    min_vertices: int = 4) -> Optional[List[float]]:
+                    min_vertices: int = 4) -> list[float] | None:
     """Convert a boolean mask to a simplified polygon (normalized vertices).
 
     Uses cv2.findContours + cv2.approxPolyDP to extract and simplify
@@ -67,7 +67,7 @@ def mask_to_polygon(mask: np.ndarray, img_h: int, img_w: int,
         return None
 
     # Normalize coordinates
-    polygon: List[float] = []
+    polygon: list[float] = []
     for point in approx:
         x, y = point[0]
         polygon.append(round(float(x) / img_w, 6))
@@ -96,16 +96,16 @@ class Annotator:
 
     def __init__(
         self,
-        class_names: Dict[int, str],
-        text_prompts: Dict[str, str],
+        class_names: dict[int, str],
+        text_prompts: dict[str, str],
         mode: str = "text",
         confidence_threshold: float = 0.5,
         nms_iou_threshold: float = 0.5,
         service_url: str = DEFAULT_SERVICE_URL,
         timeout: int = DEFAULT_TIMEOUT,
-        detection_classes: Optional[Dict[str, str]] = None,
-        class_rules: Optional[List[Dict[str, Any]]] = None,
-        vlm_verify: Optional[Dict[str, Any]] = None,
+        detection_classes: dict[str, str] | None = None,
+        class_rules: list[dict[str, Any]] | None = None,
+        vlm_verify: dict[str, Any] | None = None,
     ) -> None:
         self.class_names = class_names
         self.text_prompts = text_prompts
@@ -122,7 +122,7 @@ class Annotator:
         self,
         image_path: Path,
         output_format: str = "bbox",
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate annotations for a single image via the auto-label service.
 
         Args:
@@ -144,15 +144,12 @@ class Annotator:
 
         # Map output_format to service format
         # "bbox" -> "yolo", "polygon" -> "yolo_seg", "both" -> "yolo" (polygon in detections)
-        if output_format == "polygon":
-            svc_output_format = "yolo_seg"
-        else:
-            svc_output_format = "yolo"
+        svc_output_format = "yolo_seg" if output_format == "polygon" else "yolo"
 
         # Build request payload
         # Service expects class keys as strings in JSON
         classes_str_keys = {str(k): v for k, v in self.class_names.items()}
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "image": image_b64,
             "classes": classes_str_keys,
             "text_prompts": self.text_prompts,
@@ -193,12 +190,12 @@ class Annotator:
         detections_raw = data.get("detections", [])
 
         # Convert service Detection objects to pipeline detection dicts
-        detections: List[Dict[str, Any]] = []
+        detections: list[dict[str, Any]] = []
         for det in detections_raw:
             bbox_norm = det.get("bbox_norm", [0, 0, 0, 0])
             cx, cy, w, h = bbox_norm
 
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "class_id": det["class_id"],
                 "cx": cx,
                 "cy": cy,
@@ -212,7 +209,7 @@ class Annotator:
             if output_format in ("polygon", "both") and polygon_data:
                 # Service returns polygon as [[x,y], ...] pairs (normalized)
                 # Pipeline expects flat list [x1, y1, x2, y2, ...]
-                flat_polygon: List[float] = []
+                flat_polygon: list[float] = []
                 for pt in polygon_data:
                     flat_polygon.append(round(float(pt[0]), 6))
                     flat_polygon.append(round(float(pt[1]), 6))

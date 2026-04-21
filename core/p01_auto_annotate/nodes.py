@@ -14,10 +14,10 @@ import sys
 import time
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
-from typing_extensions import Annotated, TypedDict
+from typing import Annotated, Any
 
 import numpy as np
+from typing_extensions import TypedDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -27,7 +27,6 @@ from utils.langgraph_common import (
     list_append_reducer,
     replace_reducer,
 )
-from utils.yolo_io import image_to_label_path, parse_yolo_label
 
 logger = logging.getLogger(__name__)
 
@@ -39,26 +38,26 @@ logger = logging.getLogger(__name__)
 class AutoAnnotateState(TypedDict, total=False):
     """Auto-annotation pipeline state."""
     # Config
-    data_config: Annotated[Dict[str, Any], replace_reducer]
-    annotate_config: Annotated[Dict[str, Any], replace_reducer]
+    data_config: Annotated[dict[str, Any], replace_reducer]
+    annotate_config: Annotated[dict[str, Any], replace_reducer]
     dataset_name: Annotated[str, replace_reducer]
-    class_names: Annotated[Dict[int, str], replace_reducer]
-    text_prompts: Annotated[Dict[str, str], replace_reducer]
+    class_names: Annotated[dict[int, str], replace_reducer]
+    text_prompts: Annotated[dict[str, str], replace_reducer]
     config_dir: Annotated[str, replace_reducer]
     # Scan
-    image_paths: Annotated[Dict[str, List[str]], replace_reducer]
+    image_paths: Annotated[dict[str, list[str]], replace_reducer]
     total_images: Annotated[int, replace_reducer]
     current_batch_idx: Annotated[int, replace_reducer]
     total_batches: Annotated[int, replace_reducer]
     batch_size: Annotated[int, replace_reducer]
     # Processing
-    image_results: Annotated[List[Dict[str, Any]], list_append_reducer]
+    image_results: Annotated[list[dict[str, Any]], list_append_reducer]
     mode: Annotated[str, replace_reducer]
     output_format: Annotated[str, replace_reducer]
     dry_run: Annotated[bool, replace_reducer]
     filter_mode: Annotated[str, replace_reducer]
     # Output
-    summary: Annotated[Dict[str, Any], replace_reducer]
+    summary: Annotated[dict[str, Any], replace_reducer]
     report_path: Annotated[str, replace_reducer]
     output_dir_override: Annotated[str, replace_reducer]
     # Backup
@@ -104,7 +103,7 @@ def scan_node(state: AutoAnnotateState) -> dict:
 
     image_paths = scanner.scan()
     # Convert Path to str for serialisation
-    image_paths_str: Dict[str, List[str]] = {
+    image_paths_str: dict[str, list[str]] = {
         split: [str(p) for p in paths]
         for split, paths in image_paths.items()
     }
@@ -170,7 +169,7 @@ def annotate_batch(state: AutoAnnotateState) -> dict:
     )
 
     batch_paths = get_batch_paths(state)
-    new_results: List[Dict[str, Any]] = []
+    new_results: list[dict[str, Any]] = []
 
     for split, img_path in batch_paths:
         t_start = time.perf_counter()
@@ -178,7 +177,7 @@ def annotate_batch(state: AutoAnnotateState) -> dict:
         detections = annotator.annotate_image(img_path, output_format=output_format)
 
         annotate_time = time.perf_counter() - t_start
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "image_path": str(img_path),
             "split": split,
             "detections": detections,
@@ -211,7 +210,7 @@ def validate_batch(state: AutoAnnotateState) -> dict:
         t_start = time.perf_counter()
         result = image_results[result_idx]
         detections = result.get("detections", [])
-        issues: List[Dict[str, Any]] = []
+        issues: list[dict[str, Any]] = []
 
         for idx, det in enumerate(detections):
             cx, cy, w, h = det["cx"], det["cy"], det["w"], det["h"]
@@ -333,7 +332,6 @@ def write_batch(state: AutoAnnotateState) -> dict:
     """
     from core.p01_auto_annotate.writer import LabelWriter
 
-    annotate_config = state["annotate_config"]
     output_format = state.get("output_format", "bbox")
     dry_run = state.get("dry_run", False)
 
@@ -345,7 +343,7 @@ def write_batch(state: AutoAnnotateState) -> dict:
     backup_dir_str: str = state.get("backup_dir", "")
     if batch_idx == 0 and not backup_dir_str:
         # Collect all unique labels dirs and count existing label files
-        existing_label_files: List[Path] = []
+        existing_label_files: list[Path] = []
         for result in image_results:
             img_path = Path(result["image_path"])
             label_path = LabelWriter._get_label_path(img_path)
@@ -418,14 +416,14 @@ def aggregate_node(state: AutoAnnotateState) -> dict:
 
     annotate_config = state["annotate_config"]
     class_names = {int(k): v for k, v in state["class_names"].items()}
-    image_results: List[Dict[str, Any]] = state.get("image_results", [])
+    image_results: list[dict[str, Any]] = state.get("image_results", [])
 
     # Compute summary statistics
     total_annotated = sum(1 for r in image_results if r.get("written", False))
     total_detections = sum(len(r.get("detections", [])) for r in image_results)
 
     # Per-class counts
-    per_class: Dict[str, int] = {}
+    per_class: dict[str, int] = {}
     for r in image_results:
         for det in r.get("detections", []):
             cls_id = det.get("class_id", -1)
@@ -433,7 +431,7 @@ def aggregate_node(state: AutoAnnotateState) -> dict:
             per_class[cname] = per_class.get(cname, 0) + 1
 
     # Per-split counts
-    per_split: Dict[str, int] = {}
+    per_split: dict[str, int] = {}
     for r in image_results:
         split = r.get("split", "unknown")
         per_split[split] = per_split.get(split, 0) + 1
@@ -448,14 +446,14 @@ def aggregate_node(state: AutoAnnotateState) -> dict:
         for r in image_results
     ]
 
-    timing_stats: Dict[str, Any] = {
+    timing_stats: dict[str, Any] = {
         "avg_annotate_s": round(float(np.mean(annotate_times)), 4) if annotate_times else 0.0,
         "avg_total_per_sample_s": round(float(np.mean(total_times)), 4) if total_times else 0.0,
         "max_total_per_sample_s": round(float(np.max(total_times)), 4) if total_times else 0.0,
         "min_total_per_sample_s": round(float(np.min(total_times)), 4) if total_times else 0.0,
     }
 
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "dataset": state.get("dataset_name", "unknown"),
         "total_images": len(image_results),
         "total_annotated": total_annotated,

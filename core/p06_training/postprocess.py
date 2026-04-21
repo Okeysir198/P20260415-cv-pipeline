@@ -33,11 +33,14 @@ Example::
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import torch
 from torchvision.ops import nms
+
+from utils.registry import Registry
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +48,11 @@ logger = logging.getLogger(__name__)
 # Registry
 # ---------------------------------------------------------------------------
 
-POSTPROCESSOR_REGISTRY: Dict[str, Callable] = {}
+POSTPROCESSOR_REGISTRY: dict[str, Callable] = {}
+
+_postprocessor_registry = Registry(
+    entity_name="postprocessor", registry=POSTPROCESSOR_REGISTRY,
+)
 
 
 def register_postprocessor(output_format: str):
@@ -57,12 +64,7 @@ def register_postprocessor(output_format: str):
     Returns:
         Decorator that stores *fn* in :data:`POSTPROCESSOR_REGISTRY`.
     """
-
-    def decorator(fn: Callable) -> Callable:
-        POSTPROCESSOR_REGISTRY[output_format] = fn
-        return fn
-
-    return decorator
+    return _postprocessor_registry.register(output_format)
 
 
 def postprocess(
@@ -71,8 +73,8 @@ def postprocess(
     predictions: Any,
     conf_threshold: float = 0.5,
     nms_threshold: float = 0.45,
-    target_sizes: Optional[Any] = None,
-) -> List[Dict[str, np.ndarray]]:
+    target_sizes: Any | None = None,
+) -> list[dict[str, np.ndarray]]:
     """Dispatch postprocessing based on ``output_format``.
 
     Priority:
@@ -118,7 +120,7 @@ def postprocess(
 # ---------------------------------------------------------------------------
 
 
-def _empty_result() -> Dict[str, np.ndarray]:
+def _empty_result() -> dict[str, np.ndarray]:
     """Return an empty detection result dict."""
     return {
         "boxes": np.empty((0, 4), dtype=np.float32),
@@ -137,8 +139,8 @@ def _postprocess_yolox(
     predictions: torch.Tensor,
     conf_threshold: float = 0.5,
     nms_threshold: float = 0.45,
-    _target_sizes: Optional[Any] = None,
-) -> List[Dict[str, np.ndarray]]:
+    _target_sizes: Any | None = None,
+) -> list[dict[str, np.ndarray]]:
     """Decode raw YOLOX outputs into a list of result dicts.
 
     Args:
@@ -153,7 +155,7 @@ def _postprocess_yolox(
         List of B dicts with ``"boxes"`` (xyxy float32), ``"scores"``
         (float32), ``"labels"`` (int64).
     """
-    results: List[Dict[str, np.ndarray]] = []
+    results: list[dict[str, np.ndarray]] = []
     batch_size = predictions.shape[0]
 
     for b in range(batch_size):
@@ -186,7 +188,7 @@ def _postprocess_yolox(
         boxes = torch.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], dim=1)
 
         # Per-class NMS
-        keep_indices: List[torch.Tensor] = []
+        keep_indices: list[torch.Tensor] = []
         for c in cls_id_filt.unique():
             c_mask = cls_id_filt == c
             c_boxes = boxes[c_mask]
@@ -219,8 +221,8 @@ def _postprocess_segmentation(
     predictions: torch.Tensor,
     _conf_threshold: float = 0.5,
     _nms_threshold: float = 0.45,
-    _target_sizes: Optional[Any] = None,
-) -> List[Dict[str, np.ndarray]]:
+    _target_sizes: Any | None = None,
+) -> list[dict[str, np.ndarray]]:
     """Decode segmentation logits into per-pixel class maps.
 
     Args:
@@ -233,7 +235,7 @@ def _postprocess_segmentation(
         List of B dicts with ``"class_map"`` — ``(H, W)`` int64 array.
     """
     class_maps = predictions.argmax(dim=1)  # (B, H, W)
-    results: List[Dict[str, np.ndarray]] = []
+    results: list[dict[str, np.ndarray]] = []
     for i in range(class_maps.shape[0]):
         results.append({"class_map": class_maps[i].cpu().numpy().astype(np.int64)})
     return results
@@ -244,8 +246,8 @@ def _postprocess_detr(
     predictions: Any,
     _conf_threshold: float = 0.5,
     _nms_threshold: float = 0.45,
-    _target_sizes: Optional[Any] = None,
-) -> List[Dict[str, np.ndarray]]:
+    _target_sizes: Any | None = None,
+) -> list[dict[str, np.ndarray]]:
     """Decode HF DETR-family outputs into a list of result dicts.
 
     This is a fallback path for DETR-style models that do NOT implement their

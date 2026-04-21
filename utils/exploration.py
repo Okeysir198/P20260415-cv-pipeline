@@ -19,23 +19,22 @@ import random
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # project root
 
-from utils.yolo_io import IMAGE_EXTENSIONS, image_to_label_path, parse_yolo_label
 from utils.config import load_config, resolve_path
-
+from utils.yolo_io import IMAGE_EXTENSIONS, image_to_label_path, parse_yolo_label
 
 # ---------------------------------------------------------------------------
 # Dataset exploration
 # ---------------------------------------------------------------------------
 
 
-def get_image_paths(images_dir: Path) -> List[Path]:
+def get_image_paths(images_dir: Path) -> list[Path]:
     """Collect all image files from a directory.
 
     Args:
@@ -65,8 +64,8 @@ def count_images(images_dir: Path) -> int:
 
 
 def compute_class_distribution(
-    images_dir: Path, class_names: Dict[int, str]
-) -> Dict[str, int]:
+    images_dir: Path, class_names: dict[int, str]
+) -> dict[str, int]:
     """Count object instances per class across all labels in a split.
 
     Args:
@@ -89,7 +88,7 @@ def compute_class_distribution(
     return dict(counts)
 
 
-def compute_image_stats(images_dir: Path) -> Dict[str, Any]:
+def compute_image_stats(images_dir: Path) -> dict[str, Any]:
     """Compute image dimension statistics for a split.
 
     Args:
@@ -98,8 +97,8 @@ def compute_image_stats(images_dir: Path) -> Dict[str, Any]:
     Returns:
         Dictionary with min/max/mean width and height.
     """
-    widths: List[int] = []
-    heights: List[int] = []
+    widths: list[int] = []
+    heights: list[int] = []
     image_paths = get_image_paths(images_dir)
 
     for img_path in image_paths:
@@ -126,8 +125,8 @@ def compute_image_stats(images_dir: Path) -> Dict[str, Any]:
 
 
 def compute_annotation_stats(
-    images_dir: Path, class_names: Dict[int, str]
-) -> Dict[str, Any]:
+    images_dir: Path, class_names: dict[int, str]
+) -> dict[str, Any]:
     """Compute annotation statistics for a split.
 
     Args:
@@ -142,7 +141,7 @@ def compute_annotation_stats(
     total_objects = 0
     images_with_labels = 0
     images_without_labels = 0
-    objects_per_image: List[int] = []
+    objects_per_image: list[int] = []
     cooccurrence: Counter = Counter()
 
     for img_path in image_paths:
@@ -186,7 +185,7 @@ def compute_annotation_stats(
     }
 
 
-def resolve_split_dir(config: dict, split: str, config_dir: Path) -> Optional[Path]:
+def resolve_split_dir(config: dict, split: str, config_dir: Path) -> Path | None:
     """Resolve the images directory for a given split.
 
     Args:
@@ -218,7 +217,7 @@ def explore(config_path: str) -> None:
     config_dir = config_file.parent
     config = load_config(config_file)
 
-    class_names: Dict[int, str] = {int(k): v for k, v in config["names"].items()}
+    class_names: dict[int, str] = {int(k): v for k, v in config["names"].items()}
 
     # --- Header ---
     print_separator()
@@ -236,7 +235,7 @@ def explore(config_path: str) -> None:
     print_separator("-")
     print("  Split Summary")
     print_separator("-")
-    split_dirs: Dict[str, Optional[Path]] = {}
+    split_dirs: dict[str, Path | None] = {}
     total_images = 0
     for split in splits:
         split_dir = resolve_split_dir(config, split, config_dir)
@@ -304,7 +303,7 @@ def explore(config_path: str) -> None:
         # Co-occurrence
         cooc = ann_stats["class_cooccurrence"]
         if cooc:
-            print(f"    Class co-occurrence (images where both appear):")
+            print("    Class co-occurrence (images where both appear):")
             for (cls_a, cls_b), count in sorted(cooc.items()):
                 if cls_a == cls_b:
                     print(f"      {cls_a:<20s} alone/with-others: {count:>7,d} images")
@@ -322,8 +321,8 @@ def explore(config_path: str) -> None:
 
 
 def compute_channel_stats(
-    image_paths: List[Path],
-) -> Tuple[np.ndarray, np.ndarray]:
+    image_paths: list[Path],
+) -> tuple[np.ndarray, np.ndarray]:
     """Compute per-channel mean and std using Welford's online algorithm.
 
     Processes images one at a time to avoid loading the full dataset into

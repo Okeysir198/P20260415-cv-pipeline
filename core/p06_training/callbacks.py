@@ -13,15 +13,15 @@ import math
 import random
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import cv2
 import numpy as np
 import supervision as sv
 import torch
 import torch.nn as nn
-import wandb
 
+import wandb
 from core.p10_inference.supervision_bridge import annotate_gt_pred
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
@@ -37,12 +37,12 @@ _LABEL_PALETTE = [
 ]
 
 
-def _subset_indices(dataset: Any) -> Optional[List[int]]:
+def _subset_indices(dataset: Any) -> list[int] | None:
     """Return ``list(dataset.indices)`` if dataset is a torch Subset, else None."""
     return list(dataset.indices) if hasattr(dataset, "indices") else None
 
 
-def _run_splits_and_subsets(trainer: Any) -> Dict[str, Optional[List[int]]]:
+def _run_splits_and_subsets(trainer: Any) -> dict[str, list[int] | None]:
     """Return ``{split: subset_indices or None}`` for splits actually used in the run.
 
     The custom pytorch trainer sets ``trainer.train_loader`` and
@@ -52,7 +52,7 @@ def _run_splits_and_subsets(trainer: Any) -> Dict[str, Optional[List[int]]]:
     reference notebook treats CPPE-5 as 850/150/29 train/val/test, and we
     mirror that here when the third loader is present.
     """
-    out: Dict[str, Optional[List[int]]] = {}
+    out: dict[str, list[int] | None] = {}
     for split in ("train", "val", "test"):
         loader = getattr(trainer, f"{split}_loader", None)
         if loader is not None:
@@ -78,7 +78,7 @@ def _draw_gt_boxes(image: np.ndarray, targets: np.ndarray, class_names: dict, th
     return vis
 
 
-def _save_image_grid(annotated: List[np.ndarray], grid_cols: int, title: str, out_path: Path, dpi: int) -> None:
+def _save_image_grid(annotated: list[np.ndarray], grid_cols: int, title: str, out_path: Path, dpi: int) -> None:
     """Tile a list of BGR images into a grid and save as PNG."""
     import matplotlib
     matplotlib.use("Agg")
@@ -128,7 +128,7 @@ class Callback:
         """
 
     def on_epoch_end(
-        self, trainer: Any, epoch: int, metrics: Dict[str, float]
+        self, trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> None:
         """Called at the end of each epoch.
 
@@ -139,7 +139,7 @@ class Callback:
         """
 
     def on_batch_end(
-        self, trainer: Any, batch_idx: int, metrics: Dict[str, float]
+        self, trainer: Any, batch_idx: int, metrics: dict[str, float]
     ) -> None:
         """Called at the end of each training batch.
 
@@ -179,7 +179,7 @@ class CheckpointSaver(Callback):
         self.save_interval = save_interval
         self.save_best = save_best
 
-        self._best_value: Optional[float] = None
+        self._best_value: float | None = None
         self._best_epoch: int = 0
 
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -187,6 +187,7 @@ class CheckpointSaver(Callback):
     def on_train_start(self, trainer: Any) -> None:
         """Copy training + data configs to the run directory for reproducibility."""
         import shutil
+
         import yaml
 
         config_path = getattr(trainer, "config_path", None)
@@ -216,7 +217,7 @@ class CheckpointSaver(Callback):
                 yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     def on_epoch_end(
-        self, trainer: Any, epoch: int, metrics: Dict[str, float]
+        self, trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> None:
         """Save checkpoints at epoch end.
 
@@ -261,7 +262,7 @@ class CheckpointSaver(Callback):
 
     @staticmethod
     def _build_checkpoint(
-        trainer: Any, epoch: int, metrics: Dict[str, float]
+        trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> dict:
         """Build a checkpoint dictionary from trainer state.
 
@@ -273,7 +274,7 @@ class CheckpointSaver(Callback):
         Returns:
             Checkpoint dictionary.
         """
-        checkpoint: Dict[str, Any] = {
+        checkpoint: dict[str, Any] = {
             "epoch": epoch,
             "metrics": metrics,
             "config": trainer.config,
@@ -381,13 +382,13 @@ class EarlyStopping(Callback):
         self.patience = patience
         self.min_delta = min_delta
 
-        self._best_value: Optional[float] = None
+        self._best_value: float | None = None
         self._counter: int = 0
         self._best_epoch: int = 0
         self.should_stop: bool = False
 
     def on_epoch_end(
-        self, trainer: Any, epoch: int, metrics: Dict[str, float]
+        self, trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> None:
         """Check if training should stop.
 
@@ -444,10 +445,10 @@ class WandBLogger(Callback):
     def __init__(
         self,
         project: str = "smart-camera",
-        run_name: Optional[str] = None,
-        config: Optional[dict] = None,
+        run_name: str | None = None,
+        config: dict | None = None,
         log_interval: int = 0,
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
     ) -> None:
         self.project = project
         self.run_name = run_name
@@ -479,7 +480,7 @@ class WandBLogger(Callback):
             logger.warning("Failed to initialize W&B: %s. Continuing without logging.", e)
 
     def on_epoch_end(
-        self, trainer: Any, epoch: int, metrics: Dict[str, float]
+        self, trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> None:
         """Log epoch-level metrics to W&B.
 
@@ -500,7 +501,7 @@ class WandBLogger(Callback):
         self._wandb.log(log_data, step=epoch + 1)
 
     def on_batch_end(
-        self, trainer: Any, batch_idx: int, metrics: Dict[str, float]
+        self, trainer: Any, batch_idx: int, metrics: dict[str, float]
     ) -> None:
         """Log batch-level metrics to W&B (if log_interval > 0).
 
@@ -563,7 +564,7 @@ class ValPredictionLogger(Callback):
         self.pred_color = sv.Color(r=pred_color_rgb[0], g=pred_color_rgb[1], b=pred_color_rgb[2])
         self.text_scale = text_scale
         self.dpi = dpi
-        self._sample_indices: Optional[List[int]] = None
+        self._sample_indices: list[int] | None = None
 
     @staticmethod
     def _unwrap_subset(dataset: Any):
@@ -584,7 +585,7 @@ class ValPredictionLogger(Callback):
         logger.info("ValPredictionLogger(%s): sampled %d images for visualization", self.split, k)
 
     def on_epoch_end(
-        self, trainer: Any, epoch: int, metrics: Dict[str, float]
+        self, trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> None:
         if self._sample_indices is None:
             return
@@ -708,7 +709,7 @@ class DatasetStatsLogger(Callback):
         save_dir: str,
         data_config: dict,
         base_dir: str,
-        splits: List[str],
+        splits: list[str],
         dpi: int = 120,
     ) -> None:
         self.save_dir = Path(save_dir)
@@ -721,7 +722,7 @@ class DatasetStatsLogger(Callback):
         class_names = {int(k): str(v) for k, v in self.data_config.get("names", {}).items()}
         out_dir = self.save_dir / "data_preview"
         try:
-            from core.p05_data.run_viz import generate_dataset_stats, _load_cached_stats
+            from core.p05_data.run_viz import _load_cached_stats, generate_dataset_stats
             if _load_cached_stats(out_dir):
                 logger.info("DatasetStatsLogger: cache hit — skipping recompute (%s)", out_dir)
                 return
@@ -753,7 +754,7 @@ class DataLabelGridLogger(Callback):
     def __init__(
         self,
         save_dir: str,
-        splits: List[str],
+        splits: list[str],
         data_config: dict,
         base_dir: str,
         num_samples: int = 16,
@@ -846,7 +847,7 @@ class AugLabelGridLogger(Callback):
     def __init__(
         self,
         save_dir: str,
-        splits: List[str],
+        splits: list[str],
         data_config: dict,
         aug_config: dict,
         base_dir: str,
@@ -961,8 +962,8 @@ class CallbackRunner:
         callbacks: List of Callback instances.
     """
 
-    def __init__(self, callbacks: Optional[List[Callback]] = None) -> None:
-        self.callbacks: List[Callback] = callbacks or []
+    def __init__(self, callbacks: list[Callback] | None = None) -> None:
+        self.callbacks: list[Callback] = callbacks or []
 
     def add(self, callback: Callback) -> None:
         """Register a new callback.
@@ -1001,7 +1002,7 @@ class CallbackRunner:
             cb.on_epoch_start(trainer, epoch)
 
     def on_epoch_end(
-        self, trainer: Any, epoch: int, metrics: Dict[str, float]
+        self, trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> None:
         """Fire on_epoch_end for all callbacks.
 
@@ -1014,7 +1015,7 @@ class CallbackRunner:
             cb.on_epoch_end(trainer, epoch, metrics)
 
     def on_batch_end(
-        self, trainer: Any, batch_idx: int, metrics: Dict[str, float]
+        self, trainer: Any, batch_idx: int, metrics: dict[str, float]
     ) -> None:
         """Fire on_batch_end for all callbacks.
 
@@ -1026,7 +1027,7 @@ class CallbackRunner:
         for cb in self.callbacks:
             cb.on_batch_end(trainer, batch_idx, metrics)
 
-    def get_callback(self, callback_type: type) -> Optional[Callback]:
+    def get_callback(self, callback_type: type) -> Callback | None:
         """Find a callback by type.
 
         Args:

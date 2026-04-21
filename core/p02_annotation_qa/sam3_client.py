@@ -7,7 +7,7 @@ all inference to the SAM3 REST service.  No torch or transformers dependency.
 import base64
 import io
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import httpx
 import numpy as np
@@ -43,7 +43,7 @@ class SAM3Client:
     # Public API
     # ------------------------------------------------------------------
 
-    def segment_with_box(self, image: Any, box: List[float]) -> Dict:
+    def segment_with_box(self, image: Any, box: list[float]) -> dict:
         """Segment an object using a bounding-box prompt.
 
         Args:
@@ -74,7 +74,7 @@ class SAM3Client:
             "iou_score": float(result.get("iou_score", result.get("score", 0.0))),
         }
 
-    def segment_with_text(self, image: Any, text: str) -> List[Dict]:
+    def segment_with_text(self, image: Any, text: str) -> list[dict]:
         """Segment objects matching a text prompt.
 
         Args:
@@ -93,7 +93,7 @@ class SAM3Client:
         }
         data = self._post("/segment_text", payload)
 
-        detections: List[Dict] = []
+        detections: list[dict] = []
         for det in data.get("detections", []):
             mask = self._decode_mask(det["mask"])
             img_h, img_w = mask.shape[:2]
@@ -106,7 +106,7 @@ class SAM3Client:
 
         return detections
 
-    def auto_mask(self, image: Any) -> List[Dict]:
+    def auto_mask(self, image: Any) -> list[dict]:
         """Generate all masks automatically (no prompt).
 
         Args:
@@ -122,7 +122,7 @@ class SAM3Client:
         payload = {"image": pil_to_b64(image)}
         data = self._post("/auto_mask", payload)
 
-        detections: List[Dict] = []
+        detections: list[dict] = []
         for det in data.get("detections", []):
             mask = self._decode_mask(det["mask"])
             img_h, img_w = mask.shape[:2]
@@ -146,7 +146,7 @@ class SAM3Client:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def mask_to_bbox(mask: np.ndarray, img_h: int, img_w: int) -> Tuple[float, float, float, float]:
+    def mask_to_bbox(mask: np.ndarray, img_h: int, img_w: int) -> tuple[float, float, float, float]:
         """Convert a boolean mask to a normalised bounding box.
 
         Args:
@@ -170,7 +170,7 @@ class SAM3Client:
         return (cx, cy, w, h)
 
     @staticmethod
-    def mask_to_bbox_xyxy(mask: np.ndarray) -> Tuple[int, int, int, int]:
+    def mask_to_bbox_xyxy(mask: np.ndarray) -> tuple[int, int, int, int]:
         """Convert a boolean mask to an absolute-pixel bounding box.
 
         Args:
@@ -213,7 +213,7 @@ class SAM3Client:
     @staticmethod
     def _pixel_bbox_to_norm(
         bbox: dict, img_w: int, img_h: int,
-    ) -> Tuple[float, float, float, float]:
+    ) -> tuple[float, float, float, float]:
         """Convert pixel bbox ``{x1, y1, x2, y2}`` to normalised ``(cx, cy, w, h)``."""
         x1 = float(bbox["x1"])
         y1 = float(bbox["y1"])

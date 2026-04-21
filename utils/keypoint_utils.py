@@ -5,14 +5,13 @@ work with any pose model (COCO 17, MediaPipe 33, etc.).
 """
 
 import math
-from typing import List, Optional
 
 import numpy as np
 
 
 def get_keypoint(
     keypoints: np.ndarray,
-    keypoint_names: List[str],
+    keypoint_names: list[str],
     name: str,
 ) -> np.ndarray:
     """Get a single keypoint by name.
@@ -36,7 +35,7 @@ def get_keypoint(
 
 def get_midpoint(
     keypoints: np.ndarray,
-    keypoint_names: List[str],
+    keypoint_names: list[str],
     name_a: str,
     name_b: str,
 ) -> np.ndarray:
@@ -54,7 +53,7 @@ def get_midpoint(
 
 def get_distance(
     keypoints: np.ndarray,
-    keypoint_names: List[str],
+    keypoint_names: list[str],
     name_a: str,
     name_b: str,
 ) -> float:
@@ -72,7 +71,7 @@ def get_distance(
 
 def get_angle(
     keypoints: np.ndarray,
-    keypoint_names: List[str],
+    keypoint_names: list[str],
     name_a: str,
     name_b: str,
     name_c: str,
@@ -104,9 +103,9 @@ def get_angle(
 
 def _compute_torso_data(
     keypoints: np.ndarray,
-    keypoint_names: List[str],
+    keypoint_names: list[str],
     min_score: float,
-) -> Optional[dict]:
+) -> dict | None:
     """Compute shared torso geometry data for body_orientation and hip_shoulder_ratio.
 
     Returns:
@@ -137,7 +136,7 @@ def _compute_torso_data(
 
 def body_orientation(
     keypoints: np.ndarray,
-    keypoint_names: List[str],
+    keypoint_names: list[str],
     min_score: float = 0.3,
 ) -> str:
     """Determine body orientation from keypoints.
@@ -173,9 +172,9 @@ def body_orientation(
 
 def hip_shoulder_ratio(
     keypoints: np.ndarray,
-    keypoint_names: List[str],
+    keypoint_names: list[str],
     min_score: float = 0.3,
-) -> Optional[float]:
+) -> float | None:
     """Compute hip-shoulder height ratio for fall detection.
 
     From the technical spec: ratio >= 0.05 indicates standing, lower
@@ -194,10 +193,10 @@ def hip_shoulder_ratio(
 
 def ground_proximity(
     keypoints: np.ndarray,
-    keypoint_names: List[str],
+    keypoint_names: list[str],
     image_height: int,
     min_score: float = 0.3,
-) -> Optional[float]:
+) -> float | None:
     """Compute hip vertical position as fraction of image height.
 
     From the technical spec: hip_y > 0.7 indicates ground proximity

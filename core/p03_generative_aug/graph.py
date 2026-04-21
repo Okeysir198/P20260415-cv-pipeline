@@ -5,18 +5,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from utils.langgraph_common import should_continue
 from core.p03_generative_aug.nodes import (
     GenAugmentState,
+    aggregate_node,
+    inpaint_batch,
     scan_node,
     segment_batch,
-    inpaint_batch,
     validate_batch,
     write_batch,
-    aggregate_node,
 )
+from utils.langgraph_common import should_continue
 
 
 def build_graph():

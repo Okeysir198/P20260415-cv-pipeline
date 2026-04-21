@@ -9,7 +9,7 @@ Reads images and COCO-format annotation JSON files
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import cv2
 import numpy as np
@@ -21,7 +21,7 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent.parent)
 )  # project root
 
-from core.p05_data.base_dataset import BaseDataset, IMAGENET_MEAN, IMAGENET_STD  # noqa: E402
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, BaseDataset  # noqa: E402
 from core.p05_data.detection_dataset import collate_fn  # noqa: E402
 from core.p05_data.transforms import build_transforms  # noqa: E402
 from utils.config import resolve_path  # noqa: E402
@@ -35,9 +35,9 @@ _IMG_EXTENSIONS = {
 
 
 def _build_coco_category_map(
-    coco_categories: List[Dict[str, Any]],
-    names: Dict[int, str],
-) -> Dict[int, int]:
+    coco_categories: list[dict[str, Any]],
+    names: dict[int, str],
+) -> dict[int, int]:
     """Build a mapping from COCO category_id to internal class_id.
 
     The mapping is derived by matching COCO category names to the
@@ -61,11 +61,11 @@ def _build_coco_category_map(
         return {cid: cid for cid in coco_id_set}
 
     # Build name -> internal_class_id lookup (lowercased)
-    name_to_id: Dict[str, int] = {
+    name_to_id: dict[str, int] = {
         v.lower(): k for k, v in names.items()
     }
 
-    mapping: Dict[int, int] = {}
+    mapping: dict[int, int] = {}
     for cat in coco_categories:
         cat_name = cat["name"].lower()
         if cat_name in name_to_id:
@@ -119,8 +119,8 @@ class COCODetectionDataset(BaseDataset):
         self,
         data_config: dict,
         split: str = "train",
-        transforms: Optional[Any] = None,
-        base_dir: Optional[Union[str, Path]] = None,
+        transforms: Any | None = None,
+        base_dir: str | Path | None = None,
     ) -> None:
         if split not in ("train", "val", "test"):
             raise ValueError(
@@ -181,8 +181,8 @@ class COCODetectionDataset(BaseDataset):
 
         # Collect image entries that actually exist on disk
         all_img_ids = sorted(self.coco.getImgIds())
-        self._img_entries: List[Dict[str, Any]] = []
-        self.img_paths: List[Path] = []
+        self._img_entries: list[dict[str, Any]] = []
+        self.img_paths: list[Path] = []
 
         for img_id in all_img_ids:
             info = self.coco.loadImgs(img_id)[0]
@@ -197,7 +197,7 @@ class COCODetectionDataset(BaseDataset):
             )
 
         # Pre-build per-image annotation lists for fast access
-        self._img_annotations: List[List[Dict[str, Any]]] = []
+        self._img_annotations: list[list[dict[str, Any]]] = []
         for entry in self._img_entries:
             ann_ids = self.coco.getAnnIds(imgIds=entry["id"])
             anns = self.coco.loadAnns(ann_ids)
@@ -231,7 +231,7 @@ class COCODetectionDataset(BaseDataset):
         if not anns:
             return np.zeros((0, 5), dtype=np.float32)
 
-        rows: List[np.ndarray] = []
+        rows: list[np.ndarray] = []
         n_unmapped = 0
         n_bad_coords = 0
         n_crowd = 0
@@ -321,7 +321,7 @@ class COCODetectionDataset(BaseDataset):
     def format_target(
         self,
         raw_target: np.ndarray,
-        image_size: Tuple[int, int],
+        image_size: tuple[int, int],
     ) -> np.ndarray:
         """Return targets as-is (already normalised 0-1).
 
@@ -368,7 +368,7 @@ class COCODetectionDataset(BaseDataset):
 
     def __getitem__(
         self, idx: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor, str]:
+    ) -> tuple[torch.Tensor, torch.Tensor, str]:
         """Get a single sample.
 
         Args:
@@ -417,7 +417,7 @@ def build_coco_dataloader(
     data_config: dict,
     split: str,
     training_config: dict,
-    base_dir: Optional[Union[str, Path]] = None,
+    base_dir: str | Path | None = None,
 ) -> DataLoader:
     """Build a DataLoader for a COCO JSON dataset.
 

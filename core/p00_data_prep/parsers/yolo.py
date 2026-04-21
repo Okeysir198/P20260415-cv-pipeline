@@ -6,14 +6,13 @@ Supports both pre-split (train/valid/test) and unsplit (flat) structures.
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import yaml
 
 from core.p00_data_prep.utils.file_ops import IMAGE_EXTENSIONS, resolve_data_root
 
 
-def parse_yolo(source_config: Dict, base_dir: Path) -> List[Dict]:
+def parse_yolo(source_config: dict, base_dir: Path) -> list[dict]:
     """
     Parse YOLO format dataset.
 
@@ -60,7 +59,7 @@ def parse_yolo(source_config: Dict, base_dir: Path) -> List[Dict]:
     return samples
 
 
-def _resolve_class_names(source_config: Dict, data_root: Path) -> Dict[str, str]:
+def _resolve_class_names(source_config: dict, data_root: Path) -> dict[str, str]:
     """
     Build class ID → class name mapping from source_classes config or data.yaml.
 
@@ -89,9 +88,9 @@ def _parse_yolo_split(
     img_dir: Path,
     label_dir: Path,
     source_name: str,
-    id_to_name: Dict[str, str],
+    id_to_name: dict[str, str],
     original_split: str | None = None,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Parse a single YOLO split.
 
@@ -123,7 +122,7 @@ def _parse_yolo_split(
         if id_to_name:
             labels = [id_to_name.get(label, label) for label in labels]
 
-        sample: Dict = {
+        sample: dict = {
             "filename": img_path.name,
             "image_path": img_path,
             "labels": labels,
@@ -137,7 +136,7 @@ def _parse_yolo_split(
     return samples
 
 
-def _parse_yolo_label(label_path: Path) -> Tuple[List[str], List[List[float]]]:
+def _parse_yolo_label(label_path: Path) -> tuple[list[str], list[list[float]]]:
     """
     Parse a YOLO format label file.
 
@@ -160,13 +159,13 @@ def _parse_yolo_label(label_path: Path) -> Tuple[List[str], List[List[float]]]:
                 if len(parts) >= 5:
                     labels.append(parts[0])
                     bboxes.append([float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])])
-    except (OSError, IOError):
+    except OSError:
         pass
 
     return labels, bboxes
 
 
-def get_yolo_classes(data_yaml: Optional[Path] = None) -> List[str]:
+def get_yolo_classes(data_yaml: Path | None = None) -> list[str]:
     """
     Get class names from YOLO data.yaml file.
 

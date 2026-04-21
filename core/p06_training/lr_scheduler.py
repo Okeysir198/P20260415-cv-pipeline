@@ -10,7 +10,6 @@ Provides:
 import math
 import sys
 from pathlib import Path
-from typing import Optional
 
 import torch.optim as optim
 from torch.optim.lr_scheduler import LRScheduler
@@ -41,7 +40,7 @@ class _WarmupMixin:
     ``self._current_epoch`` in their ``__init__``.
     """
 
-    def _advance_epoch(self, epoch: Optional[int] = None) -> None:
+    def _advance_epoch(self, epoch: int | None = None) -> None:
         """Update the internal epoch counter."""
         if epoch is not None:
             self._current_epoch = epoch
@@ -58,7 +57,7 @@ class _WarmupMixin:
             factor = _warmup_factor(
                 self._current_epoch, self.warmup_epochs, self.warmup_start_factor,
             )
-            for param_group, base_lr in zip(self.optimizer.param_groups, self._base_lrs):
+            for param_group, base_lr in zip(self.optimizer.param_groups, self._base_lrs, strict=True):
                 param_group["lr"] = base_lr * factor
             return True
         return False
@@ -129,7 +128,7 @@ class WarmupScheduler(LRScheduler):
             return [base_lr * factor for base_lr in self._base_lrs]
         return self.base_scheduler.get_last_lr()
 
-    def step(self, epoch: Optional[int] = None, metrics: Optional[float] = None) -> None:
+    def step(self, epoch: int | None = None, metrics: float | None = None) -> None:
         """Advance the scheduler by one epoch.
 
         During warmup, updates LR linearly. After warmup, delegates
@@ -146,7 +145,7 @@ class WarmupScheduler(LRScheduler):
 
         if self.last_epoch < self.warmup_epochs:
             factor = _warmup_factor(self.last_epoch, self.warmup_epochs, self.warmup_start_factor)
-            for param_group, base_lr in zip(self.optimizer.param_groups, self._base_lrs):
+            for param_group, base_lr in zip(self.optimizer.param_groups, self._base_lrs, strict=True):
                 param_group["lr"] = base_lr * factor
         else:
             if metrics is not None:
@@ -184,7 +183,7 @@ class CosineScheduler(_WarmupMixin):
         self._base_lrs = [group["lr"] for group in optimizer.param_groups]
         self._current_epoch = 0
 
-    def step(self, epoch: Optional[int] = None, metrics: Optional[float] = None) -> None:
+    def step(self, epoch: int | None = None, metrics: float | None = None) -> None:
         """Advance the scheduler by one epoch.
 
         Args:
@@ -193,7 +192,7 @@ class CosineScheduler(_WarmupMixin):
         """
         self._advance_epoch(epoch)
 
-        for param_group, base_lr in zip(self.optimizer.param_groups, self._base_lrs):
+        for param_group, base_lr in zip(self.optimizer.param_groups, self._base_lrs, strict=True):
             param_group["lr"] = self._compute_lr(base_lr)
 
     def _compute_lr(self, base_lr: float) -> float:
@@ -257,7 +256,7 @@ class PlateauScheduler(_WarmupMixin):
             min_lr=min_lr,
         )
 
-    def step(self, epoch: Optional[int] = None, metrics: Optional[float] = None) -> None:
+    def step(self, epoch: int | None = None, metrics: float | None = None) -> None:
         """Advance the scheduler by one epoch.
 
         Args:
@@ -320,7 +319,7 @@ class StepScheduler(_WarmupMixin):
             optimizer, step_size=step_size, gamma=gamma,
         )
 
-    def step(self, epoch: Optional[int] = None, metrics: Optional[float] = None) -> None:
+    def step(self, epoch: int | None = None, metrics: float | None = None) -> None:
         """Advance the scheduler by one epoch."""
         self._advance_epoch(epoch)
 
@@ -372,7 +371,7 @@ class OneCycleScheduler:
             pct_start=pct_start,
         )
 
-    def step(self, epoch: Optional[int] = None, metrics: Optional[float] = None) -> None:
+    def step(self, epoch: int | None = None, metrics: float | None = None) -> None:
         """Advance the scheduler by one epoch."""
         if epoch is not None:
             self._current_epoch = epoch

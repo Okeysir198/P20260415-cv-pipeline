@@ -8,7 +8,7 @@ for joint image+mask augmentation.
 import logging
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
 import cv2
 import numpy as np
@@ -20,9 +20,8 @@ from torch.utils.data import DataLoader, Dataset
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, IMG_EXTENSIONS
 from utils.config import resolve_path
-
-from core.p05_data.base_dataset import IMG_EXTENSIONS, IMAGENET_MEAN, IMAGENET_STD
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +59,8 @@ class SegmentationDataset(Dataset):
         self,
         data_config: dict,
         split: str = "train",
-        transforms: Optional[Any] = None,
-        base_dir: Optional[Union[str, Path]] = None,
+        transforms: Any | None = None,
+        base_dir: str | Path | None = None,
     ) -> None:
         if split not in ("train", "val", "test"):
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
@@ -83,7 +82,7 @@ class SegmentationDataset(Dataset):
         if not self.img_dir.exists():
             raise FileNotFoundError(f"Image directory not found: {self.img_dir}")
 
-        self.img_paths: List[Path] = sorted(
+        self.img_paths: list[Path] = sorted(
             p for p in self.img_dir.iterdir()
             if p.suffix.lower() in IMG_EXTENSIONS
         )
@@ -109,7 +108,7 @@ class SegmentationDataset(Dataset):
     def __len__(self) -> int:
         return len(self.img_paths)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, str]:
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, str]:
         """Get a single sample.
 
         Returns:
@@ -178,7 +177,7 @@ class _SegmentationTransform:
 
     def __call__(
         self, image_bgr_np: np.ndarray, mask_np: np.ndarray
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply transforms to image and mask jointly.
 
         Args:
@@ -215,9 +214,9 @@ class _SegmentationTransform:
 
 def build_segmentation_transforms(
     is_train: bool,
-    input_size: Tuple[int, int] = (512, 512),
-    mean: Optional[list] = None,
-    std: Optional[list] = None,
+    input_size: tuple[int, int] = (512, 512),
+    mean: list | None = None,
+    std: list | None = None,
 ) -> _SegmentationTransform:
     """Build segmentation transforms with joint image+mask augmentation.
 
@@ -274,7 +273,7 @@ def build_segmentation_transforms(
 
 
 def segmentation_collate_fn(
-    batch: List[Tuple[torch.Tensor, torch.Tensor, str]],
+    batch: list[tuple[torch.Tensor, torch.Tensor, str]],
 ) -> dict:
     """Collate for segmentation: stack images, list masks.
 
@@ -282,7 +281,7 @@ def segmentation_collate_fn(
         Dict with ``"images"`` (B, C, H, W), ``"targets"`` list of
         (H, W) long tensors, ``"paths"`` list of strings.
     """
-    images, masks, paths = zip(*batch)
+    images, masks, paths = zip(*batch, strict=True)
     images = torch.stack(images, dim=0)
     return {"images": images, "targets": list(masks), "paths": list(paths)}
 
@@ -296,7 +295,7 @@ def build_segmentation_dataloader(
     data_config: dict,
     split: str,
     training_config: dict,
-    base_dir: Optional[Union[str, Path]] = None,
+    base_dir: str | Path | None = None,
 ) -> DataLoader:
     """Build a segmentation DataLoader.
 

@@ -4,12 +4,11 @@ Reads image files and corresponding YOLO-format label ``.txt`` files
 (one row per object: ``class_id cx cy w h``, normalised 0-1).
 """
 
+import logging
 import random
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
-
-import logging
+from typing import Any
 
 import cv2
 import numpy as np
@@ -19,7 +18,12 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from core.p05_data.base_dataset import BaseDataset, IMG_EXTENSIONS, IMAGENET_MEAN, IMAGENET_STD  # noqa: F401
+from core.p05_data.base_dataset import (  # noqa: F401
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    IMG_EXTENSIONS,
+    BaseDataset,
+)
 from core.p05_data.transforms import build_transforms
 from utils.config import resolve_path
 
@@ -66,8 +70,8 @@ class YOLOXDataset(BaseDataset):
         self,
         data_config: dict,
         split: str = "train",
-        transforms: Optional[Any] = None,
-        base_dir: Optional[Union[str, Path]] = None,
+        transforms: Any | None = None,
+        base_dir: str | Path | None = None,
     ) -> None:
         if split not in ("train", "val", "test"):
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
@@ -89,7 +93,7 @@ class YOLOXDataset(BaseDataset):
         self.label_dir = self.img_dir.parent / "labels"
 
         # Collect image paths
-        self.img_paths: List[Path] = sorted(
+        self.img_paths: list[Path] = sorted(
             p for p in self.img_dir.iterdir()
             if p.suffix.lower() in IMG_EXTENSIONS
         )
@@ -201,7 +205,7 @@ class YOLOXDataset(BaseDataset):
         return data[:, :5] if data.shape[1] >= 5 else np.zeros((0, 5), dtype=np.float32)
 
     def format_target(
-        self, raw_target: np.ndarray, image_size: Tuple[int, int]
+        self, raw_target: np.ndarray, image_size: tuple[int, int]
     ) -> np.ndarray:
         """Return raw YOLO targets as-is (already normalised 0-1).
 
@@ -244,7 +248,7 @@ class YOLOXDataset(BaseDataset):
         targets = self._load_label(img_path)
         return {"image": image, "targets": targets}
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, str]:
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, str]:
         """Get a single sample.
 
         Args:
@@ -288,7 +292,7 @@ class YOLOXDataset(BaseDataset):
 # ---------------------------------------------------------------------------
 
 def collate_fn(
-    batch: List[Tuple[torch.Tensor, torch.Tensor, str]],
+    batch: list[tuple[torch.Tensor, torch.Tensor, str]],
 ) -> dict:
     """Custom collate for variable-length targets.
 
@@ -302,7 +306,7 @@ def collate_fn(
         - ``targets``: list of B tensors, each (N_i, 5).
         - ``paths``: list of B image path strings.
     """
-    images, targets_list, paths = zip(*batch)
+    images, targets_list, paths = zip(*batch, strict=True)
     images = torch.stack(images, dim=0)
     return {"images": images, "targets": list(targets_list), "paths": list(paths)}
 
@@ -315,7 +319,7 @@ def build_dataloader(
     data_config: dict,
     split: str,
     training_config: dict,
-    base_dir: Optional[Union[str, Path]] = None,
+    base_dir: str | Path | None = None,
 ) -> DataLoader:
     """Build a DataLoader from data and training config dicts.
 
@@ -428,7 +432,7 @@ def _build_weighted_sampler(
         active_indices = list(range(len(dataset)))
 
     class_counts = np.zeros(raw_ds.num_classes, dtype=np.float64)
-    image_classes: List[int] = []
+    image_classes: list[int] = []
 
     for idx in active_indices:
         img_path = raw_ds.img_paths[idx]
@@ -446,10 +450,7 @@ def _build_weighted_sampler(
 
     # Compute per-class weight
     class_counts = np.maximum(class_counts, 1.0)
-    if mode == "sqrt":
-        class_weights = 1.0 / np.sqrt(class_counts)
-    else:
-        class_weights = 1.0 / class_counts
+    class_weights = 1.0 / np.sqrt(class_counts) if mode == "sqrt" else 1.0 / class_counts
     class_weights /= class_weights.sum()
     min_weight = float(class_weights.min())
 

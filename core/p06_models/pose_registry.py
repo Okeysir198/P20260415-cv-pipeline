@@ -5,20 +5,20 @@ time, :func:`build_pose_model` looks up ``config["pose_model"]["arch"]`` and
 dispatches to the corresponding builder function.
 """
 
-from typing import Callable, Dict
+from collections.abc import Callable
 
 from core.p06_models.pose_base import PoseModel
-from core.p06_models.registry import GenericRegistry
+from utils.registry import Registry
 
-POSE_MODEL_REGISTRY: Dict[str, Callable] = {}
-_POSE_VARIANT_MAP: Dict[str, str] = {}
+POSE_MODEL_REGISTRY: dict[str, Callable] = {}
+_POSE_VARIANT_MAP: dict[str, str] = {}
 
-_pose_registry = GenericRegistry(
+_pose_registry = Registry(
+    entity_name="pose model",
+    config_key="pose_model",
+    default_arch="rtmpose-s",
     registry=POSE_MODEL_REGISTRY,
     variant_map=_POSE_VARIANT_MAP,
-    default_arch="rtmpose-s",
-    config_key="pose_model",
-    entity_name="pose model",
 )
 
 

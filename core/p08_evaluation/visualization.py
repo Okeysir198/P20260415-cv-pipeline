@@ -5,7 +5,7 @@ Supervision annotators are used for bounding box drawing.
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import cv2
 import matplotlib
@@ -29,9 +29,9 @@ def draw_bboxes(
     image: np.ndarray,
     boxes: np.ndarray,
     labels: np.ndarray,
-    scores: Optional[np.ndarray] = None,
-    class_names: Optional[Dict[int, str]] = None,
-    colors: Optional[Dict[int, Tuple[int, int, int]]] = None,
+    scores: np.ndarray | None = None,
+    class_names: dict[int, str] | None = None,
+    colors: dict[int, tuple[int, int, int]] | None = None,
     thickness: int = 2,
     font_scale: float = 0.5,
 ) -> np.ndarray:
@@ -96,10 +96,10 @@ def draw_bboxes(
 
 def plot_confusion_matrix(
     cm: np.ndarray,
-    class_names: List[str],
-    save_path: Optional[str] = None,
+    class_names: list[str],
+    save_path: str | None = None,
     normalize: bool = True,
-    figsize: Tuple[int, int] = (10, 8),
+    figsize: tuple[int, int] = (10, 8),
 ) -> matplotlib.figure.Figure:
     """Plot confusion matrix as a heatmap.
 
@@ -176,8 +176,8 @@ def plot_pr_curve(
     recall: np.ndarray,
     ap: float,
     class_name: str,
-    save_path: Optional[str] = None,
-    figsize: Tuple[int, int] = (8, 6),
+    save_path: str | None = None,
+    figsize: tuple[int, int] = (8, 6),
 ) -> matplotlib.figure.Figure:
     """Plot precision-recall curve for a single class.
 
@@ -216,9 +216,9 @@ def plot_pr_curve(
 
 
 def plot_training_curves(
-    history: Dict[str, List[float]],
-    save_path: Optional[str] = None,
-    figsize: Tuple[int, int] = (14, 5),
+    history: dict[str, list[float]],
+    save_path: str | None = None,
+    figsize: tuple[int, int] = (14, 5),
 ) -> matplotlib.figure.Figure:
     """Plot training/validation loss and mAP curves.
 
@@ -300,10 +300,10 @@ def plot_training_curves(
 
 
 def plot_class_distribution(
-    class_counts: Dict[str, int],
+    class_counts: dict[str, int],
     title: str = "",
-    save_path: Optional[str] = None,
-    figsize: Tuple[int, int] = (10, 5),
+    save_path: str | None = None,
+    figsize: tuple[int, int] = (10, 5),
 ) -> matplotlib.figure.Figure:
     """Bar chart of class instance distribution.
 
@@ -332,7 +332,7 @@ def plot_class_distribution(
     ax.set_title(title or "Class Distribution")
 
     # Value labels on bars
-    for bar, count in zip(bars, counts):
+    for bar, count in zip(bars, counts, strict=True):
         ax.text(
             bar.get_x() + bar.get_width() / 2, bar.get_height(),
             f"{count:,}", ha="center", va="bottom", fontsize=9,
@@ -353,13 +353,13 @@ def plot_class_distribution(
 
 
 def create_detection_grid(
-    images: List[np.ndarray],
-    predictions: List[Dict],
-    class_names: Dict[int, str],
+    images: list[np.ndarray],
+    predictions: list[dict],
+    class_names: dict[int, str],
     nrows: int = 2,
     ncols: int = 4,
-    save_path: Optional[str] = None,
-    figsize: Optional[Tuple[float, float]] = None,
+    save_path: str | None = None,
+    figsize: tuple[float, float] | None = None,
 ) -> matplotlib.figure.Figure:
     """Create a grid of images with detection results drawn.
 
@@ -413,9 +413,9 @@ def create_detection_grid(
 
 
 def plot_error_breakdown(
-    summary: Dict,
-    save_path: Optional[str] = None,
-    figsize: Tuple[int, int] = (12, 6),
+    summary: dict,
+    save_path: str | None = None,
+    figsize: tuple[int, int] = (12, 6),
 ) -> matplotlib.figure.Figure:
     """Stacked bar chart of TP/FP/FN per class.
 
@@ -472,9 +472,9 @@ def plot_error_breakdown(
 
 
 def plot_confidence_histogram(
-    errors: List["ErrorCase"],
-    save_path: Optional[str] = None,
-    figsize: Tuple[int, int] = (10, 5),
+    errors: list["ErrorCase"],
+    save_path: str | None = None,
+    figsize: tuple[int, int] = (10, 5),
 ) -> matplotlib.figure.Figure:
     """Histogram of false positive confidence scores.
 
@@ -511,9 +511,9 @@ def plot_confidence_histogram(
 
 
 def plot_size_recall(
-    summary: Dict,
-    save_path: Optional[str] = None,
-    figsize: Tuple[int, int] = (8, 5),
+    summary: dict,
+    save_path: str | None = None,
+    figsize: tuple[int, int] = (8, 5),
 ) -> matplotlib.figure.Figure:
     """Bar chart of FP/FN counts by object size category (COCO).
 
@@ -539,7 +539,7 @@ def plot_size_recall(
 
     ax.set_xticks(x)
     ax.set_xticklabels([
-        f"small\n(<32px)", "medium\n(<96px)", "large\n(>=96px)",
+        "small\n(<32px)", "medium\n(<96px)", "large\n(>=96px)",
     ])
     ax.set_ylabel("Count")
     ax.set_title("Errors by Object Size (COCO categories)")
@@ -554,12 +554,12 @@ def plot_size_recall(
 
 
 def plot_hardest_images_grid(
-    errors: List["ErrorCase"],
-    images: List[np.ndarray],
-    class_names: Dict[int, str],
+    errors: list["ErrorCase"],
+    images: list[np.ndarray],
+    class_names: dict[int, str],
     top_n: int = 8,
-    save_path: Optional[str] = None,
-    figsize: Optional[Tuple[float, float]] = None,
+    save_path: str | None = None,
+    figsize: tuple[float, float] | None = None,
 ) -> matplotlib.figure.Figure:
     """Grid of hardest images with error boxes drawn via supervision annotators.
 
@@ -575,7 +575,7 @@ def plot_hardest_images_grid(
         matplotlib Figure object.
     """
     # Rank images by error count
-    per_image: Dict[int, int] = {}
+    per_image: dict[int, int] = {}
     for err in errors:
         per_image[err.image_idx] = per_image.get(err.image_idx, 0) + 1
     ranked = sorted(per_image.items(), key=lambda item: -item[1])[:top_n]
@@ -652,10 +652,10 @@ def plot_hardest_images_grid(
 
 
 def plot_threshold_curves(
-    threshold_results: Dict[int, Dict],
-    class_names: Dict[int, str],
-    save_path: Optional[str] = None,
-    figsize: Tuple[int, int] = (10, 6),
+    threshold_results: dict[int, dict],
+    class_names: dict[int, str],
+    save_path: str | None = None,
+    figsize: tuple[int, int] = (10, 6),
 ) -> matplotlib.figure.Figure:
     """F1 vs confidence threshold curves per class with optimal points.
 

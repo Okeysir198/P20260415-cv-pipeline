@@ -11,7 +11,6 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple
 
 from tqdm import tqdm
 
@@ -23,7 +22,6 @@ from core.p00_data_prep.adapters.detection import DetectionAdapter
 from core.p00_data_prep.core.splitter import SplitGenerator
 from core.p00_data_prep.utils.file_ops import FileOps
 from utils.config import load_config, resolve_path
-
 
 TASK_ADAPTERS = {
     "detection": DetectionAdapter,
@@ -222,7 +220,7 @@ def run_data_prep(config: dict, args) -> None:
     )
 
     # Count images actually written per source
-    source_counts: Dict[str, int] = {}
+    source_counts: dict[str, int] = {}
     for sample in samples:
         if "_split" in sample:
             src = sample.get("source", "unknown")
@@ -274,7 +272,7 @@ def resplit_only(output_dir: Path, ratios: tuple, seed: int, task_type: str) -> 
                             parts = line.strip().split()
                             if parts:
                                 labels.append(parts[0])
-                    except (OSError, IOError):
+                    except OSError:
                         pass
                 samples.append({
                     "stem": stem,
@@ -292,7 +290,7 @@ def resplit_only(output_dir: Path, ratios: tuple, seed: int, task_type: str) -> 
     # Reassign.
     splitter = SplitGenerator(ratios=ratios, seed=seed, stratified=True)
     assignment = splitter.assign_splits(samples)
-    new_split_of: Dict[str, str] = {}
+    new_split_of: dict[str, str] = {}
     for split, items in assignment.items():
         for item in items:
             new_split_of[item["stem"]] = split
@@ -323,7 +321,7 @@ def _ascii_bar(count: int, max_count: int, width: int = 12) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-def _scan_label_files(output_dir: Path, classes: list) -> Tuple[dict, dict]:
+def _scan_label_files(output_dir: Path, classes: list) -> tuple[dict, dict]:
     """One-pass scan of all label files in output_dir/{train,val,test}/labels/.
 
     Returns:
@@ -380,7 +378,7 @@ def _write_dataset_report(
     stats: dict,
     splits_file: Path,
     ratios: tuple,
-    source_counts: Dict[str, int],
+    source_counts: dict[str, int],
     config_path: str = "",
 ) -> None:
     """Generate DATASET_REPORT.md summarizing the prepared dataset."""
@@ -420,7 +418,7 @@ def _write_dataset_report(
         except ValueError:
             rel_config = config_path
     else:
-        rel_config = f"features/.../configs/00_data_preparation.yaml"
+        rel_config = "features/.../configs/00_data_preparation.yaml"
 
     # ════════════════════════════════════════════════════════════════════════
     title = dataset_name.replace("_", " ").title()

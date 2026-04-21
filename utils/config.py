@@ -5,14 +5,14 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 import yaml
 
 _VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
 
-def load_config(path: Union[str, Path]) -> dict:
+def load_config(path: str | Path) -> dict:
     """Load a YAML config file and resolve relative paths.
 
     Args:
@@ -26,7 +26,7 @@ def load_config(path: Union[str, Path]) -> dict:
         yaml.YAMLError: If the YAML is malformed.
     """
     path = Path(path)
-    with open(path, "r") as f:
+    with open(path) as f:
         config = yaml.safe_load(f)
 
     if config is None:
@@ -91,7 +91,7 @@ def validate_config(config: dict, schema: str) -> bool:
     return validators[schema](config)
 
 
-def resolve_path(path_str: str, base_dir: Union[str, Path]) -> Path:
+def resolve_path(path_str: str, base_dir: str | Path) -> Path:
     """Resolve a potentially relative path against a base directory.
 
     Args:
@@ -107,7 +107,7 @@ def resolve_path(path_str: str, base_dir: Union[str, Path]) -> Path:
     return (Path(base_dir) / path).resolve()
 
 
-def feature_name_from_config_path(config_path: Union[str, Path]) -> str:
+def feature_name_from_config_path(config_path: str | Path) -> str:
     """Derive the feature folder name from a config file or config-dir path.
 
     Assumes the repo convention ``features/<feature>/configs/<step>.yaml``:
@@ -143,7 +143,7 @@ def feature_name_from_config_path(config_path: Union[str, Path]) -> str:
 def generate_run_dir(
     use_case: str,
     step: str,
-    base_dir: Union[str, Path, None] = None,
+    base_dir: str | Path | None = None,
 ) -> Path:
     """Generate a timestamped run directory under ``features/<use_case>/runs/``.
 

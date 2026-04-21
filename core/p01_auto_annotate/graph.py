@@ -5,18 +5,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from utils.langgraph_common import should_continue
 from core.p01_auto_annotate.nodes import (
     AutoAnnotateState,
-    scan_node,
-    annotate_batch,
-    validate_batch,
-    nms_filter_batch,
-    write_batch,
     aggregate_node,
+    annotate_batch,
+    nms_filter_batch,
+    scan_node,
+    validate_batch,
+    write_batch,
 )
+from utils.langgraph_common import should_continue
 
 
 def build_graph():

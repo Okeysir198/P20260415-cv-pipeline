@@ -38,6 +38,7 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 # CUDA_VISIBLE_DEVICES if the user set one. Safe to call before `import
 # torch` (auto_select_gpu uses only subprocess + env vars).
 from utils.device import auto_select_gpu  # noqa: E402
+
 auto_select_gpu()
 
 import torch  # noqa: E402
@@ -52,6 +53,7 @@ torch.use_deterministic_algorithms(True, warn_only=True)
 # eval batch and bloat training logs without signaling anything actionable.
 # Neither hides real errors — both are narrow, specific messages.
 import warnings as _warnings
+
 _warnings.filterwarnings(
     "ignore",
     message=r".*grid_sampler_2d_backward_cuda does not have a deterministic.*",

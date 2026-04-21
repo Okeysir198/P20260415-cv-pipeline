@@ -5,12 +5,13 @@ accumulates per-class violation counters, and triggers alerts based
 on configurable thresholds and confirmation windows.
 """
 
+import contextlib
 import logging
 import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import av
 import cv2
@@ -23,6 +24,7 @@ from core.p10_inference.predictor import DetectionPredictor
 logger = logging.getLogger(__name__)
 
 import supervision as sv
+
 import core.p10_inference.supervision_bridge as _sv_bridge
 
 # ---------------------------------------------------------------------------
@@ -74,7 +76,7 @@ class _H264Writer:
 # immediately (no multi-frame confirmation).
 # ---------------------------------------------------------------------------
 
-_NEUTRAL_ALERT_DEFAULTS: Dict[str, Any] = {
+_NEUTRAL_ALERT_DEFAULTS: dict[str, Any] = {
     "confidence_thresholds": {},   # {class_name: float} — empty ⇒ use global conf
     "frame_windows": {},           # {class_name: int}   — empty ⇒ fire immediately
     "window_ratio": 0.8,
@@ -83,8 +85,8 @@ _NEUTRAL_ALERT_DEFAULTS: Dict[str, Any] = {
 
 
 def load_alert_config(
-    path: Union[str, Path, None],
-) -> Dict[str, Any]:
+    path: str | Path | None,
+) -> dict[str, Any]:
     """Load the ``alerts:`` block from a feature's ``10_inference.yaml``.
 
     Merges file contents over :data:`_NEUTRAL_ALERT_DEFAULTS`. Returns the
@@ -97,7 +99,7 @@ def load_alert_config(
     Returns:
         Alert-config dict suitable for passing to :class:`VideoProcessor`.
     """
-    merged: Dict[str, Any] = {
+    merged: dict[str, Any] = {
         "confidence_thresholds": dict(_NEUTRAL_ALERT_DEFAULTS["confidence_thresholds"]),
         "frame_windows": dict(_NEUTRAL_ALERT_DEFAULTS["frame_windows"]),
         "window_ratio": _NEUTRAL_ALERT_DEFAULTS["window_ratio"],
@@ -149,11 +151,11 @@ class VideoProcessor:
     def __init__(
         self,
         predictor: DetectionPredictor,
-        alert_config: Optional[Dict[str, Any]] = None,
+        alert_config: dict[str, Any] | None = None,
         enable_tracking: bool = False,
-        tracker_config: Optional[Dict[str, Any]] = None,
-        pose_predictor: Optional[Any] = None,
-        face_predictor: Optional[Any] = None,
+        tracker_config: dict[str, Any] | None = None,
+        pose_predictor: Any | None = None,
+        face_predictor: Any | None = None,
     ) -> None:
         self.predictor = predictor
         self.pose_predictor = pose_predictor
@@ -201,15 +203,15 @@ class VideoProcessor:
     def process_stream(
         self,
         source: str,
-        output_path: Optional[Union[str, Path]] = None,
+        output_path: str | Path | None = None,
         show: bool = False,
         save_frames: bool = False,
-        frame_dir: Optional[Union[str, Path]] = None,
+        frame_dir: str | Path | None = None,
         skip_frames: int = 0,
         max_frames: int = 0,
         reconnect_delay: float = 5.0,
         max_reconnects: int = 10,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Process a live stream (RTSP, HTTP, or device index).
 
         Supports RTSP URLs (``rtsp://...``), HTTP streams (``http://...``),
@@ -236,8 +238,8 @@ class VideoProcessor:
         if source.isdigit():
             cap_source = int(source)
 
-        all_alerts: List[Dict[str, Any]] = []
-        class_counts: Dict[str, int] = defaultdict(int)
+        all_alerts: list[dict[str, Any]] = []
+        class_counts: dict[str, int] = defaultdict(int)
         t_start = time.time()
         processed = 0
         total_detections = 0
@@ -245,7 +247,7 @@ class VideoProcessor:
         stride = max(skip_frames + 1, 1)
         frame_idx = 0
 
-        resolved_frame_dir: Optional[Path] = None
+        resolved_frame_dir: Path | None = None
         if save_frames:
             resolved_frame_dir = Path(frame_dir) if frame_dir else Path("stream_frames")
             resolved_frame_dir.mkdir(parents=True, exist_ok=True)
@@ -356,13 +358,13 @@ class VideoProcessor:
 
     def process_video(
         self,
-        video_path: Union[str, Path],
-        output_path: Optional[Union[str, Path]] = None,
+        video_path: str | Path,
+        output_path: str | Path | None = None,
         show: bool = False,
         save_frames: bool = False,
-        frame_dir: Optional[Union[str, Path]] = None,
+        frame_dir: str | Path | None = None,
         skip_frames: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Process an entire video file.
 
         Args:
@@ -401,12 +403,12 @@ class VideoProcessor:
         self._reset_state()
 
         # Processing loop accumulators
-        all_alerts: List[Dict[str, Any]] = []
-        class_counts: Dict[str, int] = defaultdict(int)
+        all_alerts: list[dict[str, Any]] = []
+        class_counts: dict[str, int] = defaultdict(int)
         t_start = time.time()
 
         # Normalize frame_dir to Path for downstream methods
-        resolved_frame_dir: Optional[Path] = None
+        resolved_frame_dir: Path | None = None
         if save_frames:
             if frame_dir is None:
                 resolved_frame_dir = video_path.parent / f"{video_path.stem}_frames"
@@ -435,19 +437,19 @@ class VideoProcessor:
     def _process_video_sv(
         self,
         video_path: Path,
-        output_path: Optional[Union[str, Path]],
+        output_path: str | Path | None,
         show: bool,
         save_frames: bool,
-        frame_dir: Optional[Path],
+        frame_dir: Path | None,
         skip_frames: int,
         fps_video: float,
         total_frames: int,
         width: int,
         height: int,
-        all_alerts: List[Dict[str, Any]],
-        class_counts: Dict[str, int],
+        all_alerts: list[dict[str, Any]],
+        class_counts: dict[str, int],
         t_start: float,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Process video using supervision video I/O."""
         assert sv is not None  # narrowing for type checkers
         stride = max(skip_frames + 1, 1)
@@ -513,7 +515,7 @@ class VideoProcessor:
 
     def process_frame(
         self, frame: np.ndarray, frame_idx: int
-    ) -> Tuple[np.ndarray, Dict[str, np.ndarray], List[Dict[str, Any]]]:
+    ) -> tuple[np.ndarray, dict[str, np.ndarray], list[dict[str, Any]]]:
         """Process a single video frame.
 
         Args:
@@ -527,9 +529,8 @@ class VideoProcessor:
         detections = self.predictor.predict(frame)
 
         # Optional pose estimation on detected persons
-        pose_results = None
         if self.pose_predictor is not None:
-            pose_results = self.pose_predictor.predict(frame)
+            self.pose_predictor.predict(frame)
 
         # Optional face recognition on violation detections
         face_results = None
@@ -561,10 +562,10 @@ class VideoProcessor:
 
     def _check_alerts(
         self,
-        detections: Dict[str, np.ndarray],
+        detections: dict[str, np.ndarray],
         frame_idx: int,
-        face_results: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        face_results: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Check detections against alert rules.
 
         Alert rules (from project spec):
@@ -589,10 +590,10 @@ class VideoProcessor:
         window_ratio = self._window_ratio
         cooldown = self._cooldown_frames
 
-        alerts: List[Dict[str, Any]] = []
+        alerts: list[dict[str, Any]] = []
 
         # Collect per-class identity info from face recognition results
-        _face_identities: Dict[str, List[str]] = {}
+        _face_identities: dict[str, list[str]] = {}
         if face_results is not None:
             for i, identity in enumerate(face_results.get("identities", [])):
                 if identity is not None and identity != "unknown":
@@ -601,7 +602,7 @@ class VideoProcessor:
                         _face_identities.setdefault(names[i], []).append(identity)
 
         # Track which classes had a violation this frame
-        violation_classes: Dict[str, float] = {}
+        violation_classes: dict[str, float] = {}
         for i, name in enumerate(detections.get("class_names", [])):
             score = float(detections["scores"][i])
             threshold = conf_thresholds.get(name)
@@ -625,7 +626,7 @@ class VideoProcessor:
                     # Respect cooldown
                     last = self._last_alert_frame.get(class_name, -cooldown - 1)
                     if frame_idx - last >= cooldown:
-                        alert_dict: Dict[str, Any] = {
+                        alert_dict: dict[str, Any] = {
                             "type": class_name,
                             "confidence": violation_classes[class_name],
                             "message": (
@@ -657,7 +658,7 @@ class VideoProcessor:
                                 class_name,
                                 recent_peaks[-1] if recent_peaks else 0.0,
                             )
-                            alert_dict_w: Dict[str, Any] = {
+                            alert_dict_w: dict[str, Any] = {
                                 "type": class_name,
                                 "confidence": best_conf,
                                 "message": (
@@ -690,17 +691,15 @@ class VideoProcessor:
     def _reset_state(self) -> None:
         """Reset alert tracking state for a new video."""
         self._frame_count: int = 0
-        self._violation_history: Dict[str, List[int]] = defaultdict(list)
-        self._last_alert_frame: Dict[str, int] = {}
-        self._peak_conf: Dict[str, List[float]] = {}
+        self._violation_history: dict[str, list[int]] = defaultdict(list)
+        self._last_alert_frame: dict[str, int] = {}
+        self._peak_conf: dict[str, list[float]] = {}
         if self.enable_tracking and self._tracker is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._tracker = _sv_bridge.create_tracker(self.tracker_config)
-            except Exception:
-                pass
 
     def _draw_alerts(
-        self, image: np.ndarray, alerts: List[Dict[str, Any]]
+        self, image: np.ndarray, alerts: list[dict[str, Any]]
     ) -> np.ndarray:
         """Overlay alert banners on the top of the image.
 

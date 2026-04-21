@@ -1,7 +1,7 @@
 """Shared LangGraph helpers used across tools."""
 
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -11,12 +11,12 @@ def replace_reducer(_old: Any, new: Any) -> Any:
     return new
 
 
-def list_append_reducer(_old: List, new: List) -> List:
+def list_append_reducer(_old: list, new: list) -> list:
     """Reducer for image_results: replace (nodes manage appending themselves)."""
     return new
 
 
-def get_batch_range(state: dict) -> Tuple[int, int]:
+def get_batch_range(state: dict) -> tuple[int, int]:
     """Return ``(start, end)`` indices for the current batch.
 
     Computes from state dict with keys ``current_batch_idx``, ``batch_size``,
@@ -29,7 +29,7 @@ def get_batch_range(state: dict) -> Tuple[int, int]:
     return start, end
 
 
-def get_batch_paths(state: dict) -> List[Tuple[str, Path]]:
+def get_batch_paths(state: dict) -> list[tuple[str, Path]]:
     """Return ``(split, image_path)`` tuples for the current batch.
 
     Args:
@@ -39,7 +39,7 @@ def get_batch_paths(state: dict) -> List[Tuple[str, Path]]:
         List of ``(split, Path)`` pairs for the current batch window.
     """
     paths_key = "sampled_paths" if "sampled_paths" in state else "image_paths"
-    all_paths: List[Tuple[str, Path]] = []
+    all_paths: list[tuple[str, Path]] = []
     for split, paths in state[paths_key].items():
         for p in paths:
             all_paths.append((split, Path(p)))

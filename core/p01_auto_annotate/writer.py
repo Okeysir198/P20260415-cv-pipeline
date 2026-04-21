@@ -9,7 +9,7 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -35,7 +35,7 @@ class LabelWriter:
         self,
         output_format: str = "bbox",
         dry_run: bool = False,
-        backup_dir: Optional[Path] = None,
+        backup_dir: Path | None = None,
     ) -> None:
         self.output_format = output_format
         self.dry_run = dry_run
@@ -44,7 +44,7 @@ class LabelWriter:
     def write(
         self,
         image_path: Path,
-        detections: List[Dict[str, Any]],
+        detections: list[dict[str, Any]],
     ) -> bool:
         """Write label file(s) for an image.
 
@@ -82,7 +82,7 @@ class LabelWriter:
 
         return True
 
-    def _format_bbox(self, detections: List[Dict[str, Any]]) -> List[str]:
+    def _format_bbox(self, detections: list[dict[str, Any]]) -> list[str]:
         """Format detections as YOLO bbox lines.
 
         Args:
@@ -91,7 +91,7 @@ class LabelWriter:
         Returns:
             List of ``"class_id cx cy w h"`` strings.
         """
-        lines: List[str] = []
+        lines: list[str] = []
         for det in detections:
             line = (
                 f"{det['class_id']} "
@@ -101,7 +101,7 @@ class LabelWriter:
             lines.append(line)
         return lines
 
-    def _format_polygon(self, detections: List[Dict[str, Any]]) -> List[str]:
+    def _format_polygon(self, detections: list[dict[str, Any]]) -> list[str]:
         """Format detections as YOLO-seg polygon lines.
 
         Falls back to bbox format for detections without polygon data.
@@ -112,7 +112,7 @@ class LabelWriter:
         Returns:
             List of ``"class_id x1 y1 x2 y2 ... xN yN"`` strings.
         """
-        lines: List[str] = []
+        lines: list[str] = []
         for det in detections:
             polygon = det.get("polygon")
             if polygon and len(polygon) >= 6:
@@ -128,7 +128,7 @@ class LabelWriter:
             lines.append(line)
         return lines
 
-    def _write_file(self, path: Path, lines: List[str]) -> None:
+    def _write_file(self, path: Path, lines: list[str]) -> None:
         """Write lines to a file (respecting dry_run).
 
         If ``backup_dir`` is set and the target file already exists, the
@@ -153,10 +153,7 @@ class LabelWriter:
                 if part == "labels":
                     rel_start = i
                     break
-            if rel_start is not None:
-                rel_path = Path(*parts[rel_start:])
-            else:
-                rel_path = Path(path.name)
+            rel_path = Path(*parts[rel_start:]) if rel_start is not None else Path(path.name)
 
             backup_path = self.backup_dir / rel_path
             backup_path.parent.mkdir(parents=True, exist_ok=True)

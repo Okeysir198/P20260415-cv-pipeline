@@ -6,7 +6,6 @@ only adapts I/O format between timm and our trainer.
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 import timm as timm_lib
 import torch
@@ -62,7 +61,7 @@ class TimmModel(DetectionModel):
 
     def forward_with_loss(
         self, images: torch.Tensor, targets: list,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
         """Forward pass with cross-entropy loss.
 
         Args:
@@ -84,7 +83,7 @@ class TimmModel(DetectionModel):
 
     def get_param_groups(
         self, lr: float, weight_decay: float,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Split into backbone and classifier head groups.
 
         Uses timm's built-in get_classifier() to identify the head.

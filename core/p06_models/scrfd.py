@@ -19,7 +19,6 @@ Typical usage::
 """
 
 import logging
-from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
@@ -31,7 +30,7 @@ from core.p06_models.face_registry import _FACE_DETECTOR_VARIANT_MAP, register_f
 logger = logging.getLogger(__name__)
 
 # Default ONNX paths per variant
-_DEFAULT_ONNX_PATHS: Dict[str, str] = {
+_DEFAULT_ONNX_PATHS: dict[str, str] = {
     "scrfd-500m": "pretrained/scrfd_500m.onnx",
     "scrfd-2.5g": "pretrained/scrfd_2.5g.onnx",
 }
@@ -101,7 +100,7 @@ class SCRFDModel(FaceDetector):
         self._num_anchors = 1 if self._outputs_per_stride == 4 else 2
 
         # Cache for anchor grids keyed by (stride, height, width)
-        self._center_cache: Dict[Tuple[int, int, int], np.ndarray] = {}
+        self._center_cache: dict[tuple[int, int, int], np.ndarray] = {}
 
         logger.info(
             "Loaded SCRFD ONNX model: %s (input=%dx%d, outputs=%d, landmarks=%s)",
@@ -143,7 +142,7 @@ class SCRFDModel(FaceDetector):
 
     def _preprocess(
         self, image: np.ndarray
-    ) -> Tuple[np.ndarray, float, float]:
+    ) -> tuple[np.ndarray, float, float]:
         """Resize and normalize an image for SCRFD inference.
 
         Args:
@@ -174,10 +173,10 @@ class SCRFDModel(FaceDetector):
 
     def _decode_outputs(
         self,
-        outputs: List[np.ndarray],
+        outputs: list[np.ndarray],
         scale_h: float,
         scale_w: float,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Decode raw ONNX outputs into boxes, scores, and landmarks.
 
         Iterates over the 3 stride levels, generates anchor grids, and
@@ -331,7 +330,7 @@ class SCRFDModel(FaceDetector):
 
     def detect_faces(
         self, image: np.ndarray, bbox: np.ndarray
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Detect faces within a bounding box region.
 
         Crops the bbox region from the full image, runs SCRFD inference on
@@ -351,7 +350,7 @@ class SCRFDModel(FaceDetector):
                   (left_eye, right_eye, nose, left_mouth, right_mouth)
                   in full image coordinates. Zeros if model has no landmarks.
         """
-        empty_result: Dict[str, np.ndarray] = {
+        empty_result: dict[str, np.ndarray] = {
             "face_boxes": np.empty((0, 4), dtype=np.float32),
             "face_scores": np.empty((0,), dtype=np.float32),
             "landmarks": np.empty((0, 5, 2), dtype=np.float32),
@@ -407,7 +406,7 @@ class SCRFDModel(FaceDetector):
         }
 
     @property
-    def input_size(self) -> Tuple[int, int]:
+    def input_size(self) -> tuple[int, int]:
         """Expected network input size ``(H, W)``."""
         return (self._input_h, self._input_w)
 

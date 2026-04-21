@@ -6,16 +6,14 @@ schemas (COCO 17, MediaPipe 33) and mapping constants.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple
 
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # COCO 17-keypoint schema (used by RTMPose, most top-down estimators)
 # ---------------------------------------------------------------------------
 
-COCO_KEYPOINT_NAMES: List[str] = [
+COCO_KEYPOINT_NAMES: list[str] = [
     "nose",
     "left_eye",
     "right_eye",
@@ -35,7 +33,7 @@ COCO_KEYPOINT_NAMES: List[str] = [
     "right_ankle",
 ]
 
-COCO_SKELETON: List[Tuple[int, int]] = [
+COCO_SKELETON: list[tuple[int, int]] = [
     (0, 1),
     (0, 2),
     (1, 3),
@@ -58,7 +56,7 @@ COCO_SKELETON: List[Tuple[int, int]] = [
 # MediaPipe 33-landmark schema
 # ---------------------------------------------------------------------------
 
-MEDIAPIPE_KEYPOINT_NAMES: List[str] = [
+MEDIAPIPE_KEYPOINT_NAMES: list[str] = [
     "nose",
     "left_eye_inner",
     "left_eye",
@@ -94,7 +92,7 @@ MEDIAPIPE_KEYPOINT_NAMES: List[str] = [
     "right_foot_index",
 ]
 
-MEDIAPIPE_SKELETON: List[Tuple[int, int]] = [
+MEDIAPIPE_SKELETON: list[tuple[int, int]] = [
     (0, 2),
     (0, 5),
     (2, 7),
@@ -125,7 +123,7 @@ MEDIAPIPE_SKELETON: List[Tuple[int, int]] = [
 
 # Mapping from MediaPipe landmark indices to COCO keypoint indices.
 # Used by ``PoseModel.to_coco()`` for 33→17 conversion.
-MEDIAPIPE_TO_COCO: Dict[int, int] = {
+MEDIAPIPE_TO_COCO: dict[int, int] = {
     0: 0,  # nose → nose
     2: 1,  # left_eye → left_eye
     5: 2,  # right_eye → right_eye
@@ -165,7 +163,7 @@ class PoseModel(ABC):
     @abstractmethod
     def predict_keypoints(
         self, image: np.ndarray, bbox: np.ndarray
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Estimate keypoints for a single person.
 
         Args:
@@ -181,7 +179,7 @@ class PoseModel(ABC):
 
     def predict_keypoints_batch(
         self, image: np.ndarray, bboxes: np.ndarray
-    ) -> List[Dict[str, np.ndarray]]:
+    ) -> list[dict[str, np.ndarray]]:
         """Estimate keypoints for multiple persons.
 
         Default implementation loops over bboxes. Subclasses may override
@@ -202,7 +200,7 @@ class PoseModel(ABC):
 
     @property
     @abstractmethod
-    def keypoint_names(self) -> List[str]:
+    def keypoint_names(self) -> list[str]:
         """Ordered list of keypoint names."""
 
     @property
@@ -212,12 +210,12 @@ class PoseModel(ABC):
 
     @property
     @abstractmethod
-    def skeleton(self) -> List[Tuple[int, int]]:
+    def skeleton(self) -> list[tuple[int, int]]:
         """List of ``(idx_a, idx_b)`` pairs defining skeleton bones."""
 
     @property
     @abstractmethod
-    def input_size(self) -> Tuple[int, int]:
+    def input_size(self) -> tuple[int, int]:
         """Expected crop input size ``(H, W)``."""
 
     def to_coco(self, keypoints: np.ndarray) -> np.ndarray:

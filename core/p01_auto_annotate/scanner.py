@@ -7,12 +7,11 @@ and flat directory structures. Filter modes control which images are selected.
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.yolo_io import IMAGE_EXTENSIONS
 from utils.config import resolve_path
+from utils.yolo_io import IMAGE_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +33,11 @@ class ImageScanner:
 
     def __init__(
         self,
-        data_config: Optional[dict] = None,
-        config_dir: Optional[Path] = None,
-        image_dir: Optional[str] = None,
+        data_config: dict | None = None,
+        config_dir: Path | None = None,
+        image_dir: str | None = None,
         filter_mode: str = "missing",
-        splits: Optional[List[str]] = None,
+        splits: list[str] | None = None,
     ) -> None:
         self.data_config = data_config
         self.config_dir = Path(config_dir) if config_dir else Path(".")
@@ -49,7 +48,7 @@ class ImageScanner:
         if data_config is None and image_dir is None:
             raise ValueError("Either data_config or image_dir must be provided")
 
-    def scan(self) -> Dict[str, List[Path]]:
+    def scan(self) -> dict[str, list[Path]]:
         """Scan for images based on the configured input mode.
 
         Returns:
@@ -60,10 +59,10 @@ class ImageScanner:
             return self._scan_flat_dir()
         return self._scan_yolo_layout()
 
-    def _scan_yolo_layout(self) -> Dict[str, List[Path]]:
+    def _scan_yolo_layout(self) -> dict[str, list[Path]]:
         """Scan YOLO split layout: {split}/images/ directories."""
         assert self.data_config is not None, "data_config required for YOLO layout"
-        results: Dict[str, List[Path]] = {}
+        results: dict[str, list[Path]] = {}
 
         for split in self.splits:
             if split not in self.data_config:
@@ -92,7 +91,7 @@ class ImageScanner:
 
         return results
 
-    def _scan_flat_dir(self) -> Dict[str, List[Path]]:
+    def _scan_flat_dir(self) -> dict[str, list[Path]]:
         """Scan a flat directory for image files."""
         assert self.image_dir is not None, "image_dir required for flat dir mode"
         image_dir = Path(self.image_dir)
@@ -112,7 +111,7 @@ class ImageScanner:
 
         return {"default": filtered}
 
-    def _list_images(self, directory: Path) -> List[Path]:
+    def _list_images(self, directory: Path) -> list[Path]:
         """List all image files in a directory (non-recursive).
 
         Args:
@@ -127,7 +126,7 @@ class ImageScanner:
         ]
         return sorted(images)
 
-    def _apply_filter(self, image_paths: List[Path], yolo_layout: bool) -> List[Path]:
+    def _apply_filter(self, image_paths: list[Path], yolo_layout: bool) -> list[Path]:
         """Apply filter mode to image paths.
 
         Args:
@@ -142,7 +141,7 @@ class ImageScanner:
             return image_paths
 
         # "missing" mode: keep only images with no label or empty label
-        filtered: List[Path] = []
+        filtered: list[Path] = []
         for img_path in image_paths:
             label_path = self._get_label_path(img_path, yolo_layout)
             if not label_path.exists():

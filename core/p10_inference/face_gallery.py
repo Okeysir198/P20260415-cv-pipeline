@@ -7,7 +7,6 @@ runs on CUDA via a persistent ``torch.Tensor`` gallery matrix.
 
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -43,8 +42,8 @@ class FaceGallery:
         self.similarity_threshold = similarity_threshold
         self.embedding_dim = embedding_dim
         self._embeddings: np.ndarray = np.empty((0, embedding_dim), dtype=np.float32)
-        self._identities: List[str] = []
-        self._embeddings_gpu: Optional[torch.Tensor] = None
+        self._identities: list[str] = []
+        self._embeddings_gpu: torch.Tensor | None = None
         self._device = torch.device("cuda")
 
         if self.gallery_path.exists():
@@ -79,7 +78,7 @@ class FaceGallery:
         self._invalidate_gpu_cache()
         logger.info("Enrolled '%s' (gallery size: %d)", identity, self.size)
 
-    def match(self, embedding: np.ndarray) -> Tuple[str, float]:
+    def match(self, embedding: np.ndarray) -> tuple[str, float]:
         """Find the closest identity in the gallery.
 
         Args:
@@ -110,7 +109,7 @@ class FaceGallery:
             return (self._identities[best_idx], best_sim)
         return ("unknown", best_sim)
 
-    def match_batch(self, embeddings: np.ndarray) -> List[Tuple[str, float]]:
+    def match_batch(self, embeddings: np.ndarray) -> list[tuple[str, float]]:
         """Match multiple query embeddings against the gallery.
 
         Args:
@@ -136,8 +135,8 @@ class FaceGallery:
         best_sims_cpu = best_sims.cpu().tolist()
         best_indices_cpu = best_indices.cpu().tolist()
 
-        results: List[Tuple[str, float]] = []
-        for sim, idx in zip(best_sims_cpu, best_indices_cpu):
+        results: list[tuple[str, float]] = []
+        for sim, idx in zip(best_sims_cpu, best_indices_cpu, strict=True):
             if sim >= self.similarity_threshold:
                 results.append((self._identities[idx], float(sim)))
             else:
@@ -156,7 +155,7 @@ class FaceGallery:
         mask = np.array([ident != identity for ident in self._identities])
         removed = int(np.sum(~mask))
         self._embeddings = self._embeddings[mask]
-        self._identities = [ident for ident, keep in zip(self._identities, mask) if keep]
+        self._identities = [ident for ident, keep in zip(self._identities, mask, strict=True) if keep]
         if removed > 0:
             self._invalidate_gpu_cache()
             logger.info(
@@ -189,6 +188,6 @@ class FaceGallery:
         return len(self._identities)
 
     @property
-    def unique_identities(self) -> List[str]:
+    def unique_identities(self) -> list[str]:
         """List of unique enrolled identity names."""
         return sorted(set(self._identities))

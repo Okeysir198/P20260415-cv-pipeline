@@ -37,8 +37,8 @@ vs the arch.
 │   └── runs/                       (gitignored)
 │
 ├── our_rtdetr_v2_torchvision/      OUR pipeline, RT-DETRv2, torchvision v2 aug — DONE
-├── our_dfine_albumentations/       OUR pipeline, D-FINE, HF backend, Albumentations aug — DONE
-├── our_dfine_torchvision/          OUR pipeline, D-FINE, HF backend, torchvision v2 aug — PLACEHOLDER
+├── our_dfine_albumentations/       OUR pipeline, D-FINE, HF backend, Albumentations aug — DONE (n=5)
+├── our_dfine_torchvision/          OUR pipeline, D-FINE, HF backend, torchvision v2 aug — DONE (n=1)
 └── our_yolox/                      OUR pipeline, YOLOX-M, pytorch backend — PLACEHOLDER
 ```
 
@@ -341,9 +341,33 @@ mAP 0.2617 vs qubvel's 0.4485). Reverting to lr=5e-5 + keeping early
 `set_seed(42)` was the actual fix.
 
 **`our_dfine_albumentations/`** (same recipe via
-`core/p06_training/train.py --backend hf`) — 6-run spread 0.328-0.441
-across seeds 0 / 42×4 / 2024, mean 0.388 ± 0.042. Best-of-6 (0.441)
-exceeds reference. Matches reference within measured noise.
+`core/p06_training/train.py --backend hf`) — 5-run spread 0.328-0.441
+across seeds 0 / 42×3 / 2024, mean **0.383 ± 0.042**. Best-of-5
+(0.441) exceeds reference. Matches reference within measured noise.
+
+**`our_dfine_torchvision/`** (same recipe, torchvision v2 aug instead
+of Albumentations) — seed=42 single run: test mAP **0.430**,
+mAP₅₀ 0.617, train_runtime 635 s. Sits at +1.1σ above the Albu mean
+(inside noise band) and nearly matches Albu's best-of-5. Trains
+**~15 % faster** than Albu (635 s vs Albu mean 760 s) — mirrors
+the RT-DETRv2 finding: the "resize-first" reorder (`c4d3658`)
+closes the previously-observed TV slowdown on D-FINE too. No
+statistical signal differentiating the two backends on accuracy.
+**Torchvision v2 remains the recommended default** for D-FINE.
+
+Per-class TV-vs-Albu-mean comparison (seed=42):
+
+| class | Albu mean (n=5) | TV (n=1) | Δ |
+|---|---|---|---|
+| Coverall | 0.42 | 0.615 | +0.20 |
+| Face_Shield | 0.47 | 0.487 | +0.02 |
+| Gloves | 0.41 | 0.427 | +0.02 |
+| Goggles | 0.17 | 0.096 | −0.07 |
+| Mask | 0.42 | 0.524 | +0.10 |
+
+Goggles regression is within the per-class seed-lottery band (Albu
+single-seed std on Goggles is 0.08). Need n≥3 TV runs to call
+statistically.
 
 Two bugs were needed to reach this:
 1. **`bf16: true` stalls D-FINE** (val stuck at 0.15, eval_loss 2.2→2.9).

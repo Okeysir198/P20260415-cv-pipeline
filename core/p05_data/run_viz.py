@@ -26,16 +26,15 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from utils.config import load_config, feature_name_from_config_path, generate_run_dir
 from core.p05_data.detection_dataset import YOLOXDataset
 from core.p05_data.transforms import build_transforms
+from utils.config import feature_name_from_config_path, generate_run_dir, load_config
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -180,10 +179,10 @@ def generate_dataset_stats(
     data_cfg: dict,
     base_dir: str,
     class_names: dict,
-    splits: List[str],
+    splits: list[str],
     out_dir: Path,
     dpi: int = 120,
-    subset_indices: Optional[Dict[str, List[int]]] = None,
+    subset_indices: dict[str, list[int]] | None = None,
 ) -> None:
     """Generate dataset_stats.png: split sizes, class distribution, bbox stats.
 
@@ -196,8 +195,8 @@ def generate_dataset_stats(
     """
     import matplotlib
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     import matplotlib.gridspec as gridspec
+    import matplotlib.pyplot as plt
 
     # Collect stats per split (label-file pass only, no image I/O)
     stats = {}
@@ -209,14 +208,11 @@ def generate_dataset_stats(
             continue
 
         idx_list = (subset_indices or {}).get(split)
-        if idx_list is None:
-            img_paths = ds.img_paths
-        else:
-            img_paths = [ds.img_paths[i] for i in idx_list]
+        img_paths = ds.img_paths if idx_list is None else [ds.img_paths[i] for i in idx_list]
 
         class_counts: dict = {}
-        bbox_areas: List[float] = []
-        labels_per_image: List[int] = []
+        bbox_areas: list[float] = []
+        labels_per_image: list[int] = []
         n_empty = 0
 
         for img_path in img_paths:
@@ -273,7 +269,7 @@ def generate_dataset_stats(
     bars = ax0.barh(split_list, n_imgs, color=colors)
     ax0.set_title("Images per Split", fontsize=11, fontweight="bold")
     ax0.set_xlabel("# images")
-    for bar, n in zip(bars, n_imgs):
+    for bar, n in zip(bars, n_imgs, strict=True):
         ax0.text(
             bar.get_width() + max(n_imgs) * 0.02, bar.get_y() + bar.get_height() / 2,
             f"{n:,}", va="center", fontsize=9,
@@ -385,11 +381,11 @@ def generate_dataset_stats(
             capprops=dict(linewidth=1.2),
             flierprops=dict(marker=".", markersize=3, alpha=0.4),
         )
-        for patch, sp in zip(bp["boxes"], lpi_labels):
+        for patch, sp in zip(bp["boxes"], lpi_labels, strict=True):
             patch.set_facecolor(split_colors.get(sp, "#888"))
             patch.set_alpha(0.6)
         # Overlay individual mean markers
-        for i, (sp, data) in enumerate(zip(lpi_labels, lpi_data), start=1):
+        for i, (sp, data) in enumerate(zip(lpi_labels, lpi_data, strict=True), start=1):
             ax4.scatter(i, float(np.mean(data)), marker="D", color=split_colors.get(sp, "#888"),
                         s=30, zorder=5, label=f"{sp} mean={np.mean(data):.1f}")
     ax4.set_title("Labels per Image", fontsize=11, fontweight="bold")
@@ -416,13 +412,13 @@ def generate_dataset_stats(
         lines.append(f"  annotations    {s['n_annotations']:>7,}")
         lines.append(f"  avg labels/img {avg_lpi:>7.2f}")
         lines.append(f"  empty images   {s['n_empty']:>5} ({empty_pct:.1f}%)")
-        lines.append(f"  bbox size tiers:")
+        lines.append("  bbox size tiers:")
         lines.append(f"    tiny  (<1%)  {tiny_pct:>6.1f}%")
         lines.append(f"    small (1-5%) {small_pct:>6.1f}%")
         lines.append(f"    med  (5-15%) {med_pct:>6.1f}%")
         lines.append(f"    large (>15%) {large_pct:>6.1f}%")
         lines.append(f"  avg bbox area  {avg_area:.3f}%")
-        lines.append(f"  class counts:")
+        lines.append("  class counts:")
         for cid in all_class_ids:
             cnt = s["class_counts"].get(cid, 0)
             pct = cnt / max(s["n_annotations"], 1) * 100

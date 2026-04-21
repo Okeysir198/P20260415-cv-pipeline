@@ -13,7 +13,6 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import onnx
@@ -95,7 +94,7 @@ class ModelExporter:
         self.naming_template = config.get("naming", "{model}_{arch}_{imgsz}_v{version}")
         self.output_dir = config.get("output_dir", ".")
 
-    def _resolve_save_path(self, save_path: Optional[str]) -> str:
+    def _resolve_save_path(self, save_path: str | None) -> str:
         """Resolve the ONNX save path from explicit path or naming template.
 
         Args:
@@ -122,7 +121,7 @@ class ModelExporter:
 
     def export(
         self,
-        save_path: Optional[str] = None,
+        save_path: str | None = None,
         fmt: str = "onnx",
     ) -> str:
         """Export the model to the specified format.
@@ -153,7 +152,7 @@ class ModelExporter:
                 f"Available: onnx, tensorrt, openvino"
             )
 
-    def export_onnx(self, save_path: Optional[str] = None) -> str:
+    def export_onnx(self, save_path: str | None = None) -> str:
         """Export the model to ONNX format.
 
         Automatically selects the export backend:
@@ -175,7 +174,7 @@ class ModelExporter:
             return self._export_hf(save_path)
         return self._export_custom(save_path)
 
-    def _export_hf(self, save_path: Optional[str] = None) -> str:
+    def _export_hf(self, save_path: str | None = None) -> str:
         """Export an HF model via Optimum.
 
         Args:
@@ -189,11 +188,11 @@ class ModelExporter:
         """
         try:
             from optimum.exporters.onnx import main_export
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "optimum is required for exporting HF models. "
                 "Install it with: pip install optimum[exporters]"
-            )
+            ) from err
 
         onnx_final = Path(self._resolve_save_path(save_path))
         save_dir = onnx_final.parent / f"{onnx_final.stem}_optimum"
@@ -237,7 +236,7 @@ class ModelExporter:
         fmt = getattr(self.model, "output_format", "yolox")
         return _OUTPUT_FORMAT_TO_EXPORT_TASK.get(fmt, "object-detection")
 
-    def _export_custom(self, save_path: Optional[str] = None) -> str:
+    def _export_custom(self, save_path: str | None = None) -> str:
         """Export a custom (YOLOX) model via torch.onnx.export.
 
         Tries ``dynamo=True`` first (PyTorch >= 2.5), falls back to legacy export.
@@ -411,7 +410,7 @@ class ModelExporter:
             return cls_name
         return "model"
 
-    def _export_tensorrt(self, save_path: Optional[str] = None) -> str:
+    def _export_tensorrt(self, save_path: str | None = None) -> str:
         """Export to TensorRT engine via ONNX intermediate.
 
         Requires ``tensorrt`` Python package.
@@ -424,11 +423,11 @@ class ModelExporter:
         """
         try:
             import tensorrt as trt  # noqa: F401
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "TensorRT is required for TensorRT export. "
                 "Install it with: pip install tensorrt"
-            )
+            ) from err
 
         # Export ONNX first as intermediate
         onnx_path = self._resolve_save_path(None)
@@ -475,7 +474,7 @@ class ModelExporter:
         logger.info("TensorRT engine saved: %s (%.2f MB)", save_path, size_mb)
         return str(Path(save_path).resolve())
 
-    def _export_openvino(self, save_path: Optional[str] = None) -> str:
+    def _export_openvino(self, save_path: str | None = None) -> str:
         """Export to OpenVINO IR format via ONNX intermediate.
 
         Requires ``openvino`` Python package.
@@ -488,11 +487,11 @@ class ModelExporter:
         """
         try:
             import openvino as ov
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "OpenVINO is required for OpenVINO export. "
                 "Install it with: pip install openvino"
-            )
+            ) from err
 
         # Export ONNX first as intermediate
         onnx_path = self._resolve_save_path(None)

@@ -15,7 +15,7 @@ import logging
 import time
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langgraph.func import entrypoint, task
 
@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
 
 @task
 def scan_task(
-    data_config: Optional[Dict[str, Any]],
-    annotate_config: Dict[str, Any],
+    data_config: dict[str, Any] | None,
+    annotate_config: dict[str, Any],
     config_dir: str,
     filter_mode: str,
-    auto_label_config: Optional[Dict[str, Any]],
-) -> Dict[str, List[str]]:
+    auto_label_config: dict[str, Any] | None,
+) -> dict[str, list[str]]:
     """Discover images needing annotation."""
     from core.p01_auto_annotate.scanner import ImageScanner
 
@@ -56,13 +56,13 @@ def scan_task(
 def annotate_image_task(
     image_path: str,
     split: str,
-    class_names: Dict[int, str],
-    text_prompts: Dict[str, str],
+    class_names: dict[int, str],
+    text_prompts: dict[str, str],
     mode: str,
     output_format: str,
-    annotate_config: Dict[str, Any],
-    auto_label_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    annotate_config: dict[str, Any],
+    auto_label_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Annotate a single image via the auto-label service.
 
     When ``auto_label_config`` is provided, the service handles rule-based
@@ -100,11 +100,11 @@ def annotate_image_task(
 
 @task
 def validate_and_nms_task(
-    result: Dict[str, Any],
-    class_names: Dict[int, str],
+    result: dict[str, Any],
+    class_names: dict[int, str],
     valid_class_ids: set,
-    annotate_config: Dict[str, Any],
-) -> Dict[str, Any]:
+    annotate_config: dict[str, Any],
+) -> dict[str, Any]:
     """Structural validation + NMS filtering for one image result."""
     from core.p01_auto_annotate.nms_filter import NMSFilter
 
@@ -114,7 +114,7 @@ def validate_and_nms_task(
 
     # --- Validate ---
     t0 = time.perf_counter()
-    issues: List[Dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
     for idx, det in enumerate(detections):
         cx, cy, w, h = det["cx"], det["cy"], det["w"], det["h"]
         for name, val in [("cx", cx), ("cy", cy), ("w", w), ("h", h)]:
@@ -148,11 +148,11 @@ def validate_and_nms_task(
 
 @task
 def write_task(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     output_format: str,
     dry_run: bool,
-    backup_dir: Optional[str],
-) -> List[Dict[str, Any]]:
+    backup_dir: str | None,
+) -> list[dict[str, Any]]:
     """Write YOLO labels for a batch of results."""
     from core.p01_auto_annotate.writer import LabelWriter
 
@@ -175,16 +175,16 @@ def write_task(
 
 @task
 def aggregate_task(
-    all_results: List[Dict[str, Any]],
+    all_results: list[dict[str, Any]],
     dataset_name: str,
-    annotate_config: Dict[str, Any],
-    class_names: Dict[int, str],
+    annotate_config: dict[str, Any],
+    class_names: dict[int, str],
     mode: str,
     output_format: str,
     dry_run: bool,
     config_dir: str = ".",
-    output_dir_override: Optional[str] = None,
-) -> Dict[str, Any]:
+    output_dir_override: str | None = None,
+) -> dict[str, Any]:
     """Generate summary report."""
     from core.p01_auto_annotate.reporter import AutoAnnotateReporter
     from utils.config import generate_run_dir
@@ -194,7 +194,7 @@ def aggregate_task(
     avg = total_detections / len(all_results) if all_results else 0
 
     # Per-class counts using final class names
-    per_class: Dict[str, int] = {}
+    per_class: dict[str, int] = {}
     for r in all_results:
         for det in r.get("detections", []):
             name = class_names.get(det["class_id"], f"class_{det['class_id']}")
@@ -202,7 +202,7 @@ def aggregate_task(
 
     # Timing
     timing_keys = ["annotate_s", "validate_s", "nms_s", "rule_classify_s", "vlm_verify_s", "write_s"]
-    timing_stats: Dict[str, float] = {}
+    timing_stats: dict[str, float] = {}
     for key in timing_keys:
         vals = [r.get("timing", {}).get(key, 0) for r in all_results if r.get("timing", {}).get(key)]
         if vals:
@@ -244,7 +244,7 @@ def aggregate_task(
 
 
 @entrypoint()
-def auto_annotate_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
+def auto_annotate_pipeline(state: dict[str, Any]) -> dict[str, Any]:
     """Run the auto-annotation pipeline (functional API).
 
     When ``auto_label_config`` is present, the auto-label service (s18104)
@@ -277,7 +277,7 @@ def auto_annotate_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
     # --- Scan ---
     image_paths = scan_task(data_config, annotate_config, config_dir, filter_mode, auto_label_config).result()
 
-    all_pairs: List[tuple] = []
+    all_pairs: list[tuple] = []
     for split, paths in image_paths.items():
         for p in paths:
             all_pairs.append((p, split))
@@ -291,7 +291,7 @@ def auto_annotate_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("Found %d images in %d batches", total_images, total_batches)
 
     # --- Backup existing labels ---
-    backup_dir: Optional[str] = None
+    backup_dir: str | None = None
     if not dry_run:
         from core.p01_auto_annotate.writer import LabelWriter
         first_img = Path(all_pairs[0][0])
@@ -308,7 +308,7 @@ def auto_annotate_pipeline(state: Dict[str, Any]) -> Dict[str, Any]:
             logger.info("Will back up existing labels to %s", backup_path)
 
     # --- Process batches ---
-    all_results: List[Dict[str, Any]] = []
+    all_results: list[dict[str, Any]] = []
 
     for batch_idx in range(total_batches):
         start = batch_idx * batch_size

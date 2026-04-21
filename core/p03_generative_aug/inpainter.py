@@ -12,7 +12,7 @@ import io
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -27,7 +27,7 @@ from utils.yolo_io import pil_to_b64
 logger = logging.getLogger(__name__)
 
 # Map config string to torch dtype
-_DTYPE_MAP: Dict[str, Any] = {
+_DTYPE_MAP: dict[str, Any] = {
     "float16": torch.float16,
     "float32": torch.float32,
     "bfloat16": torch.bfloat16,
@@ -75,7 +75,7 @@ class Inpainter:
 
     _DEFAULT_MODEL = "black-forest-labs/FLUX.2-klein-4B"
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         cfg = (config or {}).get("inpainting", config or {})
 
         self._mode: str = cfg.get("mode", "local")
@@ -90,7 +90,7 @@ class Inpainter:
         self._default_guidance_scale: float = defaults.get("guidance_scale", 3.5)
         self._default_num_variants: int = defaults.get("num_variants", 1)
         self._default_steps: int = defaults.get("steps", 4)
-        self._default_seed: Optional[int] = defaults.get("seed")
+        self._default_seed: int | None = defaults.get("seed")
 
         # Lazy-loaded pipeline slot
         self._pipeline = None
@@ -112,12 +112,12 @@ class Inpainter:
         mask: Any,
         prompt: str,
         *,
-        strength: Optional[float] = None,
-        guidance_scale: Optional[float] = None,
-        num_variants: Optional[int] = None,
-        seed: Optional[int] = None,
-        steps: Optional[int] = None,
-    ) -> List[Any]:
+        strength: float | None = None,
+        guidance_scale: float | None = None,
+        num_variants: int | None = None,
+        seed: int | None = None,
+        steps: int | None = None,
+    ) -> list[Any]:
         """Generate inpainted image variant(s).
 
         Args:
@@ -181,13 +181,13 @@ class Inpainter:
         strength: float,
         guidance_scale: float,
         num_variants: int,
-        seed: Optional[int],
+        seed: int | None,
         steps: int,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """Run inpainting locally using Flux img2img + mask composite."""
         self._load_pipeline()
 
-        results: List[Any] = []
+        results: list[Any] = []
         for i in range(num_variants):
             variant_seed = seed + i if seed is not None else None
             # Flux requires generator on CPU
@@ -241,9 +241,9 @@ class Inpainter:
         prompt: str,
         *,
         num_variants: int,
-        seed: Optional[int],
+        seed: int | None,
         steps: int,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """Send inpainting request to the Image Editor orchestrator service."""
         url = f"{self._service_url.rstrip('/')}/inpaint"
 
@@ -266,7 +266,7 @@ class Inpainter:
         data = response.json()
         images_b64 = data.get("images", [])
 
-        results: List[Any] = []
+        results: list[Any] = []
         for img_b64 in images_b64:
             img_bytes = base64.b64decode(img_b64)
             img = PILImage.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -324,7 +324,7 @@ class Inpainter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_device(device: Optional[str]) -> str:
+    def _resolve_device(device: str | None) -> str:
         """Resolve the compute device string.
 
         Args:

@@ -15,14 +15,15 @@ import sys
 import time
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Annotated, Any
 
 import numpy as np
 from PIL import Image
-from typing_extensions import Annotated, TypedDict
+from typing_extensions import TypedDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from core.p03_generative_aug.inpainter import Inpainter
 from utils.langgraph_common import (
     get_batch_paths,
     get_batch_range,
@@ -30,7 +31,6 @@ from utils.langgraph_common import (
     replace_reducer,
 )
 from utils.yolo_io import image_to_label_path, parse_yolo_label
-from core.p03_generative_aug.inpainter import Inpainter
 
 logger = logging.getLogger(__name__)
 
@@ -42,26 +42,26 @@ logger = logging.getLogger(__name__)
 class GenAugmentState(TypedDict, total=False):
     """Generative augmentation pipeline state."""
     # Config
-    data_config: Annotated[Dict[str, Any], replace_reducer]
-    augment_config: Annotated[Dict[str, Any], replace_reducer]
+    data_config: Annotated[dict[str, Any], replace_reducer]
+    augment_config: Annotated[dict[str, Any], replace_reducer]
     dataset_name: Annotated[str, replace_reducer]
-    class_names: Annotated[Dict[int, str], replace_reducer]
+    class_names: Annotated[dict[int, str], replace_reducer]
     config_dir: Annotated[str, replace_reducer]
     # Source / target
     source_class_id: Annotated[int, replace_reducer]
     target_class_id: Annotated[int, replace_reducer]
-    replacement_prompts: Annotated[List[str], replace_reducer]
+    replacement_prompts: Annotated[list[str], replace_reducer]
     # Scan
-    image_paths: Annotated[Dict[str, List[str]], replace_reducer]
+    image_paths: Annotated[dict[str, list[str]], replace_reducer]
     total_images: Annotated[int, replace_reducer]
     current_batch_idx: Annotated[int, replace_reducer]
     total_batches: Annotated[int, replace_reducer]
     batch_size: Annotated[int, replace_reducer]
     # Processing
-    image_results: Annotated[List[Dict[str, Any]], list_append_reducer]
+    image_results: Annotated[list[dict[str, Any]], list_append_reducer]
     dry_run: Annotated[bool, replace_reducer]
     # Output
-    summary: Annotated[Dict[str, Any], replace_reducer]
+    summary: Annotated[dict[str, Any], replace_reducer]
     report_path: Annotated[str, replace_reducer]
     output_dir: Annotated[str, replace_reducer]
 
@@ -72,7 +72,7 @@ class GenAugmentState(TypedDict, total=False):
 
 def _yolo_bbox_to_xyxy(
     cx: float, cy: float, w: float, h: float, img_w: int, img_h: int
-) -> List[int]:
+) -> list[int]:
     """Convert normalised YOLO bbox to absolute ``[x1, y1, x2, y2]``.
 
     Args:
@@ -123,9 +123,9 @@ def scan_node(state: GenAugmentState) -> dict:
     raw_image_paths = scanner.scan()
 
     # Filter: keep only images whose label contains the source class
-    filtered_paths: Dict[str, List[str]] = {}
+    filtered_paths: dict[str, list[str]] = {}
     for split, paths in raw_image_paths.items():
-        kept: List[str] = []
+        kept: list[str] = []
         for p in paths:
             label_path = image_to_label_path(p)
             annotations = parse_yolo_label(label_path)
@@ -179,7 +179,7 @@ def segment_batch(state: GenAugmentState) -> dict:
     )
 
     batch_paths = get_batch_paths(state)
-    new_results: List[Dict[str, Any]] = []
+    new_results: list[dict[str, Any]] = []
 
     for split, img_path in batch_paths:
         t_start = time.perf_counter()
@@ -190,7 +190,7 @@ def segment_batch(state: GenAugmentState) -> dict:
         label_path = image_to_label_path(img_path)
         annotations = parse_yolo_label(label_path)
 
-        objects: List[Dict[str, Any]] = []
+        objects: list[dict[str, Any]] = []
         for cls_id, cx, cy, w, h in annotations:
             if cls_id != source_class_id:
                 continue
@@ -218,7 +218,7 @@ def segment_batch(state: GenAugmentState) -> dict:
             })
 
         segment_time = time.perf_counter() - t_start
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "image_path": str(img_path),
             "split": split,
             "objects": objects,
@@ -266,7 +266,7 @@ def inpaint_batch(state: GenAugmentState) -> dict:
         img_path = Path(result["image_path"])
         objects = result.get("objects", [])
 
-        inpainted_images: List[Dict[str, Any]] = []
+        inpainted_images: list[dict[str, Any]] = []
 
         if dry_run:
             # Record what would happen without actually inpainting
@@ -340,10 +340,10 @@ def validate_batch(state: GenAugmentState) -> dict:
         result = image_results[result_idx]
         inpainted_images = result.get("inpainted_images", [])
         original_size = result.get("image_size", (0, 0))
-        validation_statuses: List[Dict[str, Any]] = []
+        validation_statuses: list[dict[str, Any]] = []
 
         for inpaint_entry in inpainted_images:
-            status: Dict[str, Any] = {
+            status: dict[str, Any] = {
                 "object_idx": inpaint_entry.get("object_idx"),
                 "valid": True,
                 "issues": [],
@@ -430,7 +430,6 @@ def write_batch(state: GenAugmentState) -> dict:
     dry_run = state.get("dry_run", False)
     source_class_id = state["source_class_id"]
     target_class_id = state["target_class_id"]
-    augment_config = state["augment_config"]
     output_dir_str = state["output_dir"]
     output_dir = Path(output_dir_str)
 
@@ -445,7 +444,6 @@ def write_batch(state: GenAugmentState) -> dict:
         img_path = Path(result["image_path"])
         split = result.get("split", "default")
         all_annotations = result.get("all_annotations", [])
-        objects = result.get("objects", [])
         inpainted_images = result.get("inpainted_images", [])
         validation_status = result.get("validation_status", [])
 
@@ -495,7 +493,7 @@ def write_batch(state: GenAugmentState) -> dict:
 
             # Build modified label: copy all annotations, change source -> target
             # for the specific object that was inpainted
-            label_lines: List[str] = []
+            label_lines: list[str] = []
             source_obj_count = 0
             for cls_id, cx, cy, w, h in all_annotations:
                 if cls_id == source_class_id:
@@ -543,9 +541,8 @@ def aggregate_node(state: GenAugmentState) -> dict:
     Returns:
         Dict with ``summary`` and ``report_path``.
     """
-    augment_config = state["augment_config"]
     class_names = {int(k): v for k, v in state["class_names"].items()}
-    image_results: List[Dict[str, Any]] = state.get("image_results", [])
+    image_results: list[dict[str, Any]] = state.get("image_results", [])
     source_class_id = state["source_class_id"]
     target_class_id = state["target_class_id"]
 
@@ -556,14 +553,14 @@ def aggregate_node(state: GenAugmentState) -> dict:
     )
 
     # Per-prompt counts
-    per_prompt: Dict[str, int] = {}
+    per_prompt: dict[str, int] = {}
     for r in image_results:
         for inpaint_entry in r.get("inpainted_images", []):
             prompt = inpaint_entry.get("prompt", "unknown")
             per_prompt[prompt] = per_prompt.get(prompt, 0) + 1
 
     # Per-split counts
-    per_split: Dict[str, int] = {}
+    per_split: dict[str, int] = {}
     for r in image_results:
         split = r.get("split", "unknown")
         per_split[split] = per_split.get(split, 0) + 1
@@ -573,7 +570,7 @@ def aggregate_node(state: GenAugmentState) -> dict:
     inpaint_times = [r.get("timing", {}).get("inpaint_s", 0.0) for r in image_results]
     total_times = [sum(r.get("timing", {}).values()) for r in image_results]
 
-    timing_stats: Dict[str, Any] = {
+    timing_stats: dict[str, Any] = {
         "avg_segment_s": round(float(np.mean(segment_times)), 4) if segment_times else 0.0,
         "avg_inpaint_s": round(float(np.mean(inpaint_times)), 4) if inpaint_times else 0.0,
         "avg_total_per_sample_s": round(float(np.mean(total_times)), 4) if total_times else 0.0,
@@ -584,7 +581,7 @@ def aggregate_node(state: GenAugmentState) -> dict:
     source_name = class_names.get(source_class_id, str(source_class_id))
     target_name = class_names.get(target_class_id, str(target_class_id))
 
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "dataset": state.get("dataset_name", "unknown"),
         "source_class": f"{source_class_id} ({source_name})",
         "target_class": f"{target_class_id} ({target_name})",
