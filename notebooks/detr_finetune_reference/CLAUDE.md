@@ -500,6 +500,7 @@ calls — they live in separate cells/sections.
 
 ## Known gotchas
 
+- **ONNX fp32 export parity** (CPPE-5 test, 29 images, GPU benchmark, tf 5.5 both sides via `torch.onnx.export(..., dynamo=False)` in the main venv): RT-DETRv2-R50 seed42 test mAP 0.516 pytorch ≡ 0.516 ONNX (Δ < 0.001), latency **20.9 ms → 10.3 ms** (~2× speedup). D-FINE-large 50ep seed42 mAP 0.462 ≡ 0.460 ONNX, latency 13.9 → 12.2 ms. ONNX fp32 on ORT CUDA EP is a drop-in speedup with zero accuracy cost. INT8 via direct `quantize_static` + MinMax calibration on 32 images collapses mAP (→ ~0) and **runs slower than fp32** on CUDA EP — deploy INT8 only via TensorRT EP engine build.
 - **Do not run these scripts from the main venv** — albumentations 1.4.6 is
   the pin; the main `.venv/` has a newer version with different box-clip
   semantics. Always invoke via `.venv-notebook/bin/python`.
