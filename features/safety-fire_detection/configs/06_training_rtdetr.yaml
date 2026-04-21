@@ -1,17 +1,40 @@
-# Training config — Fire Detection (RT-DETRv2)
+# Training config — Fire Detection (RT-DETRv2, HF Trainer backend)
 # License: Apache 2.0 (Baidu / Peking University)
 #
+# Recipe aligned with notebooks/detr_finetune_reference/ learnings
+# (2026-04-20, commit 118625b onwards):
+#   - backend: hf  — HF Trainer reproduces qubvel's CPPE-5 results
+#     (test mAP 0.5577, within seed noise of published 0.5789); the
+#     custom pytorch trainer's bipartite matcher was too unstable on
+#     small-data DETR fine-tunes (Iteration 7: train mAP capped at 0.28
+#     on 5% fire_detection regardless of hparams).
+#   - augmentation.library: albumentations  — cv2 C kernels, 2× faster
+#     than torchvision v2 on uint8 and matches qubvel's reference
+#     pipeline byte-for-byte.
+#   - Bundle B hyperparams (bs=16, lr=1e-4, cosine, WD=1e-4, bf16,
+#     warmup_steps=300) — the canonical DETR fine-tune recipe.
+#   - Identity affine + probability-gated color aug — matches qubvel's
+#     A.Compose([A.Perspective, A.HorizontalFlip, A.RandomBrightnessContrast,
+#     A.HueSaturationValue, A.Resize]).
+#
 # Variants (override via --override model.arch=<key>):
-#   rtdetr-r18  — ResNet-18 backbone, ~20M params, fast inference   (DEFAULT)
+#   rtdetr-r18  — ResNet-18 backbone, ~20M params          (DEFAULT)
 #   rtdetr-r50  — ResNet-50 backbone, ~42M params, higher accuracy
 #
 # Pretrained weights downloaded from HuggingFace Hub on first run:
 #   PekingU/rtdetr_v2_r18vd, PekingU/rtdetr_v2_r50vd
 #
 # Usage:
-#   uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_rtdetr.yaml
-#   uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_rtdetr.yaml \
-#       --override model.arch=rtdetr-r50 training.epochs=300
+#   # Full training
+#   uv run core/p06_training/train.py \
+#     --config features/safety-fire_detection/configs/06_training_rtdetr.yaml
+#
+#   # 5% overfit-capability smoke (can RT-DETRv2 learn on a small subset?)
+#   uv run core/p06_training/train.py \
+#     --config features/safety-fire_detection/configs/06_training_rtdetr.yaml \
+#     --override data.subset.train=0.05 data.subset.val=0.05 training.epochs=150 \
+#       training.data_viz.enabled=false training.aug_viz.enabled=false \
+#       training.val_viz.enabled=false
 
 model:
   arch: rtdetr-r18
@@ -21,86 +44,93 @@ model:
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 32
-  num_workers: 8
+  batch_size: 16              # Bundle B (was 32; HF Trainer defaults to bs=8 in
+                              # qubvel's notebook, 16 is the tested fine-tune sweet spot)
+  num_workers: 4
   prefetch_factor: 4
   pin_memory: true
-  subset:                  # Limit each split independently (null = use all data)
-    train: null            # int (N images), float (fraction 0.0–1.0), or null
-    val: null              # Use for: quick code checks, experiments, progressive training
+  subset:
+    train: null
+    val: null
     test: null
 
 augmentation:
-  normalize: false      # HF RTDetrV2ImageProcessor has do_normalize=False — feed [0,1] inputs
-  mosaic: false         # not supported for DETR-family models
+  library: albumentations     # qubvel's reference + CPPE-5-validated fast path
+  normalize: false            # HF RTDetrV2ImageProcessor has do_normalize=False
+  mosaic: false               # DETR-family doesn't use it
   mixup: false
-  contrast: 0.4         # GPU luma-contrast; fire/smoke are inherently low-contrast
+
+  # Probability-gated Albumentations transforms (qubvel's exact recipe).
+  # build_albumentations_transforms defaults the magnitudes when only
+  # the `_p` gate is set, so we just set probabilities.
+  perspective_p: 0.1          # A.Perspective(p=0.1) — slight 3D wobble
+  fliplr: 0.5                 # A.HorizontalFlip(p=0.5)
+  brightness_contrast_p: 0.5  # A.RandomBrightnessContrast(p=0.5)
+  hsv_p: 0.1                  # A.HueSaturationValue(p=0.1) — conservative for fire/smoke;
+                              # fire is color-specific, don't hue-shift too often.
   hsv_h: 0.015
-  hsv_s: 0.5
-  hsv_v: 0.4
-  fliplr: 0.5
-  flipud: 0.0
-  scale: [0.8, 1.2]
-  degrees: 10.0
-  translate: 0.1
-  shear: 2.0
+  hsv_s: 0.3                  # smoke is grey, modest sat jitter is fine
+  hsv_v: 0.3                  # fire is bright, keep brightness range tight
+
+  # Identity affine — qubvel's recipe has NO affine beyond flip + perspective.
+  # On RTX 5090 `build_albumentations_transforms` skips A.Affine entirely when
+  # all four params are no-op, so this costs nothing at build time.
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
 
 training:
-  backend: pytorch
+  backend: hf                 # HF Trainer — proven on CPPE-5 RT-DETRv2-R50 (test mAP 0.5577)
   epochs: 150
-  optimizer: adamw
-  lr: 0.00016         # HPO best (trial 3, mAP50=0.1195 @ 5% data)
-  weight_decay: 0.0000115
-  warmup_epochs: 15
-  scheduler: cosine
-  patience: 30
+  optimizer: adamw            # hardcoded in HF Trainer for DETR; listed for lineage
+  lr: 0.0001                  # Bundle B (was 0.00016 from 5% HPO — diverged at full data;
+                              # CPPE-5 reproduction confirmed 1e-4 is the safe canonical LR)
+  weight_decay: 0.0001        # Bundle B (was 1.15e-5 — far too low for DETR)
+  warmup_steps: 300           # HF expects steps, not epochs. 300 matches qubvel's recipe
+                              # (previously `warmup_epochs: 15` = 555 steps on 5% data,
+                              # too long; 300 is the cross-dataset canonical.)
+  scheduler: cosine           # Bundle B cosine anneal past warmup
+  max_grad_norm: 0.1          # DETR standard; was `grad_clip: 0.1` under pytorch backend
+  bf16: true                  # RTX 5090 tensor cores — no quality loss on DETR
+  amp: false                  # explicit: NOT fp16 AMP (overflow crashes decoder)
+  gpu_augment: false          # HF backend doesn't use the GPU aug path
+  ema: false                  # reference doesn't use EMA
+  patience: 50                # HF Trainer early stopping — larger than pytorch backend
+                              # because DETR training has noisier mAP trajectory
+
   val_viz:
     enabled: true
     num_samples: 8
-    conf_threshold: 0.05
+    conf_threshold: 0.05      # DETR sigmoid scores cap ~0.2; keep low
     grid_cols: 2
-
   train_viz:
-    enabled: true
-    num_samples: 8
-    conf_threshold: 0.05
-    grid_cols: 2
-
-  data_viz:                # Raw images + GT label grid (once before training)
+    enabled: false            # HF backend viz bridge is val-only
+  data_viz:
     enabled: true
     splits: [train, val, test]
     num_samples: 16
     grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
-
-  aug_viz:                 # Augmented images + label grid (once before training)
+  aug_viz:
     enabled: true
     splits: [train]
     num_samples: 16
     grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
 
-  val_full_interval: 5        # 0 = full val every epoch; N = full val every N epochs
-  val_subset_fraction: 0.2   # fraction of val set for quick per-epoch val
-  amp: false  # RT-DETRv2 decoder overflows in fp16 — keep fp32
-  gpu_augment: true
-  grad_clip: 0.1
-  ema: false
+  # NB: pytorch-backend-only keys removed (val_full_interval,
+  # val_subset_fraction, grad_clip, ema_decay). HF Trainer evals every
+  # epoch by default.
 
 loss:
   type: detr
 
 logging:
   wandb_project: smart-camera
-  run_name: fire_rtdetr_r18_v1
+  run_name: fire_rtdetr_r18_bundleB
 
 checkpoint:
   save_best: true
-  metric: val/mAP50
+  metric: eval_map            # HF Trainer + torchmetrics key (was val/mAP50 under pytorch)
   mode: max
   save_interval: 10
 

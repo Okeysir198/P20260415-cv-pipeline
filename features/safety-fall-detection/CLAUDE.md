@@ -26,8 +26,9 @@ Detects fallen persons (on the ground) distinct from upright persons. COCO `pers
 - [x] `p00_data_prep` — 12,402 imgs, DATASET_REPORT
 - [x] `p02_annotation_qa` — LS project 16
 - [x] `code/benchmark.py` — pretrained benchmark complete
-- [ ] `06_training.yaml` — use yolov11_fall_melihuzunoglu as starting weights
-- [ ] `p06_training` — freeze backbone 5 epochs, then full fine-tune
+- [x] Arch-specific training configs created — `06_training_{yolox,rtdetr,dfine}.yaml`
+- [ ] Arch comparison on 10% data (see `safety-fire_detection` Iteration 5 for recipe); start with `06_training_yolox.yaml` (YOLOX-M is the small-data default per features/CLAUDE.md)
+- [ ] `p06_training` — full fine-tune on winning arch; `yolov11_fall_melihuzunoglu.pt` is a YOLOv11 checkpoint (not directly loadable into YOLOX), use for reference only
 - [ ] `p08_evaluation` — evaluate on test split
 - [ ] `p09_export` — ONNX export
 - [ ] `release/` — `utils/release.py`
@@ -72,26 +73,20 @@ Full results: `eval/benchmark_results.json` | `eval/benchmark_report.md`
 ```
 configs/00_data_preparation.yaml  — data sources + class map
 configs/05_data.yaml              — dataset paths + class names
-configs/06_training.yaml          — (to create) training config
+configs/06_training_yolox.yaml    — YOLOX-M (recommended starting arch)
+configs/06_training_rtdetr.yaml   — RT-DETRv2-R18 (re-eval on full data)
+configs/06_training_dfine.yaml    — D-FINE-S (reference; class collapse risk at small N_classes)
 code/benchmark.py                 — pretrained benchmark
 eval/benchmark_results.json       — benchmark output
 eval/benchmark_report.md          — benchmark summary
 ```
 
-## Training Config Template
+## Training Commands
 
-```yaml
-# features/safety-fall-detection/configs/06_training.yaml
-model:
-  arch: yolox-s
-  num_classes: 2
-  pretrained: true
-  pretrained_path: pretrained/safety-fall-detection/yolov11_fall_melihuzunoglu.pt
+```bash
+# YOLOX-M (recommended — small-data default per features/CLAUDE.md Iteration 7)
+uv run core/p06_training/train.py --config features/safety-fall-detection/configs/06_training_yolox.yaml
 
-training:
-  epochs: 100
-  freeze_backbone_epochs: 5
-  lr: 0.001
-  lr_backbone: 0.0001
-  batch_size: 16
+# RT-DETRv2-R18 (re-evaluate after full-data YOLOX-M baseline is locked)
+uv run core/p06_training/train.py --config features/safety-fall-detection/configs/06_training_rtdetr.yaml
 ```

@@ -28,8 +28,9 @@ Detects helmet compliance: whether persons are wearing hard hats. Four classes i
 - [x] `p00_data_prep` — 22,323 imgs, DATASET_REPORT ✅
 - [x] `p02_annotation_qa` — LS project 14
 - [x] `code/benchmark.py` — pretrained benchmark complete
-- [ ] `06_training.yaml` — use melihuzunoglu_yolov11_ppe as starting weights
-- [ ] `p06_training` — freeze backbone 5 epochs, then full fine-tune
+- [x] Arch-specific training configs created — `06_training_{yolox,rtdetr,dfine}.yaml`
+- [ ] Arch comparison on 10% data; start with `06_training_yolox.yaml` (YOLOX-M small-data default per features/CLAUDE.md). `melihuzunoglu_yolov11_ppe.pt` is a YOLOv11 checkpoint — not directly loadable into YOLOX, reference only.
+- [ ] `p06_training` — full fine-tune on winning arch (4 classes — `head_with_nitto_hat` at 1.6% may need augmentation)
 - [ ] `p08_evaluation` — evaluate on test split
 - [ ] `p09_export` — export HudatersU-style ONNX for fast serving
 - [ ] `release/` — `utils/release.py`
@@ -65,28 +66,19 @@ Full results: `eval/benchmark_results.json` | `eval/benchmark_report.md`
 ```
 configs/00_data_preparation.yaml  — data sources + class map
 configs/05_data.yaml              — dataset paths + class names
-configs/06_training.yaml          — (to create) training config
+configs/06_training_yolox.yaml    — YOLOX-M (recommended starting arch)
+configs/06_training_rtdetr.yaml   — RT-DETRv2-R18 (re-eval on full data)
+configs/06_training_dfine.yaml    — D-FINE-S (reference)
 code/benchmark.py                 — pretrained benchmark
 eval/benchmark_results.json       — benchmark output
 eval/benchmark_report.md          — benchmark summary
 ```
 
-## Training Config Template
+## Training Commands
 
-```yaml
-# features/ppe-helmet_detection/configs/06_training.yaml
-model:
-  arch: yolox-m          # larger model needed for 4-class fine-grained detection
-  num_classes: 4
-  pretrained: true
-  pretrained_path: pretrained/ppe-helmet_detection/melihuzunoglu_yolov11_ppe.pt
-
-training:
-  epochs: 100
-  freeze_backbone_epochs: 5
-  lr: 0.001
-  lr_backbone: 0.0001
-  batch_size: 16
+```bash
+# YOLOX-M (recommended starting arch — 4 classes, COCO backbone)
+uv run core/p06_training/train.py --config features/ppe-helmet_detection/configs/06_training_yolox.yaml
 ```
 
 ## Notes

@@ -328,20 +328,30 @@ os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 Also: Bundle B **finishes in 9m 23s on RTX 5090, 11% faster than qubvel's
 bs=8 recipe**.
 
-### D-FINE status — **NOT reproduced**
+### D-FINE status — **reproduced** (2026-04-20)
 
-`reference_dfine/finetune.py` applies the lr=2e-5 fix over qubvel's recipe; val
-mAP plateaus at ep3 ≈ 0.20 and never climbs — **the same LR that works for
-rtdetr_v2_r50 is too hot for dfine-large's ~3x-larger backbone**. Test
-mAP = 0.2617 vs qubvel's 0.4485. Fix (not yet applied):
+`reference_dfine/finetune.py` now uses qubvel's exact hparams (lr=5e-5,
+warmup=300, linear scheduler, WD=0, 30 epochs, seed=42, `bf16: false`) +
+early `set_seed(42)` and reproduces test mAP **0.4294** — within +0.019
+of qubvel's published 0.4485.
 
-```python
-learning_rate = 2e-5   # was 5e-5, halved-ish for large backbone
-warmup_steps  = 500    # was 300, gentler rampup
-# + Bundle B's other changes (cosine, WD, bf16, seed)
-```
+The earlier "lr=2e-5 fix" was actively harmful: halving LR stalled the
+optimizer in the basin around val=0.22 regardless of epoch budget (test
+mAP 0.2617 vs qubvel's 0.4485). Reverting to lr=5e-5 + keeping early
+`set_seed(42)` was the actual fix.
 
-Before using D-FINE as a Phase-2 reference, apply the above and re-run.
+**`our_dfine_albumentations/`** (same recipe via
+`core/p06_training/train.py --backend hf`) — 6-run spread 0.328-0.441
+across seeds 0 / 42×4 / 2024, mean 0.388 ± 0.042. Best-of-6 (0.441)
+exceeds reference. Matches reference within measured noise.
+
+Two bugs were needed to reach this:
+1. **`bf16: true` stalls D-FINE** (val stuck at 0.15, eval_loss 2.2→2.9).
+   D-FINE's distribution-focused loss is bf16-sensitive; RT-DETRv2 isn't.
+   Pin `bf16: false` in all D-FINE training configs.
+2. **HF backend missed early `set_seed`** before `build_model` → class-head
+   reinit used OS entropy. Fixed in `core/p06_training/hf_trainer.py` —
+   calls `transformers.set_seed(config['seed'])` right before `build_model`.
 
 ### `--aug strong` is opt-in, default stays qubvel-identical
 
@@ -466,8 +476,11 @@ calls — they live in separate cells/sections.
 - **`torch.use_deterministic_algorithms(True)` strict mode crashes RT-DETRv2**:
   the multi-scale deformable attention backward (`grid_sampler_2d_backward_cuda`)
   and memory-efficient attention backward don't have deterministic kernels.
-  We use `warn_only=True` — last-digit of mAP still varies run-to-run from
-  these ~2 ops, but the rest of the graph is locked.
+  We use `warn_only=True` — run-to-run variance is "last-digit" for
+  RT-DETRv2 (±0.005 on test mAP) but **compounds for D-FINE**: 4
+  identical seed=42 runs on CPPE-5 gave test mAP 0.364/0.441/0.395/0.425
+  (spread 0.077). D-FINE head-to-head comparisons on small test sets
+  need 3+ seeds; single-seed comparisons are unreliable.
 - **`data_loader.py` stores image paths, not bytes** — the HF Dataset holds
   string paths; the `datasets.Image()` feature lazy-loads via PIL. Safe for
   local training but breaks if the dataset is moved off-machine. For upload

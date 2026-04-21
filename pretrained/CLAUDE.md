@@ -1,6 +1,11 @@
 # CLAUDE.md — pretrained/
 
-Pretrained model weights for all use cases. Models are organized by project (Nitto Denko safety, Smart Parking) and by task. All models listed here have **free/open licenses** (Apache-2.0, MIT, BSD, CC-BY-4.0, openrail) unless noted.
+Pretrained model weights. Two layouts coexist:
+
+- **Per-feature dirs** (canonical, actively used by benchmark.py and training): `pretrained/<feature>/` — e.g. `pretrained/ppe-helmet_detection/`, `pretrained/safety-fire_detection/`. See each feature's `CLAUDE.md` for benchmark rankings.
+- **Legacy `nitto_denko/` subtree**: pre-benchmark exploration, kept for reference. Do not pick models from the Nitto Denko tables below — **authoritative "best pretrained" rankings live in `features/<feature>/CLAUDE.md`** (val mAP50 verified 2026-04-17).
+
+Most weights are free-licensed (Apache-2.0, MIT, CC-BY-4.0, openrail). AGPL-3.0 rows are flagged — avoid for commercial deployment.
 
 ## Root Models (COCO-pretrained, multi-purpose)
 
@@ -58,7 +63,10 @@ curl -L -o pretrained/mobilefacenet_arcface.onnx \
 
 ---
 
-## Nitto Denko Safety Models (`pretrained/nitto_denko/`)
+## Nitto Denko Safety Models (`pretrained/nitto_denko/`) — legacy, pre-benchmark
+
+> The tables below were populated during initial model exploration. They are **not** the current benchmark results. For the verified "best pretrained" per feature (and the winning checkpoints now living under `pretrained/<feature>/`), see the per-feature `CLAUDE.md` or the "Quick Reference" section at the bottom of this file. "Inference Quality" notes in these legacy tables are small-sample anecdotes (N=5–8), not val-split mAP.
+
 
 ### Fire Detection (`pretrained/nitto_denko/fire_detection/`)
 
@@ -238,13 +246,13 @@ No open-source pretrained model exists for safety shoes detection/classification
 
 ## License Summary
 
-| License | Count | Models |
-|---------|-------|--------|
-| Apache-2.0 | 22 | YOLOX, D-FINE, RT-DETR, ViT classifiers, YOLOS plates, YOLOv10 fire, YOLOv11 face |
-| MIT | 8 | SCRFD, MobileFaceNet, YOLOv8 PPE, phone, person, vehicle, license plate |
-| CC-BY-4.0 | 2 | Vyra PPE, YOLO26 person |
-| openrail | 1 | YOLOv8 fall |
-| AGPL-3.0 | 7 | Ultralytics YOLOv8/YOLO11 (caution for commercial) |
-| Unknown/unspecified | ~5 | keremberke hardhat, morsetechlab plates, YOLO26 vehicle |
+| License | Models |
+|---------|--------|
+| Apache-2.0 | YOLOX (all sizes), D-FINE, RT-DETRv2, ViT classifiers, YOLOS plates, YOLOv10 fire, YOLOv11 face |
+| MIT | SCRFD, MobileFaceNet, YOLOv8 PPE (Hansung-Cho), phone, person, license plate (keremberke/Koushim) |
+| CC-BY-4.0 | Vyra PPE, YOLO26 person (simoswish PRW) |
+| openrail | YOLOv8 fall (kamalchibrani) |
+| AGPL-3.0 | Ultralytics YOLOv8 / YOLO11 (caution for commercial) |
+| Unverified | keremberke YOLOv8 hardhat, morsetechlab plates, YOLO26 vehicle — check HF model cards before commercial use |
 
-**For commercial deployment**: prefer Apache-2.0/MIT models. Avoid AGPL-3.0 (Ultralytics) unless compliant.
+**For commercial deployment**: prefer Apache-2.0/MIT. Avoid AGPL-3.0 (Ultralytics, YOLOv8n-pose) unless the AGPL source-disclosure terms are acceptable. When in doubt, run `curl -s https://huggingface.co/api/models/<repo>` and check `cardData.license`.

@@ -2,6 +2,14 @@
 
 Integration tests for the auto_label service. Self-contained — run from within `services/s18104_auto_label/`, no imports from the project root.
 
+## What these tests verify
+
+- **Every one of the 11 REST endpoints is reachable and returns the documented schema** (see Endpoint Coverage table below) — no mocks, real HTTP to a live service.
+- **All 4 output formats round-trip cleanly**: `coco`, `yolo`, `yolo_seg`, `label_studio` — annotate → convert → re-annotate produces equivalent structure.
+- **SAM3 delegation works end-to-end**: each `/annotate` mode (text / auto / hybrid) actually calls SAM3 at `:18100` and post-processes (NMS, polygon extraction) locally.
+- **Video session lifecycle is correct**: create → add frames → propagate → delete. Frame-size invariance is enforced (SAM3 tracker reinitializes on each frame add).
+- **Graceful skip when service is down**: `skip_no_service` marker auto-skips the whole suite if `GET /health` fails — CI stays green when SAM3 or auto_label isn't up.
+
 ## Prerequisites
 
 - auto_label service running at `localhost:18104`
@@ -78,4 +86,4 @@ All 11 endpoints are covered:
 
 ## Outputs
 
-Test visualizations (overlays, JSON responses) are saved to `tests/outputs/`.
+Test visualizations (overlays, JSON responses) are saved to `tests/outputs/` (gitignored). Delete between runs to force a clean snapshot: `rm -rf tests/outputs/`.

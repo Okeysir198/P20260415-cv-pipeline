@@ -27,8 +27,9 @@ Detects foot-level PPE compliance: whether workers are wearing safety shoes. No 
 - [x] `p00_data_prep` — 37,026 imgs, DATASET_REPORT ✅
 - [x] `p02_annotation_qa` — LS project 15
 - [x] `code/benchmark.py` — pretrained benchmark complete
-- [ ] `06_training.yaml` — start from COCO YOLOX-S/M backbone
-- [ ] `p06_training` — full fine-tune on foot classes
+- [x] Arch-specific training configs created — `06_training_{yolox,rtdetr,dfine}.yaml`
+- [ ] Arch comparison on 10% data; start with `06_training_yolox.yaml` (YOLOX-M, COCO backbone). Person class at 2.4% — foot-centric data naturally lacks full-body bboxes.
+- [ ] `p06_training` — full fine-tune on winning arch. Consider two-stage (person detector → foot crop → shoe classifier) for edge deployment.
 - [ ] `p08_evaluation` — evaluate on test split
 - [ ] `p09_export` — ONNX export
 - [ ] `release/` — `utils/release.py`
@@ -64,27 +65,19 @@ Full results: `eval/benchmark_results.json` | `eval/benchmark_report.md`
 ```
 configs/00_data_preparation.yaml  — data sources + class map
 configs/05_data.yaml              — dataset paths + class names
-configs/06_training.yaml          — (to create) training config
+configs/06_training_yolox.yaml    — YOLOX-M (recommended starting arch)
+configs/06_training_rtdetr.yaml   — RT-DETRv2-R18 (re-eval on full data)
+configs/06_training_dfine.yaml    — D-FINE-S (reference)
 code/benchmark.py                 — pretrained benchmark
 eval/benchmark_results.json       — benchmark output
 eval/benchmark_report.md          — benchmark summary
 ```
 
-## Training Config Template
+## Training Commands
 
-```yaml
-# features/ppe-shoes_detection/configs/06_training.yaml
-model:
-  arch: yolox-s
-  num_classes: 3
-  pretrained: true       # start from COCO YOLOX-S backbone
-
-training:
-  epochs: 100
-  freeze_backbone_epochs: 5
-  lr: 0.001
-  lr_backbone: 0.0001
-  batch_size: 16
+```bash
+# YOLOX-M (recommended starting arch — 3 classes, COCO backbone, largest dataset at 37k imgs)
+uv run core/p06_training/train.py --config features/ppe-shoes_detection/configs/06_training_yolox.yaml
 ```
 
 ## Notes

@@ -1,0 +1,107 @@
+# Training config — Fall Detection (D-FINE)
+# License: Apache 2.0 (USTC / DEIM)
+#
+# Variants (override via --override model.arch=<key>):
+#   dfine-n   — smallest, fastest inference (~4M params)
+#   dfine-s   — 16M params, good accuracy-speed tradeoff   (DEFAULT)
+#   dfine-m   — 31M params, highest accuracy, slower
+#
+# Pretrained weights downloaded from HuggingFace Hub on first run:
+#   ustc-community/dfine_s_coco, ustc-community/dfine_m_coco
+#
+# Usage:
+#   uv run core/p06_training/train.py --config features/safety-fall-detection/configs/06_training_dfine.yaml
+
+model:
+  arch: dfine-s
+  pretrained: ustc-community/dfine_s_coco
+  num_classes: 2
+  input_size: [640, 640]
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 8
+  num_workers: 8
+  prefetch_factor: 4
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  normalize: false      # HF DFineImageProcessor has do_normalize=False — feed [0,1] inputs
+  mosaic: false         # not supported for DETR-family models
+  mixup: false
+  contrast: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  fliplr: 0.5
+  flipud: 0.0
+  scale: [0.8, 1.2]
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: pytorch
+  epochs: 150
+  optimizer: adamw
+  lr: 0.0001
+  weight_decay: 0.0001
+  warmup_epochs: 10
+  scheduler: cosine
+  patience: 30
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 2
+
+  train_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 2
+
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+  val_full_interval: 5
+  val_subset_fraction: 0.2
+  amp: false           # D-FINE decoder overflows in fp16 — keep fp32
+  bf16: false          # D-FINE DFL loss stalls under bf16 (see root CLAUDE.md)
+  gpu_augment: true
+  grad_clip: 0.1
+  ema: false
+
+loss:
+  type: detr
+
+logging:
+  wandb_project: smart-camera
+  run_name: fall_dfines_v1
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 10
+
+seed: 42

@@ -119,10 +119,14 @@ def run_data_prep(config: dict, args) -> None:
         return
 
     output_dir = Path(config["output_dir"])
-    if output_dir.exists() and not args.force:
-        print(f"\n⚠️  Output directory exists: {output_dir}")
-        print("   Use --force to overwrite")
-        return
+    if output_dir.exists():
+        if not args.force:
+            print(f"\n⚠️  Output directory exists: {output_dir}")
+            print("   Use --force to overwrite")
+            return
+        import shutil
+        print(f"\n🧹 --force: wiping existing output dir {output_dir}")
+        shutil.rmtree(output_dir)
 
     print(f"\n📥 Merging {len(config.get('sources', []))} source datasets...")
 

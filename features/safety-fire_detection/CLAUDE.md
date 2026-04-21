@@ -27,9 +27,11 @@ Detects fire and smoke in images/video. Both classes are absent from COCO — pr
 - [x] `p02_annotation_qa` — LS project 13
 - [x] `code/benchmark.py` — pretrained benchmark complete
 - [x] Arch comparison configs — `06_training_dfine.yaml`, `06_training_rtdetr.yaml`, `06_training_yolox.yaml` created and tested
-- [x] Arch comparison complete — **RT-DETRv2-R18 wins** (mAP50=0.541 @ ep15, 10% data); proceed with `06_training_rtdetr.yaml`
-- [x] `p07_hpo` — RT-DETRv2 best: lr=1.6e-4, warmup=15, wd=1.15e-5 (mAP50=0.119 @ 5% data). Applied to `06_training_rtdetr.yaml`.
-- [ ] `p06_training` — full training: `06_training_rtdetr.yaml`, bs=32, 150 epochs, 100% dataset
+- [x] Arch comparison (Iteration 5, 10% data / 15 ep): RT-DETRv2-R18 led at val mAP50=0.541, but full-data runs (Iteration 6) showed RT-DETRv2 diverges at HPO LR and plateaus at ~0.335 at safer LR.
+- [x] Overfit-capability analysis (Iteration 7, 5% data, aug off): **YOLOX-M memorizes (train 0.978 / val 0.478); RT-DETRv2 cannot (best train 0.28 across 5 configs)**. → **YOLOX-M is production arch for fire_detection.**
+- [x] `p07_hpo` — RT-DETRv2 best (historical): lr=1.6e-4, warmup=15, wd=1.15e-5. Kept in `06_training_rtdetr.yaml` for reference; not the production config.
+- [x] Full training — YOLOX-M (official) ep51: full val mAP=0.442, TTA=0.492. YOLOX-M v2 retrain with `val_full_interval=0` in progress (see below).
+- [ ] `p06_training` — production run: `06_training_yolox.yaml --override model.impl=official augmentation.normalize=false training.val_full_interval=0`
 - [ ] `p08_evaluation` — evaluate on test split
 - [ ] `p09_export` — ONNX export
 - [ ] `release/` — `utils/release.py`
@@ -95,12 +97,16 @@ Mosaic stays CPU. GPU path: batched `affine_grid+grid_sample`, vectorized HSV, r
 ## Training Commands
 
 ```bash
-# Full training — RT-DETRv2 (winner, bs=32, 150 epochs)
+# Production — YOLOX-M (official Megvii impl, per Iteration 7 overfit analysis)
+.venv-yolox-official/bin/python core/p06_training/train.py \
+  --config features/safety-fire_detection/configs/06_training_yolox.yaml \
+  --override model.impl=official augmentation.normalize=false training.val_full_interval=0
+
+# Reference-only — RT-DETRv2 (plateaus ~0.335 on full data; use at 50k+ images)
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_rtdetr.yaml
 
-# Other arch configs (arch comparison complete — kept for reference)
+# Reference-only — D-FINE-S (class collapse on 2-class fine-tune; see Iteration 6)
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml
-uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
 ```
 
 ## Key Files
@@ -108,9 +114,9 @@ uv run core/p06_training/train.py --config features/safety-fire_detection/config
 ```
 configs/00_data_preparation.yaml   — data sources + class map
 configs/05_data.yaml               — dataset paths + class names
-configs/06_training_rtdetr.yaml    — RT-DETRv2-R18 (winner — use for full training)
-configs/06_training_dfine.yaml     — D-FINE-S (reference)
-configs/06_training_yolox.yaml     — YOLOX-M (reference)
+configs/06_training_yolox.yaml     — YOLOX-M (production — per Iteration 7)
+configs/06_training_rtdetr.yaml    — RT-DETRv2-R18 (reference — small-data plateau)
+configs/06_training_dfine.yaml     — D-FINE-S (reference — class collapse on 2-class)
 code/benchmark.py                  — pretrained benchmark
 eval/benchmark_results.json        — benchmark output
 eval/benchmark_report.md           — benchmark summary

@@ -28,8 +28,9 @@ Detects the act of using a phone while walking — a behavioral action class, no
 - [x] `p00_data_prep` — 22,975 imgs, DATASET_REPORT ✅
 - [x] `p02_annotation_qa` — LS project 17 (borderline)
 - [x] `code/benchmark.py` — COCO baseline benchmark complete
-- [ ] `06_training.yaml` — start from COCO YOLOX-S backbone
-- [ ] `p06_training` — full fine-tune (no domain-specific pretrained backbone available)
+- [x] Arch-specific training configs created — `06_training_{yolox,rtdetr,dfine}.yaml`
+- [ ] Arch comparison on 10% data; start with `06_training_yolox.yaml` (YOLOX-M small-data default). Note 94.6%/5.4% class imbalance — consider balanced sampling or per-class loss weights.
+- [ ] `p06_training` — full fine-tune (no domain-specific pretrained backbone available — COCO YOLOX-M backbone)
 - [ ] `p08_evaluation` — evaluate on test split
 - [ ] `p09_export` — ONNX export
 - [ ] `release/` — `utils/release.py`
@@ -54,27 +55,19 @@ Full results: `eval/benchmark_results.json` | `eval/benchmark_report.md`
 ```
 configs/00_data_preparation.yaml  — data sources + class map
 configs/05_data.yaml              — dataset paths + class names
-configs/06_training.yaml          — (to create) training config
+configs/06_training_yolox.yaml    — YOLOX-M (recommended starting arch)
+configs/06_training_rtdetr.yaml   — RT-DETRv2-R18 (re-eval on full data)
+configs/06_training_dfine.yaml    — D-FINE-S (reference)
 code/benchmark.py                 — COCO baseline benchmark
 eval/benchmark_results.json       — benchmark output
 eval/benchmark_report.md          — benchmark summary
 ```
 
-## Training Config Template
+## Training Commands
 
-```yaml
-# features/safety-poketenashi-phone-usage/configs/06_training.yaml
-model:
-  arch: yolox-s
-  num_classes: 2
-  pretrained: true       # COCO YOLOX-S — no domain-specific backbone available
-
-training:
-  epochs: 100
-  freeze_backbone_epochs: 5
-  lr: 0.001
-  lr_backbone: 0.0001
-  batch_size: 16
+```bash
+# YOLOX-M (recommended starting arch; COCO backbone)
+uv run core/p06_training/train.py --config features/safety-poketenashi-phone-usage/configs/06_training_yolox.yaml
 ```
 
 ## Notes

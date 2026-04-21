@@ -1,0 +1,106 @@
+# Training config — Fall Detection (YOLOX)
+# License: Apache 2.0 (Megvii)
+#
+# Variants (override via --override model.arch=<key>):
+#   yolox-s   — 2.5M params, fastest inference
+#   yolox-m   — 8.9M params, best accuracy-speed tradeoff  (DEFAULT)
+#   yolox-l   — 46.5M params, highest accuracy, slower
+#
+# Usage:
+#   uv run core/p06_training/train.py --config features/safety-fall-detection/configs/06_training_yolox.yaml
+#   uv run core/p06_training/train.py --config features/safety-fall-detection/configs/06_training_yolox.yaml \
+#       --override model.arch=yolox-s training.epochs=300
+
+model:
+  arch: yolox-m
+  pretrained: ../../../pretrained/yolox_m.pth
+  num_classes: 2
+  input_size: [640, 640]
+  depth: 0.67
+  width: 0.75
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 16
+  num_workers: 8
+  pin_memory: true
+  subset:                  # Limit each split independently (null = use all data)
+    train: null            # int (N images), float (fraction 0.0–1.0), or null
+    val: null
+    test: null
+
+augmentation:
+  mosaic: true          # YOLOX-specific; helps with varied scale/pose of fallen_person
+  mixup: false
+  contrast: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  fliplr: 0.5           # horizontal flip is safe (left/right fall)
+  flipud: 0.0           # no vertical flip — upright vs lying distinction is the task
+  scale: [0.8, 1.2]
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: pytorch
+  epochs: 200
+  optimizer: sgd
+  lr: 0.01
+  momentum: 0.9
+  weight_decay: 0.0005
+  warmup_epochs: 5
+  scheduler: cosine
+  patience: 50
+  val_viz:
+    enabled: true
+    num_samples: 12
+    conf_threshold: 0.25
+    grid_cols: 2
+    gt_color_rgb: [160, 32, 240]
+    pred_color_rgb: [0, 200, 0]
+    gt_thickness: 2
+    pred_thickness: 1
+    text_scale: 0.4
+    dpi: 150
+
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+    thickness: 2
+    text_scale: 0.4
+    dpi: 120
+
+  val_full_interval: 5
+  val_subset_fraction: 0.2
+  amp: true
+  grad_clip: 35.0
+  ema: true
+  ema_decay: 0.9998
+
+loss:
+  type: yolox
+
+logging:
+  wandb_project: smart-camera
+  run_name: fall_yoloxm_v1
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 10
+
+seed: 42

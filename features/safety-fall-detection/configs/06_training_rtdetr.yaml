@@ -1,0 +1,106 @@
+# Training config — Fall Detection (RT-DETRv2, HF Trainer backend)
+# License: Apache 2.0 (Baidu / Peking University)
+#
+# Recipe aligned with notebooks/detr_finetune_reference/ learnings:
+#   - backend: hf  — HF Trainer reproduces qubvel's CPPE-5 results
+#   - augmentation.library: albumentations  — cv2 C kernels, matches
+#     qubvel's reference pipeline byte-for-byte
+#   - Bundle B hyperparams (bs=16, lr=1e-4, cosine, WD=1e-4, bf16,
+#     warmup_steps=300) — the canonical DETR fine-tune recipe
+#
+# Variants (override via --override model.arch=<key>):
+#   rtdetr-r18  — ResNet-18 backbone, ~20M params          (DEFAULT)
+#   rtdetr-r50  — ResNet-50 backbone, ~42M params, higher accuracy
+#
+# Pretrained weights downloaded from HuggingFace Hub on first run:
+#   PekingU/rtdetr_v2_r18vd, PekingU/rtdetr_v2_r50vd
+#
+# Usage:
+#   uv run core/p06_training/train.py \
+#     --config features/safety-fall-detection/configs/06_training_rtdetr.yaml
+
+model:
+  arch: rtdetr-r18
+  pretrained: PekingU/rtdetr_v2_r18vd
+  num_classes: 2
+  input_size: [640, 640]
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 16
+  num_workers: 4
+  prefetch_factor: 4
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: albumentations     # qubvel's reference + CPPE-5-validated fast path
+  normalize: false            # HF RTDetrV2ImageProcessor has do_normalize=False
+  mosaic: false               # DETR-family doesn't use it
+  mixup: false
+
+  # Probability-gated Albumentations transforms (qubvel's exact recipe)
+  perspective_p: 0.1
+  fliplr: 0.5
+  brightness_contrast_p: 0.5
+  hsv_p: 0.1
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+
+  # Identity affine — no affine beyond flip + perspective
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
+
+training:
+  backend: hf                 # HF Trainer — proven on CPPE-5 RT-DETRv2
+  epochs: 150
+  optimizer: adamw            # hardcoded in HF Trainer for DETR; listed for lineage
+  lr: 0.0001                  # Bundle B canonical LR
+  weight_decay: 0.0001
+  warmup_steps: 300           # HF expects steps, not epochs
+  scheduler: cosine
+  max_grad_norm: 0.1
+  bf16: true
+  amp: false                  # explicit: NOT fp16 AMP (decoder overflow)
+  gpu_augment: false          # HF backend doesn't use the GPU aug path
+  ema: false
+  patience: 50
+
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 2
+  train_viz:
+    enabled: false            # HF backend viz bridge is val-only
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  wandb_project: smart-camera
+  run_name: fall_rtdetr_r18_bundleB
+
+checkpoint:
+  save_best: true
+  metric: eval_map            # HF Trainer + torchmetrics key
+  mode: max
+  save_interval: 10
+
+seed: 42

@@ -50,6 +50,64 @@ from core.p06_training.hf_callbacks import (
 )
 
 
+class FreezeBackboneCallback(TrainerCallback):
+    """Freeze the backbone for the first N epochs, then unfreeze.
+
+    Activated when ``training.freeze_backbone_epochs > 0``. Matches the
+    convention documented in `features/CLAUDE.md` (head-only warm-up,
+    then full fine-tune) which previously only worked on the pytorch
+    backend via ``training.freeze: ["backbone"]``.
+
+    Mechanics:
+    - ``on_train_begin``: sets ``requires_grad = False`` on every param
+      whose name contains ``"backbone"``.
+    - ``on_epoch_begin``: at epoch ``freeze_backbone_epochs``, flips
+      ``requires_grad`` back to True. Adam / AdamW pick the new params
+      up immediately because HF Trainer already put them in the optimizer
+      param-group — they just weren't receiving gradients while frozen.
+
+    Optimizer-state caveat: when unfreezing, Adam's momentum stats for
+    the backbone params start from zero. That's the intended behaviour
+    — the first few post-unfreeze steps act like a mini-warmup.
+    """
+
+    def __init__(self, freeze_epochs: int) -> None:
+        self.freeze_epochs = int(freeze_epochs)
+        self._frozen = False
+        self._frozen_param_count = 0
+
+    def _flip_backbone(self, model, requires_grad: bool) -> int:
+        n = 0
+        for name, p in model.named_parameters():
+            if "backbone" in name:
+                p.requires_grad = requires_grad
+                n += 1
+        return n
+
+    def on_train_begin(self, args, state, control, model=None, **kwargs):
+        if model is None or self.freeze_epochs <= 0:
+            return control
+        self._frozen_param_count = self._flip_backbone(model, requires_grad=False)
+        self._frozen = True
+        logger.info(
+            "FreezeBackboneCallback: froze %d backbone params for the first %d epochs",
+            self._frozen_param_count, self.freeze_epochs,
+        )
+        return control
+
+    def on_epoch_begin(self, args, state, control, model=None, **kwargs):
+        if not self._frozen or model is None:
+            return control
+        if state.epoch is not None and state.epoch >= self.freeze_epochs:
+            n = self._flip_backbone(model, requires_grad=True)
+            self._frozen = False
+            logger.info(
+                "FreezeBackboneCallback: unfroze %d backbone params at epoch %d",
+                n, int(state.epoch),
+            )
+        return control
+
+
 class EMACallback(TrainerCallback):
     """HF TrainerCallback wrapping our `ModelEMA` for the HF backend.
 
@@ -822,6 +880,14 @@ def _build_callbacks(
             decay=train_cfg.get("ema_decay", 0.9998),
             warmup_steps=train_cfg.get("ema_warmup_steps", 2000),
         ))
+
+    # Freeze-backbone warmup — `training.freeze_backbone_epochs: N` freezes
+    # backbone params for the first N epochs, then unfreezes. Stabilises
+    # small-data DETR fine-tunes where the matcher destabilises the
+    # backbone during the warmup phase.
+    freeze_epochs = train_cfg.get("freeze_backbone_epochs", 0)
+    if freeze_epochs and int(freeze_epochs) > 0:
+        callbacks.append(FreezeBackboneCallback(freeze_epochs=int(freeze_epochs)))
 
     # Viz callbacks — native HF TrainerCallback subclasses
     # (core/p06_training/hf_callbacks.py). Detection only for now.

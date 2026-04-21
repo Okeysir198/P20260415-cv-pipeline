@@ -34,15 +34,17 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 
 ---
 
-## Top-level summary (verified from disk, 2026-04-15)
+## Top-level summary
+
+> **Disk-size snapshot last verified: 2026-04-21.** Image counts are from Phase A data-prep logs (2026-04-17) and are not re-counted here — for current per-source counts see each feature's `DATASET_REPORT.md`. To refresh disk sizes: `du -sh dataset_store/raw/*/ dataset_store/training_ready/`.
 
 | Category | Size | Imgs | Notes |
 |---|---|---|---|
 | `raw/fire_detection` | 16 GB | 131,387 | d_fire + zenodo + industrial + fasdd_cv + fire_seg |
 | `raw/helmet_detection` | 25 GB | 114,929 | sh17, shlokraval, hardhat_vest_v3, roboflow_hardhat + 7 more (sfchd/shwd Baidu-only) |
 | `raw/fall_detection` | 10 GB | 71,501 | coco_keypoints (pose-only), roboflow_person_fall_8k, roboflow_fall, cctv_fall |
+| `raw/shoes_detection` | 8.4 GB | 34,662+ | grew post-v1: keremberke, rf_feet_segmentation, rf_safety_shoes_11k, rf_footwear_*, rf_sneakers, rf_barefoot, shoe_ppe |
 | `raw/phone_detection` | 4.6 GB | 63,419 | fpi_det + 7 roboflow sources (person-using-phone coverage) |
-| `raw/shoes_detection` | 3.6 GB | 34,662 | keremberke, rf_feet_segmentation, rf_barefoot, rf_footwear_sandal_shoe, shoe_ppe |
 | `raw/smoking_detection` | 676 MB | 10,291 | rf_cigarette_5k |
 | `raw/harness_detection` | 547 MB | 3,303 | rf_body_harness + rf_safety_harness_v2 |
 | `raw/mask_detection` | 465 MB | 12,226 | rf_n95, rf_mask_3class, rf_mask_3k, mask_type_det |
@@ -52,9 +54,9 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 | `raw/ear_protection` | 37 MB | 780 | rf_earplug |
 | `raw/_coco_val` | — | 0 | empty (COCO val2017 placeholder) |
 | `site_collected/` | — | 0 | placeholders only (populate on-site) |
-| `training_ready/` | ~37 GB | ~112K | Phase A complete (2026-04-17) — 5 features built |
+| `training_ready/` | 11 GB | 112,099 | Phase A complete (2026-04-17) — 5 features built (fire, helmet, shoes, fall, phone-usage) |
 
-**Total raw: ~62 GB across 12 categories, ~450K images.**
+**Total raw: ~67 GB across 12 categories, ~450K images.**
 
 ---
 

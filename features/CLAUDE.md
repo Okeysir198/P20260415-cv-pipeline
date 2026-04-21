@@ -42,7 +42,7 @@ We never train from scratch. Every fine-tuned model follows a two-step process:
 3. Unfreeze all layers, train with lower LR (full fine-tune phase)
 4. Evaluate final checkpoint on test split
 
-Config knobs in `06_training.yaml`:
+Each feature has arch-specific configs (`06_training_{yolox,rtdetr,dfine}.yaml`); YOLOX-M is the small-data default (per Iteration 7 — dataset sizes here are all < 50k). Common knobs:
 ```yaml
 training:
   freeze_backbone_epochs: 5    # head-only warm-up
@@ -60,7 +60,7 @@ GPU 2 has ~28 GB — run one training job at a time to avoid OOM.
 **Phase A — Data prep:** ✅ Complete (all 5 ML features)
 
 **Phase B — Training (sequential, one at a time on GPU 2):**
-1. `safety-fire_detection` — 🔄 `06_training.yaml` done (gpu_augment enabled, 3 arch configs); ready to train
+1. `safety-fire_detection` — 🔄 3 arch configs (`06_training_{yolox,rtdetr,dfine}.yaml`); YOLOX-M is the production choice (Iteration 7)
 2. `ppe-helmet_detection` — 4 classes, start from melihuzunoglu_yolov11_ppe.pt
 3. `safety-fall-detection` — specialized class, start from yolov11_fall_melihuzunoglu.pt
 4. `ppe-shoes_detection` — largest dataset (37k imgs), COCO backbone only

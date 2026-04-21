@@ -27,7 +27,7 @@ on features it doesn't implement yet. See `_validate_hf_backend_config`
 | `training.scheduler` | ✓ | passed as `lr_scheduler_type` |
 | `training.warmup_steps` | ✓ (preferred) | HF `warmup_steps` directly; if missing, `warmup_epochs` → `warmup_ratio` |
 | `training.max_grad_norm` / `grad_clip` | ✓ | |
-| `training.bf16` | ✓ | set `True` for detection (DETR decoder overflows in fp16) |
+| `training.bf16` | ✓ | `True` OK for RT-DETRv2; **must be `False` for D-FINE** (DFL stalls val at ~0.15 under bf16). fp16/`amp` overflows both — use bf16 or fp32 only. |
 | `training.amp` | ✓ | validator **hard-errors** if True for detection |
 | `training.patience` | ✓ | `EarlyStoppingCallback` |
 | `training.ema` | ✓ | native `EMACallback` wrapping our `ModelEMA` — swaps weights in/out around each eval |
@@ -84,6 +84,15 @@ still surface.
 HF Trainer's own `args.seed` + `data_seed` handle Python/NumPy/Torch RNG
 and DataLoader sampler seed — all plumbed through from our YAML
 `seed:` key.
+
+**Early `set_seed` hook (hf_trainer.py)**: `train_with_hf` calls
+`transformers.set_seed(config['seed'])` immediately before `build_model`,
+because `from_pretrained(ignore_mismatched_sizes=True)` reinits class/bbox/
+denoising heads inside that call. HF Trainer's own `args.seed` fires later
+inside `Trainer.__init__` — too late. Without the early seed, D-FINE's
+6 decoder `class_embed` heads picked up OS-entropy init and stalled val at
+0.15; RT-DETRv2 still converged but with wider run-to-run variance.
+Matches qubvel's convention from the reference notebooks.
 
 ## When to use which path — decision tree
 

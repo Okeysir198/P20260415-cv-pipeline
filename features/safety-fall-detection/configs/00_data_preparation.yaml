@@ -38,11 +38,13 @@ sources:
       "Fall-Detected": "fallen_person"
 
   # CCTV-angle — critical for deployment-angle match
-  # Note: labels include pose keypoints; YOLO parser uses first 5 fields (cls+bbox), ignores keypoints
+  # Note: labels include pose keypoints; YOLO parser uses first 5 fields (cls+bbox), ignores keypoints.
+  # source_classes required because the source ships dataset.yaml (not data.yaml) — parser can't auto-resolve names.
   - name: "cctv_fall"
     path: "../../../dataset_store/raw/fall_detection/cctv_fall/laying_dataset"
     format: "yolo"
     has_splits: false
+    source_classes: ["laying", "standing"]
     license: "CC-BY-4.0"
     notes: "CCTV top-down angle — matches deployment camera perspective (112 imgs)"
     class_map:

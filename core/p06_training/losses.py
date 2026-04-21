@@ -357,6 +357,7 @@ class YOLOXLoss(DetectionLoss):
 
         self.iou_loss_fn = IoULoss(variant=iou_variant, reduction="none")
         self.bce_loss = nn.BCEWithLogitsLoss(reduction="none")
+        self._anchor_cache: dict = {}  # (num_anchors, device_str, dtype) -> (centers, strides)
 
     def set_epoch(self, epoch: int) -> None:
         """Set current epoch for loss warmup scaling."""
@@ -416,9 +417,9 @@ class YOLOXLoss(DetectionLoss):
             gt_boxes = self._cxcywh_to_xyxy(gt[:, 1:5])  # (M, 4)
             gt_classes = gt[:, 0].long()  # (M,)
 
-            # SimOTA assignment
+            # SimOTA assignment (with center-prior geometry filter)
             fg_mask, matched_gt_inds, matched_ious = self._simota_assign(
-                pred, pred_boxes, gt_boxes, gt_classes
+                pred, pred_boxes, gt_boxes, gt_classes, gt[:, 1:3]
             )
 
             num_fg = fg_mask.sum().item()
@@ -485,23 +486,85 @@ class YOLOXLoss(DetectionLoss):
 
         return total_loss, loss_dict
 
+    def _build_anchor_metadata(
+        self,
+        num_anchors: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Build per-anchor cell-center pixel coords + stride.
+
+        Assumes a square input shape and anchor ordering stride-ascending
+        (matches ``YOLOXModel.forward``'s iteration over ``self.strides``).
+
+        Args:
+            num_anchors: Total anchor count across all scales, ``N``.
+            device: Target device.
+            dtype: Target dtype (always float32 internally; cast on return).
+
+        Returns:
+            Tuple of ``(anchor_centers, anchor_strides)`` with shapes
+            ``(N, 2)`` and ``(N,)`` — pixel-space cell centers and stride
+            per anchor.
+        """
+        key = (num_anchors, str(device), dtype)
+        cached = self._anchor_cache.get(key)
+        if cached is not None:
+            return cached
+
+        # Solve square input size S from: N = sum_i (S/stride_i)^2
+        sum_inv_sq = sum(1.0 / (s * s) for s in self.strides)
+        s_float = (num_anchors / sum_inv_sq) ** 0.5
+        s_int = int(round(s_float))
+        if abs(s_int - s_float) > 1e-3 or any(s_int % s != 0 for s in self.strides):
+            raise RuntimeError(
+                f"Cannot infer square input size for num_anchors={num_anchors} "
+                f"with strides={self.strides} (solved S={s_float})"
+            )
+
+        centers_parts, strides_parts = [], []
+        for stride in self.strides:
+            h = w = s_int // stride
+            gy, gx = torch.meshgrid(
+                torch.arange(h, device=device, dtype=torch.float32),
+                torch.arange(w, device=device, dtype=torch.float32),
+                indexing="ij",
+            )
+            cx = ((gx + 0.5) * stride).reshape(-1)
+            cy = ((gy + 0.5) * stride).reshape(-1)
+            centers_parts.append(torch.stack([cx, cy], dim=-1))
+            strides_parts.append(
+                torch.full((h * w,), float(stride), device=device, dtype=torch.float32)
+            )
+
+        anchor_centers = torch.cat(centers_parts, dim=0).to(dtype)  # (N, 2)
+        anchor_strides = torch.cat(strides_parts, dim=0).to(dtype)  # (N,)
+        self._anchor_cache[key] = (anchor_centers, anchor_strides)
+        return anchor_centers, anchor_strides
+
     def _simota_assign(
         self,
         pred: torch.Tensor,
         pred_boxes: torch.Tensor,
         gt_boxes: torch.Tensor,
         gt_classes: torch.Tensor,
+        gt_cxcy: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Simplified SimOTA dynamic label assignment.
+        """SimOTA dynamic label assignment with center-prior geometry filter.
 
-        For each GT, selects the top-k predictions by combined cost
-        (classification + regression), then resolves conflicts.
+        Adds the upstream Megvii YOLOXHead.get_geometry_constraint step
+        (``center_radius=1.5 * stride``) so positive-anchor selection only
+        considers anchors whose cell center lies near the GT center. Without
+        it, topk over all ~8400 anchors lets distant anchors win positive
+        slots by virtue of slightly lower raw-logit BCE cost, driving
+        training to divergence.
 
         Args:
             pred: Full predictions (N, 5 + C).
             pred_boxes: Decoded prediction boxes (N, 4) in xyxy format.
             gt_boxes: Ground truth boxes (M, 4) in xyxy format.
             gt_classes: Ground truth class indices (M,).
+            gt_cxcy: Ground truth centers (M, 2) in pixel space.
 
         Returns:
             Tuple of:
@@ -513,41 +576,65 @@ class YOLOXLoss(DetectionLoss):
         num_pred = pred.shape[0]
         num_gt = gt_boxes.shape[0]
 
-        # Compute pairwise IoU: (num_gt, num_pred)
-        pair_iou = self._pairwise_iou(gt_boxes, pred_boxes)
+        anchor_centers, anchor_strides = self._build_anchor_metadata(
+            num_pred, device, torch.float32
+        )
 
-        # Classification cost: BCE between pred cls logits and GT one-hot
-        # Use binary_cross_entropy_with_logits for AMP safety and numerical stability
-        pred_cls_logits = pred[:, 5:].float()  # (N, C) — raw logits
-        gt_onehot = F.one_hot(gt_classes, self.num_classes).float()  # (M, C)
+        # Center-prior geometry filter: anchor cell center within
+        # center_radius * stride (L-inf) of GT center.
+        center_radius = 1.5
+        center_dist = (anchor_strides * center_radius).unsqueeze(0)  # (1, N)
+        gt_cxcy_f = gt_cxcy.float()
+        dx = (anchor_centers[:, 0].unsqueeze(0) - gt_cxcy_f[:, 0].unsqueeze(1)).abs()
+        dy = (anchor_centers[:, 1].unsqueeze(0) - gt_cxcy_f[:, 1].unsqueeze(1)).abs()
+        pair_geom_mask = (dx < center_dist) & (dy < center_dist)  # (M, N)
+        anchor_candidates = pair_geom_mask.any(dim=0)  # (N,)
+        num_cand = int(anchor_candidates.sum().item())
 
-        # cls_cost: (M, N) — BCE of each pred against each GT class
-        cls_cost = torch.zeros(num_gt, num_pred, device=device)
+        empty_fg = torch.zeros(num_pred, dtype=torch.bool, device=device)
+        empty_inds = torch.zeros(0, dtype=torch.long, device=device)
+        empty_ious = torch.zeros(0, device=device, dtype=pred_boxes.dtype)
+
+        if num_cand == 0:
+            return empty_fg, empty_inds, empty_ious
+
+        cand_pred_boxes = pred_boxes[anchor_candidates]           # (C, 4)
+        cand_pred_cls = pred[anchor_candidates, 5:].float()       # (C, nc)
+        cand_geom_mask = pair_geom_mask[:, anchor_candidates]     # (M, C)
+
+        # Pairwise IoU over candidates only
+        pair_iou = self._pairwise_iou(gt_boxes, cand_pred_boxes)  # (M, C)
+
+        # cls cost: BCE of each candidate against each GT class
+        gt_onehot = F.one_hot(gt_classes, self.num_classes).float()  # (M, nc)
+        cls_cost = torch.zeros(num_gt, num_cand, device=device)
         for i in range(num_gt):
-            gt_cls_expanded = gt_onehot[i].unsqueeze(0).expand(num_pred, -1)
+            gt_cls_expanded = gt_onehot[i].unsqueeze(0).expand(num_cand, -1)
             cls_cost[i] = F.binary_cross_entropy_with_logits(
-                pred_cls_logits, gt_cls_expanded, reduction="none"
+                cand_pred_cls, gt_cls_expanded, reduction="none"
             ).sum(dim=-1)
 
-        # Combined cost: lower is better
-        cost_matrix = cls_cost + 3.0 * (1.0 - pair_iou)
+        # Combined cost; penalise (gt, anchor) pairs that fail the per-GT
+        # geometry check so topk never picks them.
+        cost_matrix = (
+            cls_cost
+            + 3.0 * (1.0 - pair_iou)
+            + 1e5 * (~cand_geom_mask).float()
+        )
 
-        # Dynamic k selection based on IoU
-        top_k = min(self.simota_top_k, num_pred)
+        # Dynamic k per GT based on IoU sum of top candidates
+        top_k = min(self.simota_top_k, num_cand)
         topk_ious, _ = torch.topk(pair_iou, top_k, dim=1)
         dynamic_ks = topk_ious.sum(dim=1).int().clamp(min=1)
 
-        # Assign: for each GT, pick top dynamic_k predictions by cost
-        matching_matrix = torch.zeros(num_gt, num_pred, device=device, dtype=torch.bool)
+        matching_matrix = torch.zeros(num_gt, num_cand, device=device, dtype=torch.bool)
         for gt_idx in range(num_gt):
-            k = dynamic_ks[gt_idx].item()
-            k = min(k, num_pred)
+            k = min(int(dynamic_ks[gt_idx].item()), num_cand)
             _, topk_inds = torch.topk(cost_matrix[gt_idx], k, largest=False)
             matching_matrix[gt_idx, topk_inds] = True
 
-        # Resolve conflicts: if a prediction is assigned to multiple GTs,
-        # keep only the GT with the lowest cost
-        anchor_match_count = matching_matrix.sum(dim=0)  # (N,)
+        # Resolve conflicts: anchor matched to multiple GTs → keep lowest-cost GT
+        anchor_match_count = matching_matrix.sum(dim=0)  # (C,)
         conflict_mask = anchor_match_count > 1
         if conflict_mask.any():
             conflict_inds = conflict_mask.nonzero(as_tuple=True)[0]
@@ -557,10 +644,19 @@ class YOLOXLoss(DetectionLoss):
                 matching_matrix[:, idx] = False
                 matching_matrix[best_gt, idx] = True
 
-        # Build outputs
-        fg_mask = matching_matrix.any(dim=0)  # (N,)
-        matched_gt_inds = matching_matrix.float().argmax(dim=0)[fg_mask]  # (num_fg,)
-        matched_ious = pair_iou.gather(0, matched_gt_inds.unsqueeze(0)).squeeze(0)
+        # Map candidate-space results back to full anchor-space
+        cand_fg_mask = matching_matrix.any(dim=0)  # (C,)
+        if not cand_fg_mask.any():
+            return empty_fg, empty_inds, empty_ious
+
+        cand_abs_inds = anchor_candidates.nonzero(as_tuple=True)[0]  # (C,)
+        fg_abs_inds = cand_abs_inds[cand_fg_mask]                    # (num_fg,)
+        fg_mask = torch.zeros(num_pred, dtype=torch.bool, device=device)
+        fg_mask[fg_abs_inds] = True
+
+        matched_gt_inds = matching_matrix.float().argmax(dim=0)[cand_fg_mask]
+        fg_pair_iou = pair_iou[:, cand_fg_mask]  # (M, num_fg)
+        matched_ious = fg_pair_iou.gather(0, matched_gt_inds.unsqueeze(0)).squeeze(0)
 
         return fg_mask, matched_gt_inds, matched_ious
 
