@@ -1,0 +1,170 @@
+[
+  {
+    "image": "fire_1.jpg",
+    "detections": [
+      {
+        "class": "fire",
+        "score": 0.081,
+        "box": [
+          8.4,
+          652.2,
+          560.1,
+          1191.9
+        ]
+      }
+    ]
+  },
+  {
+    "image": "fire_2.jpg",
+    "detections": [
+      {
+        "class": "fire",
+        "score": 0.095,
+        "box": [
+          1197.5,
+          38.2,
+          2100.8,
+          1548.3
+        ]
+      }
+    ]
+  },
+  {
+    "image": "fire_3.jpg",
+    "detections": [
+      {
+        "class": "fire",
+        "score": 0.162,
+        "box": [
+          791.2,
+          316.7,
+          1926.9,
+          2408.6
+        ]
+      },
+      {
+        "class": "fire",
+        "score": 0.116,
+        "box": [
+          1364.0,
+          2366.3,
+          1549.3,
+          2608.1
+        ]
+      },
+      {
+        "class": "fire",
+        "score": 0.087,
+        "box": [
+          1670.1,
+          1668.9,
+          1899.1,
+          2097.0
+        ]
+      }
+    ]
+  },
+  {
+    "image": "fire_4.jpg",
+    "detections": [
+      {
+        "class": "fire",
+        "score": 0.121,
+        "box": [
+          54.1,
+          6.6,
+          295.9,
+          559.6
+        ]
+      }
+    ]
+  },
+  {
+    "image": "fire_5.jpg",
+    "detections": [
+      {
+        "class": "smoke",
+        "score": 0.182,
+        "box": [
+          14.9,
+          10.8,
+          851.1,
+          491.2
+        ]
+      },
+      {
+        "class": "fire",
+        "score": 0.125,
+        "box": [
+          70.3,
+          383.1,
+          877.5,
+          515.6
+        ]
+      }
+    ]
+  },
+  {
+    "image": "fire_6.jpg",
+    "detections": [
+      {
+        "class": "fire",
+        "score": 0.06,
+        "box": [
+          224.1,
+          177.5,
+          272.3,
+          236.2
+        ]
+      }
+    ]
+  },
+  {
+    "image": "neg_excavator.jpg",
+    "detections": []
+  },
+  {
+    "image": "neg_lights.jpg",
+    "detections": []
+  },
+  {
+    "image": "neg_steam.jpg",
+    "detections": [
+      {
+        "class": "smoke",
+        "score": 0.069,
+        "box": [
+          1892.5,
+          32.6,
+          2795.4,
+          785.2
+        ]
+      }
+    ]
+  },
+  {
+    "image": "neg_sunset.jpg",
+    "detections": [
+      {
+        "class": "smoke",
+        "score": 0.064,
+        "box": [
+          342.5,
+          486.5,
+          1294.2,
+          1587.0
+        ]
+      },
+      {
+        "class": "fire",
+        "score": 0.063,
+        "box": [
+          1331.1,
+          1590.3,
+          1392.2,
+          1672.5
+        ]
+      }
+    ]
+  }
+]

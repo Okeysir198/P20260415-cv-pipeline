@@ -217,6 +217,62 @@ class _DetectionTrainer(Trainer):
 
         torch.save(self.args, _os.path.join(output_dir, "training_args.bin"))
 
+    def create_optimizer(self):
+        """Build AdamW with a backbone vs head param-group split.
+
+        Activates when `training.lr_backbone` is set in the config (stashed
+        onto `self.args.backbone_lr` by `_config_to_training_args`). Matches
+        the official Peterande/D-FINE recipe (backbone 2.5e-5, head 2.5e-4)
+        and the RT-DETR reference (backbone 1e-5, head 1e-4). When unset,
+        falls back to HF Trainer's default single-LR optimizer.
+
+        The decay/no-decay split (LayerNorm + bias → wd=0) is preserved
+        inside each group via `self.get_decay_parameter_names`, so the
+        official behaviour is a strict superset of the default.
+        """
+        if self.optimizer is not None:
+            return self.optimizer
+        lr_bb = getattr(self.args, "backbone_lr", None)
+        if lr_bb is None:
+            return super().create_optimizer()
+
+        import torch  # local — matches _save's convention
+        opt_model = self.model
+        decay_names = set(self.get_decay_parameter_names(opt_model))
+        lr_head = self.args.learning_rate
+        wd = self.args.weight_decay
+        bb_decay, bb_nodecay, hd_decay, hd_nodecay = [], [], [], []
+        for n, p in opt_model.named_parameters():
+            if not p.requires_grad:
+                continue
+            is_backbone = "backbone" in n
+            in_decay = n in decay_names
+            bucket = (
+                bb_decay if is_backbone and in_decay else
+                bb_nodecay if is_backbone else
+                hd_decay if in_decay else
+                hd_nodecay
+            )
+            bucket.append(p)
+        param_groups = [
+            {"params": bb_decay,   "lr": lr_bb,   "weight_decay": wd},
+            {"params": bb_nodecay, "lr": lr_bb,   "weight_decay": 0.0},
+            {"params": hd_decay,   "lr": lr_head, "weight_decay": wd},
+            {"params": hd_nodecay, "lr": lr_head, "weight_decay": 0.0},
+        ]
+        param_groups = [g for g in param_groups if g["params"]]
+        n_bb = sum(len(g["params"]) for g in param_groups if g["lr"] == lr_bb)
+        n_hd = sum(len(g["params"]) for g in param_groups if g["lr"] == lr_head)
+        logger.info(
+            "Layered AdamW: backbone lr=%g (%d params), head lr=%g (%d params), wd=%g",
+            lr_bb, n_bb, lr_head, n_hd, wd,
+        )
+        cls, kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
+        kwargs.pop("lr", None)  # per-group LRs win
+        self.optimizer = cls(param_groups, **kwargs)
+        return self.optimizer
+
+
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
 from core.p06_models import build_model
 from utils.config import generate_run_dir, load_config, merge_configs
@@ -453,6 +509,18 @@ def train_with_hf(
     else:
         compute_metrics = _build_compute_metrics(output_format, config)
 
+    # Compute subset indices to pass into data-preview callbacks so their
+    # stats/grids reflect the 20%-subset run (not the full underlying dataset).
+    # Test is always full (no subset_cfg.test applied) → None is correct.
+    import torch.utils.data as _tud
+    def _subset_indices(ds):
+        return list(ds.indices) if isinstance(ds, _tud.Subset) else None
+    subset_map = {
+        "train": _subset_indices(train_dataset),
+        "val":   _subset_indices(eval_dataset),
+        "test":  None,
+    }
+
     # Build callbacks (incl. viz-bridge for detection)
     callbacks = _build_callbacks(
         config,
@@ -461,6 +529,7 @@ def train_with_hf(
         data_config=data_config,
         base_dir=base_dir,
         save_dir=training_args.output_dir,
+        subset_map=subset_map,
     )
 
     # Create HF Trainer. Detection uses a subclass that avoids safetensors'
@@ -763,7 +832,7 @@ def _config_to_training_args(
     # For non-detection tasks we keep the current concat-batch behaviour.
     eval_do_concat_batches = output_format != "detr"
 
-    return TrainingArguments(
+    training_args = TrainingArguments(
         output_dir=save_dir,
         num_train_epochs=epochs,
         learning_rate=train_cfg.get("lr", 0.001),
@@ -795,6 +864,12 @@ def _config_to_training_args(
         eval_do_concat_batches=eval_do_concat_batches,
         logging_steps=10,
     )
+    # Layered LR — stashed as a dynamic attribute (TrainingArguments is a
+    # @dataclass but not frozen). `_DetectionTrainer.create_optimizer` reads
+    # it to build a backbone vs head AdamW param-group split (official D-FINE
+    # recipe: backbone 2.5e-5, head 2.5e-4). Unset → falls back to HF default.
+    training_args.backbone_lr = train_cfg.get("lr_backbone")
+    return training_args
 
 
 def _build_compute_metrics(output_format: str, config: dict):
@@ -852,6 +927,7 @@ def _build_callbacks(
     data_config: dict | None = None,
     base_dir: str | None = None,
     save_dir: str | None = None,
+    subset_map: dict[str, list[int] | None] | None = None,
 ) -> list:
     """Build HF Trainer callbacks from our config.
 
@@ -898,10 +974,15 @@ def _build_callbacks(
     input_size = tuple(data_config.get("input_size", (640, 640)))
 
     # DatasetStatsLogger — always on, matching custom-trainer policy.
+    # subset_map threads the active data.subset.{train,val,test} indices so
+    # data_preview reflects what the run actually trained on, not the full
+    # underlying dataset. Mirrors the pytorch-backend DatasetStatsLogger
+    # (callbacks.py::_subset_indices).
     data_viz = train_cfg.get("data_viz", {})
     callbacks.append(HFDatasetStatsCallback(
         save_dir=save_dir, data_config=data_config, base_dir=base_dir or "",
         splits=splits,
+        subsets=subset_map,
         dpi=data_viz.get("dpi", 120),
     ))
 
@@ -909,6 +990,7 @@ def _build_callbacks(
         callbacks.append(HFDataLabelGridCallback(
             save_dir=save_dir, splits=splits,
             data_config=data_config, base_dir=base_dir or "",
+            subsets=subset_map,
             num_samples=data_viz.get("num_samples", 16),
             grid_cols=data_viz.get("grid_cols", 4),
             thickness=data_viz.get("thickness", 2),
@@ -925,6 +1007,7 @@ def _build_callbacks(
             aug_config=config.get("augmentation", {}),
             base_dir=base_dir or "",
             input_size=input_size,
+            subsets=subset_map,
             num_samples=aug_viz.get("num_samples", 16),
             grid_cols=aug_viz.get("grid_cols", 4),
             thickness=aug_viz.get("thickness", 2),

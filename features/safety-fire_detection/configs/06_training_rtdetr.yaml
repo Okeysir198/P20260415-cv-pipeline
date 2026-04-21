@@ -41,6 +41,12 @@ model:
   pretrained: PekingU/rtdetr_v2_r50vd
   num_classes: 2
   input_size: [640, 640]
+  # Tuned for fire_detection (2 classes, sparse bboxes, max 22 / p99 9 boxes per image).
+  # Defaults (300/100) are COCO-tuned (80 cls, dense) and cause 298/300 queries to
+  # match "no-object" each step — VFL suppresses all logits and bleeds onto the few
+  # positives, producing the 0.15-max calibration we observed at 20%-data / 30 ep.
+  num_queries: 100            # from HF default 300 — less no-object pressure
+  num_denoising: 200          # from HF default 100 — stabilize matching on sparse data
 
 data:
   dataset_config: 05_data.yaml

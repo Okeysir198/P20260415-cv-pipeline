@@ -74,27 +74,44 @@ augmentation:
 
 training:
   backend: hf                # HF Trainer — proven for D-FINE on CPPE-5 (test mAP 0.492)
-  epochs: 50                 # bumped from qubvel's 30 — reference shows +0.06 test mAP
-                             # (0.43 → 0.49 on CPPE-5, 30 ep → 50 ep). D-FINE is
-                             # under-trained at 30 ep; Goggles class 0.096 → 0.307.
+  # Epochs: official Peterande/D-FINE base is 72 (COCO) / 56 (obj365→custom).
+  # CPPE-5 reference showed +0.06 test mAP going 30 → 50. 30-ep Phase-B kill on
+  # fire landed at 0.19 peak — clearly under-trained. 72 matches official base.
+  epochs: 72
   optimizer: adamw
-  lr: 0.00005                # qubvel's learning_rate=5e-5 (conservative — 1e-4 diverges
-                             # on small-class DETR fine-tune per Iteration 7)
-  weight_decay: 0.0          # qubvel's default (explicit 0, not 1e-4)
-  warmup_steps: 300          # reference pin (HF expects steps, not epochs)
-  scheduler: linear          # reference default — cosine is OK too but linear matches qubvel
-  max_grad_norm: 0.1         # DETR-family standard
+  # Layered AdamW matching official Peterande/D-FINE `configs/dfine/include/
+  # optimizer.yml` — head (encoder/decoder) at 2.5e-4, backbone (HGNetv2) at
+  # 2.5e-5 (10× lower). Our HF Trainer subclass (_DetectionTrainer.
+  # create_optimizer) reads lr_backbone and splits params by "backbone" name.
+  # Without the split, qubvel's blended 5e-5 was the safe fallback on CPPE-5.
+  lr: 0.00025                # head LR
+  lr_backbone: 0.000025      # backbone LR (10× lower — official ratio)
+  weight_decay: 0.000125     # official D-FINE optimizer.yml (norm groups get 0)
+  warmup_steps: 500          # official LinearWarmup duration (was 300 from qubvel)
+  # constant_with_warmup approximates official MultiStepLR (flat after warmup,
+  # gamma step only near end). `linear` decays to 0 by final epoch — starves the
+  # DFL head that keeps refining box-corner distributions late in training.
+  scheduler: constant_with_warmup
+  max_grad_norm: 0.1         # official clip_max_norm
   bf16: false                # MANDATORY for D-FINE — distribution-focused loss stalls
                              # val mAP at ~0.15 under bf16 (unlike RT-DETRv2 which is
                              # bf16-neutral). Keep fp32.
   amp: false                 # fp16 AMP overflows DETR decoder — NaN pred_boxes
   gpu_augment: false         # HF Trainer uses its own DataLoader
-  ema: false                 # reference doesn't use EMA
-  patience: 50               # HF Trainer early stopping — DETR noisier mAP trajectory
+  # EMA is part of the official D-FINE recipe (decay 0.9999, 1000-step warmup).
+  # Smooths the noisy DETR mAP trajectory; also what CPPE-5 reference uses by
+  # default. `EMACallback` in hf_trainer.py handles swap-before-eval/save.
+  ema: true
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+  # Tighter patience with EMA + flat LR — stalls are real stalls, not LR-decay
+  # artefacts. 50 was needed only because noisy trajectory + decaying LR looked
+  # like plateaus that weren't.
+  patience: 15
 
   val_viz:
     enabled: true
-    num_samples: 8
+    num_samples: 16
     conf_threshold: 0.05     # DETR sigmoid scores cap ~0.2; keep low
     grid_cols: 2
   train_viz:
