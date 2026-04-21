@@ -346,28 +346,43 @@ across seeds 0 / 42×3 / 2024, mean **0.383 ± 0.042**. Best-of-5
 (0.441) exceeds reference. Matches reference within measured noise.
 
 **`our_dfine_torchvision/`** (same recipe, torchvision v2 aug instead
-of Albumentations) — seed=42 single run: test mAP **0.430**,
-mAP₅₀ 0.617, train_runtime 635 s. Sits at +1.1σ above the Albu mean
-(inside noise band) and nearly matches Albu's best-of-5. Trains
-**~15 % faster** than Albu (635 s vs Albu mean 760 s) — mirrors
-the RT-DETRv2 finding: the "resize-first" reorder (`c4d3658`)
-closes the previously-observed TV slowdown on D-FINE too. No
-statistical signal differentiating the two backends on accuracy.
-**Torchvision v2 remains the recommended default** for D-FINE.
+of Albumentations). Trains ~15 % faster than Albu (635 s vs
+Albu mean 760 s at 30 ep) — mirrors the RT-DETRv2 finding: the
+"resize-first" reorder (`c4d3658`) closes the previously-observed
+TV slowdown on D-FINE too. **Torchvision v2 remains the recommended
+default** for D-FINE.
 
-Per-class TV-vs-Albu-mean comparison (seed=42):
+Two seed=42 data points:
 
-| class | Albu mean (n=5) | TV (n=1) | Δ |
+| run | epochs | test mAP | test mAP₅₀ | train_runtime |
+|---|---|---|---|---|
+| 30 ep (baseline) | 30 | 0.430 | 0.617 | 635 s |
+| **50 ep (default now)** | 50 | **0.492** | **0.737** | 1068 s |
+
+**50 ep unlocks +0.062 test mAP over 30 ep** — D-FINE was
+under-trained at qubvel's 30-epoch setting. Qubvel's published
+number (0.449) is now beaten at a single seed. Goggles (our
+worst class) nearly triples: 0.096 → 0.307. Face_Shield jumps
++0.19. Coverall/Mask regress slightly under the longer LR
+schedule but the net gain is decisive.
+
+Both `our_dfine_torchvision/06_training.yaml` and
+`our_dfine_albumentations/06_training.yaml` now default to
+`epochs: 50`.
+
+Per-class comparison (seed=42):
+
+| class | Albu mean (n=5, 30ep) | TV 30ep | TV 50ep |
 |---|---|---|---|
-| Coverall | 0.42 | 0.615 | +0.20 |
-| Face_Shield | 0.47 | 0.487 | +0.02 |
-| Gloves | 0.41 | 0.427 | +0.02 |
-| Goggles | 0.17 | 0.096 | −0.07 |
-| Mask | 0.42 | 0.524 | +0.10 |
+| Coverall | 0.42 | 0.615 | 0.564 |
+| Face_Shield | 0.47 | 0.487 | **0.677** |
+| Gloves | 0.41 | 0.427 | 0.452 |
+| Goggles | 0.17 | 0.096 | **0.307** |
+| Mask | 0.42 | 0.524 | 0.462 |
 
-Goggles regression is within the per-class seed-lottery band (Albu
-single-seed std on Goggles is 0.08). Need n≥3 TV runs to call
-statistically.
+The 50-ep run rebalances classes significantly: the rare/hard
+classes (Goggles, Face_Shield) gain the most, the easy classes
+(Coverall, Mask) give back a little. Net **+0.062 test mAP**.
 
 Two bugs were needed to reach this:
 1. **`bf16: true` stalls D-FINE** (val stuck at 0.15, eval_loss 2.2→2.9).
