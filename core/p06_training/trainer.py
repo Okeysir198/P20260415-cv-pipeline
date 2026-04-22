@@ -843,7 +843,7 @@ class DetectionTrainer:
                 style=style,
                 best_num_samples=int(post_cfg.get("num_samples", 16)),
                 best_conf_threshold=float(post_cfg.get("conf_threshold", 0.3)),
-                error_analysis_conf_threshold=float(post_cfg.get("error_conf_threshold", 0.3)),
+                error_analysis_conf_threshold=float(post_cfg.get("error_conf_threshold", 0.05)),
                 error_analysis_iou_threshold=float(post_cfg.get("error_iou_threshold", 0.5)),
                 error_analysis_max_samples=post_cfg.get("error_max_samples", 500),
                 error_analysis_hard_images_per_class=int(post_cfg.get("hard_images_per_class", 20)),

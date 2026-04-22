@@ -329,7 +329,7 @@ def run_post_train_artifacts(
     style: VizStyle | None = None,
     best_num_samples: int = 16,
     best_conf_threshold: float = 0.3,
-    error_analysis_conf_threshold: float = 0.3,
+    error_analysis_conf_threshold: float = 0.05,
     error_analysis_iou_threshold: float = 0.5,
     error_analysis_max_samples: int | None = 500,
     error_analysis_hard_images_per_class: int = 20,

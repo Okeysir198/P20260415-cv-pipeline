@@ -219,6 +219,25 @@ Gotchas
   in `build_hf_model`; any new HF detection wrapper MUST do the same or wire
   a custom preprocess path. YOLOX (`output_format == "yolox"`) bypasses this
   and feeds raw [0, 255] to match the Megvii recipe.
+- **Default `error_analysis_conf_threshold = 0.05`, not 0.3** — DETR-family
+  models (RT-DETRv2, D-FINE) routinely produce correct predictions at scores
+  in the 0.05–0.20 range; on CPPE-5 RT-DETRv2's max score on a typical val
+  image was 0.176. Using 0.3 as the analyzer threshold dropped virtually
+  every prediction, leaving TP≈0 / FN≈all in summary.json even when HF
+  Trainer's own eval reported mAP50=0.82. With 0.05, TP counts land in the
+  100s and PR curves / mAP-vs-IoU reflect real model behavior. Override via
+  `training.post_train.error_conf_threshold` if you need different ops calibration.
+- **HF `load_best_model_at_end` + wrapper-prefixed state dict** — our
+  `_DetectionTrainer._save` writes state dicts with `hf_model.*` prefix.
+  HF Trainer's `_load_best_model` loads into the **inner** `hf_model` module,
+  not the wrapper, so it silently misses every prefixed key and reinits weights.
+  The final `pytorch_model.bin` at run root therefore has **untrained class
+  heads**; the true best weights live in `<run_dir>/checkpoint-N/pytorch_model.bin`
+  where `N` is the step pointed to by `trainer_state.json::best_model_checkpoint`.
+  HF Trainer's OWN test eval (run in-memory after the broken save) still sees
+  the correct weights — so `test_results.json` is trustworthy even when
+  `pytorch_model.bin` is not. Any analyzer-rerun script must load from the
+  best-checkpoint folder, not the root.
 - **`self.save_dir` is an instance attribute** (set inside `_build_callbacks`)
   so `_finalize_training` and `_build_pytorch_training_config` can read it
   after the main loop. Do not convert it back to a local variable — it's the
