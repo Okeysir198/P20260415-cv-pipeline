@@ -74,18 +74,46 @@ def _safe_name(name: str) -> str:
     return _SAFE_NAME.sub("_", str(name))[:80]
 
 
-def _preprocess_for_model(raw_image: np.ndarray, input_size: tuple[int, int]) -> torch.Tensor:
-    """BGR HWC uint8 → normalized CHW float32 tensor. The HF processor or
-    our transform pipeline normally handles this; for the error analysis path
-    we replicate the minimum the model expects (resize + /255 + CHW)."""
+def _preprocess_for_model(
+    raw_image: np.ndarray,
+    input_size: tuple[int, int],
+    model=None,
+) -> torch.Tensor:
+    """BGR HWC uint8 → CHW float32 tensor the model can forward on.
+
+    Three cases:
+      * Model has ``model.processor`` (HF wrappers e.g. ``HFDetectionModel``):
+        delegate to ``AutoImageProcessor`` so inputs are rescaled + normalized
+        with the exact ``(mean, std)`` the model was trained with. Without
+        this, DETR-family decoders receive un-normalized pixels and produce
+        garbage predictions — observed as zero TP/FP in the analyzer when
+        HF Trainer's own eval reported mAP50=0.82.
+      * Model has ``augmentation.normalize=False`` semantics (YOLOX raw-pixel
+        recipe): the postprocess expects [0, 255] uint8 inputs; we feed the
+        resized tensor straight through as float without any mean/std shift.
+      * Fallback: ImageNet-norm manually (matches our default transforms path).
+    """
     h, w = int(input_size[0]), int(input_size[1])
+    processor = getattr(model, "processor", None)
+    if processor is not None:
+        # HF processor wants a list of PIL-style RGB HWC uint8 arrays
+        rgb = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
+        resized = cv2.resize(rgb, (w, h))
+        out = processor(images=[resized], return_tensors="pt", do_resize=False)
+        return out["pixel_values"][0]
+
     resized = cv2.resize(raw_image, (w, h))
-    tensor = torch.from_numpy(
-        np.ascontiguousarray(
-            (resized.astype(np.float32) / 255.0).transpose(2, 0, 1)
-        )
-    )
-    return tensor
+    arr = resized.astype(np.float32)
+    # YOLOX expects raw [0, 255]; others (timm etc.) expect ImageNet-normalized.
+    output_format = (getattr(model, "output_format", "") or "").lower()
+    if output_format in {"yolox"}:
+        tensor_np = arr.transpose(2, 0, 1)  # keep in [0, 255]
+    else:
+        mean = np.array([0.485 * 255, 0.456 * 255, 0.406 * 255], dtype=np.float32).reshape(1, 1, 3)
+        std = np.array([0.229 * 255, 0.224 * 255, 0.225 * 255], dtype=np.float32).reshape(1, 1, 3)
+        # Our transforms feed BGR to the model; keep channel order consistent.
+        tensor_np = ((arr - mean) / std).transpose(2, 0, 1)
+    return torch.from_numpy(np.ascontiguousarray(tensor_np))
 
 
 def _dispatch_forward(model, tensor_batch: torch.Tensor):
@@ -239,7 +267,7 @@ def _analyze_detection(
         if image is None:
             continue
         orig_h, orig_w = image.shape[:2]
-        tensor = _preprocess_for_model(image, (input_h, input_w)).unsqueeze(0).to(device)
+        tensor = _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
         with torch.no_grad():
             preds_raw = _dispatch_forward(model, tensor)
         target_sizes = torch.tensor([[input_h, input_w]], device=device)
@@ -1024,7 +1052,7 @@ def _analyze_classification(
         gt = raw.get("targets")
         if image is None or gt is None:
             continue
-        tensor = _preprocess_for_model(image, (input_h, input_w)).unsqueeze(0).to(device)
+        tensor = _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
         with torch.no_grad():
             out = _dispatch_forward(model, tensor)
         logits = out.logits if hasattr(out, "logits") else out
@@ -1162,7 +1190,7 @@ def _analyze_segmentation(
         gt_mask = raw.get("targets")
         if image is None or gt_mask is None:
             continue
-        tensor = _preprocess_for_model(image, (input_h, input_w)).unsqueeze(0).to(device)
+        tensor = _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
         with torch.no_grad():
             out = _dispatch_forward(model, tensor)
         logits = out.logits if hasattr(out, "logits") else out
@@ -1231,7 +1259,7 @@ def _analyze_segmentation(
             image = raw["image"]; gt_mask = raw.get("targets")
             if image is None:
                 continue
-            tensor = _preprocess_for_model(image, (input_h, input_w)).unsqueeze(0).to(device)
+            tensor = _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
             with torch.no_grad():
                 out = _dispatch_forward(model, tensor)
             logits = out.logits if hasattr(out, "logits") else out
@@ -1302,7 +1330,7 @@ def _analyze_keypoint(
                            dtype=np.float32).reshape(-1, 3)
         if gt_kp.size == 0:
             continue
-        tensor = _preprocess_for_model(image, (input_h, input_w)).unsqueeze(0).to(device)
+        tensor = _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
         with torch.no_grad():
             preds_raw = _dispatch_forward(model, tensor)
         target_sizes = torch.tensor([[input_h, input_w]], device=device)

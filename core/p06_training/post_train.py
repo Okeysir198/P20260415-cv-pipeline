@@ -135,12 +135,13 @@ def render_prediction_grid(
         if image is None:
             skipped += 1
             continue
+        # Use the same preprocessing path as the analyzer so predictions
+        # here match the error-analysis numbers. Critical for HF wrappers:
+        # without processor-driven ImageNet normalization the DETR decoder
+        # produces zero usable predictions.
+        from core.p08_evaluation.error_analysis_runner import _preprocess_for_model
+        tensor = _preprocess_for_model(image, (input_h, input_w), model=model)
         resized = cv2.resize(image, (input_w, input_h))
-        tensor = torch.from_numpy(
-            np.ascontiguousarray(
-                (resized.astype(np.float32) / 255.0).transpose(2, 0, 1)
-            )
-        )
         samples.append((real_idx, image, resized, tensor, raw.get("targets")))
 
     if not samples:
