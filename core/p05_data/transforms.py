@@ -232,6 +232,127 @@ class AlbumentationsDetectionTransform:
         return "DetectionTransform([\n" + "\n".join(lines) + "\n])"
 
 
+class AlbumentationsWithProcessorTransform:
+    """Albumentations aug + HF image_processor (qubvel pattern).
+
+    1. Augment via Albumentations (COCO pixel xywh bboxes, NO resize)
+    2. Format as COCO annotations
+    3. Call image_processor(images=..., annotations=...) -> resize + rescale + bbox convert
+
+    Returns (pixel_values_tensor, hf_labels_dict) -- the image_processor handles
+    resize, uint8->[0,1] rescaling, and COCO->norm-cxcywh bbox conversion atomically.
+    """
+
+    def __init__(self, albu_pipeline, image_processor):
+        self.pipeline = albu_pipeline
+        self.image_processor = image_processor
+
+    def __call__(self, image, targets):
+        H, W = image.shape[:2]
+
+        # YOLO normalized cxcywh -> COCO pixel xywh
+        if len(targets) > 0:
+            cx, cy, bw, bh = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
+            x = (cx - bw / 2) * W
+            y = (cy - bh / 2) * H
+            w_px = bw * W
+            h_px = bh * H
+            bboxes = [[float(x[i]), float(y[i]), float(w_px[i]), float(h_px[i])]
+                      for i in range(len(targets))]
+            categories = targets[:, 0].astype(np.int64).tolist()
+        else:
+            bboxes, categories = [], []
+
+        # BGR -> RGB
+        img_rgb = image[:, :, ::-1].copy()
+        out = self.pipeline(image=img_rgb, bboxes=bboxes, category=categories)
+        aug_img = out["image"]     # HWC RGB uint8
+        aug_boxes = out["bboxes"]  # list of [x, y, w, h] COCO pixel
+        aug_cats = out["category"] # list of int
+
+        # Format as COCO annotations dict for image_processor
+        annotations = []
+        for bbox, cat_id in zip(aug_boxes, aug_cats):
+            annotations.append({
+                "category_id": int(cat_id),
+                "bbox": bbox,  # COCO [x, y, w, h] pixel
+                "area": bbox[2] * bbox[3],
+                "iscrowd": 0,
+            })
+
+        formatted = {"image_id": 0, "annotations": annotations}
+        result = self.image_processor(
+            images=aug_img, annotations=formatted, return_tensors="pt",
+        )
+
+        pixel_values = result["pixel_values"][0]  # squeeze batch dim
+        labels = result["labels"][0]  # full dict: class_labels, boxes, size, image_id, area, iscrowd, orig_size
+        return pixel_values, labels
+
+
+class TorchvisionWithProcessorTransform:
+    """torchvision v2 aug + HF image_processor.
+
+    1. Convert to v2 sample, run v2 pipeline (NO Normalize -- processor handles rescaling)
+    2. Extract from v2 sample: uint8 RGB numpy + COCO pixel bboxes
+    3. Call image_processor(images=..., annotations=...) -> resize + rescale + bbox convert
+
+    Returns (pixel_values_tensor, hf_labels_dict).
+    """
+
+    def __init__(self, v2_pipeline, image_processor, canvas_size):
+        self.pipeline = v2_pipeline
+        self.image_processor = image_processor
+        self.canvas_size = canvas_size
+
+    def __call__(self, image, targets):
+        original_size = (image.shape[0], image.shape[1])
+
+        # Convert to v2 sample (BGR->RGB, YOLO norm cxcywh->pixel XYXY)
+        sample = _to_v2_sample(image, targets, original_size)
+        sample = self.pipeline(sample)
+
+        # Extract from v2 sample
+        img_tensor = sample["image"]  # (3, H, W) float32 [0,1]
+        boxes_v2 = sample["boxes"]    # tv_tensors BoundingBoxes XYXY
+        labels_v2 = sample["labels"]  # int64 class IDs
+
+        # Convert image to uint8 RGB numpy
+        img_uint8 = (img_tensor * 255).to(torch.uint8)
+        img_rgb = img_uint8.permute(1, 2, 0).numpy()  # HWC RGB
+
+        # Convert v2 XYXY boxes to COCO pixel xywh
+        if len(boxes_v2) > 0:
+            xyxy = boxes_v2.float()
+            x1, y1, x2, y2 = xyxy[:, 0], xyxy[:, 1], xyxy[:, 2], xyxy[:, 3]
+            coco_boxes = np.stack([
+                x1.numpy(), y1.numpy(),
+                (x2 - x1).numpy(), (y2 - y1).numpy(),
+            ], axis=1).tolist()
+            cats = labels_v2.numpy().tolist()
+        else:
+            coco_boxes, cats = [], []
+
+        # Format as COCO annotations dict
+        annotations = []
+        for bbox, cat_id in zip(coco_boxes, cats):
+            annotations.append({
+                "category_id": int(cat_id),
+                "bbox": [float(b) for b in bbox],
+                "area": float(bbox[2] * bbox[3]),
+                "iscrowd": 0,
+            })
+
+        formatted = {"image_id": 0, "annotations": annotations}
+        result = self.image_processor(
+            images=img_rgb, annotations=formatted, return_tensors="pt",
+        )
+
+        pixel_values = result["pixel_values"][0]
+        labels = result["labels"][0]  # full dict with class_labels, boxes, size, etc.
+        return pixel_values, labels
+
+
 # ---------------------------------------------------------------------------
 # Custom v2.Transform subclasses
 # ---------------------------------------------------------------------------
@@ -654,6 +775,7 @@ def build_transforms(
     input_size: tuple[int, int] | None = None,
     mean: Sequence[float] | None = None,
     std: Sequence[float] | None = None,
+    image_processor: Any = None,
 ):
     """Build a transform pipeline from an augmentation config dict.
 
@@ -689,6 +811,7 @@ def build_transforms(
         return build_albumentations_transforms(
             config=config, is_train=is_train,
             input_size=input_size, mean=mean, std=std,
+            image_processor=image_processor,
         )
 
     transforms: list[Any] = []
@@ -859,8 +982,18 @@ def build_transforms(
     # inputs with do_normalize=False — ImageNet normalize degrades their
     # pretrained-feature distribution. Also YOLOX Megvii weights expect
     # [0, 255] raw. Respect `augmentation.normalize` to opt out.
-    if config.get("normalize", True):
+    if config.get("normalize", True) and image_processor is None:
         transforms.append(v2.Normalize(mean=mean, std=std))
+
+    # When an HF image_processor is provided, wrap the v2 pipeline so
+    # resize/rescale/bbox-convert go through the processor (qubvel pattern).
+    # The Normalize step is skipped — the processor handles rescaling.
+    if image_processor is not None:
+        return TorchvisionWithProcessorTransform(
+            v2_pipeline=v2.Compose(transforms),
+            image_processor=image_processor,
+            canvas_size=input_size,
+        )
 
     return DetectionTransform(transforms, canvas_size=input_size)
 
@@ -871,6 +1004,7 @@ def build_albumentations_transforms(
     input_size: tuple[int, int] = (640, 640),
     mean: Sequence[float] = IMAGENET_MEAN,
     std: Sequence[float] = IMAGENET_STD,
+    image_processor: Any = None,
 ):
     """Albumentations-backed pipeline matching our torchvision v2 semantics.
 
@@ -964,15 +1098,35 @@ def build_albumentations_transforms(
                     hue_shift_limit=hue, sat_shift_limit=sat, val_shift_limit=val, p=1.0,
                 ))
 
+    # When image_processor is provided, skip A.Resize — the processor
+    # handles resize + rescale + bbox conversion atomically (qubvel pattern).
+    # `min_bbox_area` default 25 matches qubvel's reference (drops sub-5x5
+    # boxes after augmentation — noise for the matcher).
+    min_bbox_area = float(config.get("min_bbox_area", 25.0))
+
+    if image_processor is not None:
+        # Albumentations-only pipeline (no resize — processor does it)
+        pipeline = A.Compose(
+            tfms,
+            bbox_params=A.BboxParams(
+                format="coco", label_fields=["category"],
+                clip=True,
+                min_area=min_bbox_area,
+                min_width=1,
+                min_height=1,
+            ),
+        )
+        return AlbumentationsWithProcessorTransform(
+            albu_pipeline=pipeline,
+            image_processor=image_processor,
+        )
+
     # Always applied (train + val): resize to input_size.
     tfms.append(A.Resize(height=H_in, width=W_in, p=1.0))
 
     # Note: normalization is applied in AlbumentationsDetectionTransform.__call__
     # instead of via A.Normalize, so we can preserve the same `normalize: false`
     # semantics (feed [0, 1] raw pixels, let HF image processor do per-batch norm).
-    # `min_bbox_area` default 25 matches qubvel's reference (drops sub-5x5
-    # boxes after augmentation — noise for the matcher).
-    min_bbox_area = float(config.get("min_bbox_area", 25.0))
     pipeline = A.Compose(
         tfms,
         bbox_params=A.BboxParams(

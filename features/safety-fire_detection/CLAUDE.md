@@ -24,12 +24,12 @@ Detects fire and smoke in images/video. Both classes are absent from COCO — pr
 
 - [x] `00_data_preparation.yaml`, `p00_data_prep`, `p02_annotation_qa`, `code/benchmark.py`
 - [x] Arch configs authored — `06_training_{yolox,rtdetr,dfine}.yaml`
-- [ ] **Phase B — 20% smoke (3 arches)**
-  - [ ] YOLOX-M — best.pth + p08 eval + error analysis
-  - [ ] RT-DETRv2-R50 — best.pth + p08 eval + error analysis
-  - [ ] D-FINE-M — best.pth + p08 eval + error analysis
-  - [ ] Decision: which arches PASS the 4-criterion gate
-- [ ] **Phase C — full-data training** on winning arch(es)
+- [x] **Phase B — 20% smoke (3 arches)** — YOLOX-M + RT-DETRv2-R50 PASS; D-FINE-M re-run pending
+  - [x] YOLOX-M — best.pth val mAP@0.5 = 0.5179 ✅
+  - [x] RT-DETRv2-R50 — best.pth val mAP@0.5 = 0.6904 ✅ (winner)
+  - [ ] D-FINE-M — 40 ep run stalled at mAP@0.5 = 0.5677; 50-ep re-run pending
+- [~] **Phase C — full-data training** — RT-DETRv2-R50 60-ep run complete 2026-04-22 07:24
+      → best mAP@0.5 = **0.6844** @ ep60 (last epoch → likely undertrained; consider extending)
 - [ ] `p08_evaluation` — full test split
 - [ ] `p09_export` — ONNX export
 - [ ] `release/` — `utils/release.py`
@@ -92,23 +92,29 @@ Outputs: `metrics.json`, `confusion_matrix.png`, per-class PR curves, `error_bre
 - **Never launch two trainings on the same GPU** — system hang risk.
 - Fire-specific: ~18% empty images + tiny-object bias (bbox 0.01–0.1% of image) → keep input at 640², don't lower.
 
-### Results table (2026-04-21)
+### Results table (updated 2026-04-22)
 
-| Arch | epochs | best val mAP@0.5 | train loss drop | Class collapse? | PASS? | runs/ dir | eval/ dir |
+| Arch | epochs | best val mAP@0.5 | best val mAP | Class collapse? | PASS? | runs/ dir | eval/ dir |
 |---|---|---|---|---|---|---|---|
-| YOLOX-M v1 (legacy aug, superseded) | 186 early-stop (300 cap) | **0.5102 @ ep136** | 6.82→2.52 (−63%) ✅ | no (fire 0.608 / smoke 0.412) | ✅ | `2026-04-21_141209_06_training` | pending |
-| **YOLOX-M v2 (new recipe)** | *in progress, ep 73+/300* | **0.5118 @ ep69** *(exceeds v1)* | 6.8→3.6 so far | no (fire 0.62 / smoke 0.38) | ✅ (provisional) | `2026-04-21_154819_06_training` | pending |
-| **RT-DETRv2-R50** | **30 (full)** | **0.6971 @ ep13** 🏆 | n/a (eval-loss 17.1→13.7 −20%) ✅ | no (fire 0.369 / smoke 0.385 COCO-avg) | ✅ | `2026-04-21_154828_06_training` (best: `checkpoint-2930`) | **test mAP@0.5 = 0.6739** (3051 imgs, val-test gap −0.017) |
-| D-FINE-M | KILLED @ ep19 (of 30) | 0.19 peak — under-trained | n/a (stalled) | — | ❌ FAIL | killed | n/a — 30 ep insufficient for D-FINE on 2-class (ref needs 50 ep); re-run pending |
+| YOLOX-M v1 (legacy aug, superseded) | 135/200 | 0.5102 @ ep135 | — | no (fire 0.608 / smoke 0.412) | ✅ | `2026-04-21_141209_06_training` | pending |
+| **YOLOX-M v2 (new recipe)** | 92/100 | **0.5179 @ ep92** | — | no (fire 0.632 / smoke 0.404) | ✅ | `2026-04-21_154819_06_training` | pending |
+| YOLOX-M v3 (aborted) | 35/100 | 0.4718 @ ep35 | — | no | — | `2026-04-22_011502_06_training` | — |
+| **RT-DETRv2-R50 (20% smoke)** | 30/150 early-stop | **0.6904 @ ep10** 🏆 | 0.3851 | no | ✅ | `2026-04-21_154828_06_training` | test mAP@0.5 = 0.6739 (3051 imgs, val-test gap −0.017) |
+| RT-DETRv2-R50 (Phase-C trial 1) | 28/50 aborted | 0.6823 @ ep27 | 0.3446 | no | — | `2026-04-22_004655_06_training` | — |
+| RT-DETRv2-R50 (Phase-C trial 2) | — / 50 | no eval logs (crash/abort) | — | — | — | `2026-04-22_010805_06_training` | — |
+| RT-DETRv2-R50 (Phase-C trial 3) | 15/50 diverged | 0.6223 @ ep7 | 0.3312 | no | — | `2026-04-22_010928_06_training` | — |
+| RT-DETRv2-R50 (Phase-C trial 4) | 50/50 full | 0.6863 @ ep47 | 0.3674 | no | ✅ | `2026-04-22_014318_06_training` | pending |
+| **RT-DETRv2-R50 (Phase-C trial 5, current)** | **60/60 full** | **0.6844 @ ep60** (last) | **0.3848 @ ep60** (last) | no | ✅ | `2026-04-22_034458_06_training` | pending |
+| D-FINE-M | 40/40 | 0.5677 @ ep39 | 0.2959 | no (under-trained) | ❌ | `2026-04-21_201919_06_training` | 50-ep re-run pending |
 
 **Headlines:**
-- **RT-DETRv2-R50 is the clear winner** at val mAP@0.5 = 0.6971 (ep13), **TEST mAP@0.5 = 0.6739** on full 3,051-img test split. Val-test gap only −0.017 → strong generalization, no overfit on the 2,342-train subset.
-- **RT-DETR test mAP@0.5 = 0.674 matches the D-Fire published range** (0.625–0.784) at 20% data, and sits within 11 pp of community SOTA (0.784, YOLOv11-CHBG). See Market Benchmark section.
-- **YOLOX-M v2's new Mosaic-via-torchvision recipe beats v1** at less than half the wall time (0.5179 @ ep93 vs 0.5102 @ ep136). Aligning the config to `notebooks/detr_finetune_reference/our_yolox_torchvision/` paid off.
-- **RT-DETR plateau** matches root CLAUDE.md gotcha: peaks in 30-40 ep, over-trains thereafter (eval_mAP50 bounced 0.67–0.70 from ep13 to ep30).
-- RT-DETR has **more balanced per-class performance** than YOLOX: test fire 0.337 vs smoke 0.388 COCO-avg (Δ 0.051) vs YOLOX's val AP@0.5 fire 0.62 vs smoke 0.35 (Δ 0.27). Smoke is RT-DETR's *stronger* class on test — opposite of YOLOX's SimOTA bias.
-- **D-FINE-M FAILED at 30 epochs** on this 2-class setup: peak eval_mAP50 = 0.19 at ep19, stalled. Matches CLAUDE.md gotcha — D-FINE's distribution-focused loss needs ≥50 ep on small datasets (reference showed 0.30 → 0.49 between ep30→50 on CPPE-5). Re-run with 50 ep pending.
-- **Test small-object mAP = 0.201** — small-obj performance is RT-DETR's weakness (2.1× gap to large), matching feature's Data Finding that bboxes peak at 0.01–0.1% of image. Further gains likely from higher input resolution or small-object copy-paste aug.
+- **RT-DETRv2-R50 is the winner.** 20% smoke peaked val mAP@0.5 = 0.6904 (ep10), TEST mAP@0.5 = 0.6739 (val-test gap −0.017 → strong generalization).
+- **Phase-C full-data RT-DETR (run `034458`, 2026-04-22)** — 60 ep, EMA on (`decay=0.9999`, `warmup=1000`), reverted label-qual knobs (HF defaults). Final val mAP = 0.3848, val mAP@0.5 = 0.6844. Best epoch = last epoch → monotonic climb, **still improving at ep60 → likely under-trained; extend to ~80 ep or consume EMA checkpoint.**
+- **Phase-C 50% smoke loop-of-iterations** — trials 1–4 (`004655`, `010805`, `010928`, `014318`) plateaued at mAP@0.5 ~0.68 with stacked label-qual regularization. Reverting those knobs + enabling EMA + 60 ep produced the current leader at the same mAP@0.5 but with clean-tail trajectory.
+- **RT-DETR full-data beats 20% mAP only marginally on mAP@0.5 (0.684 vs 0.690)** — ceiling is bounded by small-bbox tier. Improving it likely needs higher input resolution or small-object copy-paste aug (consistent with 20%-smoke small-obj mAP = 0.201, 2.1× gap to large).
+- **YOLOX-M v2** holds at val mAP@0.5 = 0.5179 (ep92) — ~17 pp below RT-DETR; remains the faster-inference fallback if RT-DETR ONNX export is blocked.
+- **D-FINE-M at 40 ep = 0.5677 mAP@0.5** — better than YOLOX but under-trained per CLAUDE.md gotcha (needs ≥50 ep). 50-ep re-run still pending.
+- **Label-quality knob reversal (2026-04-22)** — `label_noise_ratio=0.25`, `box_noise_scale=1.5`, `focal_loss_gamma=1.5`, `weight_loss_bbox=7.0`, `weight_loss_giou=3.0` (from `feedback_detr_label_quality_tuning`) stacked on top of each other killed convergence at 50% data. Now reverted to HF defaults for the fire/smoke recipe; only query/DN budget + mild affine retained as levers.
 
 ### Error analysis summary (per arch, fill after p08)
 - Dominant FP type (background / class confusion / localization / duplicate)
@@ -186,11 +192,11 @@ High-90s numbers come from curated datasets with larger/cleaner boxes — **not 
 
 ### Our position in the band (2026-04-21)
 
-| Arch | Our 20% mAP | Full-data estimate¹ | D-Fire SOTA band |
+| Arch | 20% mAP@0.5 | Full-data mAP@0.5 (actual) | D-Fire SOTA band |
 |---|---|---|---|
-| YOLOX-M (v1, legacy aug) | 0.510 @ ep136 | 0.60–0.68 | 0.625 (YOLOv8n baseline) |
-| YOLOX-M v2 (new Mosaic+TV recipe) | in progress | 0.60–0.68 | 0.625 |
-| **RT-DETRv2-R50** | **0.697 @ ep13** | **0.75–0.80** | **0.784 (SOTA)** |
+| YOLOX-M v1 (legacy aug) | 0.510 @ ep135 | — | 0.625 (YOLOv8n baseline) |
+| YOLOX-M v2 (new Mosaic+TV recipe) | 0.518 @ ep92 | — | 0.625 |
+| **RT-DETRv2-R50** | **0.690 @ ep10** | **0.684 @ ep60** (run `034458`, still climbing) | 0.784 (SOTA) |
 
 ¹ Extrapolation from 20% → full-data gain (typical +0.04–0.10 mAP on this scale for this model class).
 

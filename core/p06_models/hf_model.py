@@ -251,7 +251,12 @@ def build_hf_model(config: dict) -> HFDetectionModel:
         )
 
         hf_model = ModelClass.from_pretrained(pretrained, **hf_kwargs, ignore_mismatched_sizes=True)
-        processor = AutoImageProcessor.from_pretrained(pretrained)
+        input_size = model_cfg.get("input_size", [640, 640])
+        processor = AutoImageProcessor.from_pretrained(
+            pretrained,
+            do_resize=True,
+            size={"height": int(input_size[0]), "width": int(input_size[1])},
+        )
     elif "hf_model_id" in model_cfg:
         # Dynamic fallback: load any HF ForObjectDetection model via Auto class
         hf_model_id = model_cfg["hf_model_id"]
@@ -264,12 +269,38 @@ def build_hf_model(config: dict) -> HFDetectionModel:
         hf_model = AutoModelForObjectDetection.from_pretrained(
             hf_model_id, **hf_kwargs, ignore_mismatched_sizes=True,
         )
-        processor = AutoImageProcessor.from_pretrained(hf_model_id)
+        input_size = model_cfg.get("input_size", [640, 640])
+        processor = AutoImageProcessor.from_pretrained(
+            hf_model_id,
+            do_resize=True,
+            size={"height": int(input_size[0]), "width": int(input_size[1])},
+        )
     else:
         raise ValueError(
             f"Unknown HF arch '{arch}'. Either use a registered arch "
             f"({sorted(HF_MODEL_REGISTRY)}) or provide 'hf_model_id' in config "
             f"for dynamic AutoModelForObjectDetection loading."
+        )
+
+    # Sanity-log the processor normalization contract. Our data pipeline
+    # (core/p05_data/transforms.py) skips v2.Normalize when `image_processor`
+    # is supplied, on the assumption the processor owns rescale+normalize.
+    # If a non-default checkpoint ships a processor with `do_normalize=False`,
+    # inputs would reach the model un-normalized — catch it loudly here.
+    do_rescale = getattr(processor, "do_rescale", True)
+    do_normalize = getattr(processor, "do_normalize", True)
+    logger.info(
+        "HF image processor: do_rescale=%s, do_normalize=%s, mean=%s, std=%s",
+        do_rescale, do_normalize,
+        getattr(processor, "image_mean", None),
+        getattr(processor, "image_std", None),
+    )
+    if not do_normalize:
+        logger.warning(
+            "HF processor has do_normalize=False — our transforms also skip "
+            "Normalize when a processor is present, so inputs will reach the "
+            "model un-normalized. Either set do_normalize=True on the "
+            "processor or add Normalize to the data pipeline."
         )
 
     return HFDetectionModel(hf_model, processor)

@@ -28,6 +28,9 @@ def test_hf_detection_one_epoch():
     """Run 1 epoch of HF Trainer detection on the fire_100 fixture."""
     import os
     os.environ.setdefault("WANDB_MODE", "disabled")
+    # Force single GPU — HF Trainer wraps with DataParallel on multi-GPU which
+    # can't scatter the detection labels (list of per-image dicts) correctly.
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
     from core.p06_training.hf_trainer import train_with_hf
 
@@ -113,6 +116,7 @@ def test_hf_ema_enabled_one_epoch():
     """EMA callback runs: shadow weights updated + saved at end of training."""
     import os
     os.environ.setdefault("WANDB_MODE", "disabled")
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
     from core.p06_training.hf_trainer import train_with_hf
 

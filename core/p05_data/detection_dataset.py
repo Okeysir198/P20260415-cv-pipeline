@@ -267,6 +267,10 @@ class YOLOXDataset(BaseDataset):
 
         if self.transforms is not None:
             image, targets = self.transforms(image, targets)
+            # HF image_processor path: targets has "class_labels" + "boxes" keys
+            # (BatchFeature is a UserDict, not a dict — use duck typing)
+            if hasattr(targets, "class_labels"):
+                return image, targets, img_path_str
             # transforms.ToTensor returns torch tensors
             if isinstance(image, torch.Tensor):
                 return image, targets, img_path_str

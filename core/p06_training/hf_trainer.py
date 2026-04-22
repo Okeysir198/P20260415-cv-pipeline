@@ -312,17 +312,18 @@ def _maybe_subset(dataset, fraction_or_count, seed: int):
 def _hf_detection_collate(batch):
     """Collate `YOLOXDataset.__getitem__` tuples into HF DETR batch dict.
 
-    YOLOXDataset returns `(image, targets_Nx5, path)` where `targets` is
-    ``[class_id, cx_norm, cy_norm, w_norm, h_norm]`` (already 0-1 normalized
-    cxcywh — canonical internal format, see `core/p05_data/transforms.py`).
-    HF DETR `forward(pixel_values, labels)` wants `labels` as a list of per-image
-    dicts `{"class_labels": LongTensor[N], "boxes": FloatTensor[N, 4]}` where
-    boxes are also normalized cxcywh. So the conversion is just a column split.
+    When image_processor is used, targets is already a dict with
+    ``{"class_labels": LongTensor[N], "boxes": FloatTensor[N, 4]}`` — pass
+    through directly.  Otherwise targets is an (N, 5) tensor with
+    ``[class_id, cx_norm, cy_norm, w_norm, h_norm]``; split columns into the
+    HF label format.
     """
     images = torch.stack([sample[0] for sample in batch])
     labels = []
     for _, targets, _ in batch:
-        if targets.numel() == 0:
+        if hasattr(targets, "class_labels"):
+            labels.append(targets)
+        elif isinstance(targets, torch.Tensor) and targets.numel() == 0:
             labels.append({
                 "class_labels": torch.zeros(0, dtype=torch.long),
                 "boxes": torch.zeros(0, 4, dtype=torch.float32),
@@ -335,7 +336,7 @@ def _hf_detection_collate(batch):
     return {"pixel_values": images, "labels": labels}
 
 
-def _build_detection_compute_metrics(image_processor, input_size, id2label=None):
+def _build_detection_compute_metrics(image_processor, input_size, id2label=None, score_threshold=0.0):
     """Real `compute_metrics` for HF Trainer, detection task.
 
     Mirrors qubvel's reference `MAPEvaluator`
@@ -372,7 +373,7 @@ def _build_detection_compute_metrics(image_processor, input_size, id2label=None)
 
             hf_output = SimpleNamespace(logits=batch_logits, pred_boxes=batch_boxes)
             preds = image_processor.post_process_object_detection(
-                hf_output, threshold=0.0, target_sizes=target_sizes,
+                hf_output, threshold=score_threshold, target_sizes=target_sizes,
             )
             # torchmetrics expects {"boxes","scores","labels"} cpu tensors
             preds = [{k: v.detach().cpu() for k, v in p.items()} for p in preds]
@@ -482,8 +483,10 @@ def train_with_hf(
     _validate_hf_backend_config(config, output_format)
 
     # Build datasets based on task type
+    _ip = model.processor if output_format == "detr" else None
     train_dataset, eval_dataset, data_collator = _build_datasets(
         data_config, config, output_format, base_dir,
+        image_processor=_ip,
     )
 
     # Map our config → HF TrainingArguments
@@ -501,10 +504,20 @@ def train_with_hf(
         hf_inner = getattr(model, "hf_model", None)
         if hf_inner is not None and getattr(hf_inner, "config", None) is not None:
             id2label = getattr(hf_inner.config, "id2label", None)
+        # Canonical mAP uses threshold=0.0 (torchmetrics ranks the full PR
+        # curve). Raising it truncates predictions and mechanically lowers
+        # reported mAP; only do so when matching an external baseline.
+        eval_thr = float(config.get("evaluation", {}).get("score_threshold", 0.0))
+        if eval_thr > 0.0:
+            logger.warning(
+                "evaluation.score_threshold=%g (non-canonical; 0.0 is standard "
+                "for mAP — higher values lower reported mAP)", eval_thr,
+            )
         compute_metrics = _build_detection_compute_metrics(
             image_processor=model.processor,
             input_size=input_size,
             id2label=id2label,
+            score_threshold=eval_thr,
         )
     else:
         compute_metrics = _build_compute_metrics(output_format, config)
@@ -682,6 +695,7 @@ def _build_datasets(
     training_config: dict,
     output_format: str,
     base_dir: str,
+    image_processor=None,
 ) -> tuple:
     """Build train and eval datasets based on task type.
 
@@ -757,9 +771,11 @@ def _build_datasets(
 
         train_transforms = build_transforms(
             config=aug_config, is_train=True, input_size=input_size, mean=mean, std=std,
+            image_processor=image_processor,
         )
         eval_transforms = build_transforms(
             config=aug_config, is_train=False, input_size=input_size, mean=mean, std=std,
+            image_processor=image_processor,
         )
 
         train_dataset = YOLOXDataset(
