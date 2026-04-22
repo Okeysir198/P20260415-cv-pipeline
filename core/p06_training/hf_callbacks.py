@@ -430,28 +430,34 @@ class HFValPredictionCallback(TrainerCallback):
                 if "eval_map_50" in entry:
                     map_val = float(entry["eval_map_50"]); break
 
-        out_dir = self.save_dir / "val_predictions"
+        # Per-epoch grids land under val_predictions/epochs/ to keep
+        # val_predictions/ itself short (just epochs/, best.png, error_analysis/).
+        out_dir = self.save_dir / "val_predictions" / "epochs"
         self._save_grid(rows, out_dir / f"epoch_{epoch_idx:03d}.png",
                         f"Epoch {epoch_idx} — mAP50: {map_val:.4f}", self.grid_cols)
-        logger.info("HFValPredictionCallback: saved epoch_%03d.png", epoch_idx)
+        logger.info("HFValPredictionCallback: saved epochs/epoch_%03d.png", epoch_idx)
 
         if was_training:
             model.train()
         return control
 
     def on_train_end(self, args, state, control, **kwargs):
-        """Render best-checkpoint predictions on val + test (HF has just
-        reloaded best weights via load_best_model_at_end=True).
+        """Render best-checkpoint val+test grids + full error analysis.
 
-        Also dumps per-class TP/FP/FN counts + hardest-10 images as
-        ``test_predictions/error_analysis.json``. Runs at end only — does not
-        touch training.
+        HF's ``load_best_model_at_end=True`` has already reloaded best weights
+        by the time this hook fires — so the artifacts reflect the same
+        checkpoint that produced the reported ``test_map``.
+
+        Entirely delegated to :func:`core.p06_training.post_train.run_post_train_artifacts`
+        so the pytorch backend and HF backend produce byte-identical artifact
+        trees.
         """
         model = kwargs.get("model")
         if model is None:
             return control
-        was_training = model.training
-        model.eval()
+
+        from core.p06_training.post_train import run_post_train_artifacts
+        from core.p10_inference.supervision_bridge import VizStyle
 
         best_map = 0.0
         for entry in state.log_history:
@@ -460,136 +466,42 @@ class HFValPredictionCallback(TrainerCallback):
         test_map = None
         for entry in reversed(state.log_history):
             if "test_map_50" in entry:
-                test_map = float(entry["test_map_50"]); break
+                test_map = float(entry["test_map_50"])
+                break
 
         val_loader = kwargs.get("eval_dataloader")
         val_ds = val_loader.dataset if val_loader is not None else None
 
-        if val_ds is not None:
-            indices = self._sample_indices or sorted(random.sample(
-                range(len(val_ds)), min(self.num_samples, len(val_ds))))
-            rows = self._forward_and_render_rows(model, val_ds, indices, self.best_conf_threshold)
-            if rows:
-                self._save_grid(rows, self.save_dir / "val_predictions" / "best.png",
-                                f"Best checkpoint (val) — mAP50: {best_map:.4f}",
-                                self.grid_cols)
-                logger.info("HFValPredictionCallback: saved val_predictions/best.png")
-
-            # Val-set error analysis on best checkpoint — same breakdown as
-            # test, but scoped to the val split so train/val/test all have
-            # matching FP/FN/TP diagnostics.
-            try:
-                self._write_error_analysis(
-                    model, val_ds,
-                    self.save_dir / "val_predictions" / "error_analysis.json")
-            except Exception as e:
-                logger.warning("val error_analysis skipped: %s", e)
-
-        if self.test_dataset is not None and len(self.test_dataset) > 0:
-            n = len(self.test_dataset)
-            k = min(self.best_num_samples, n)
-            test_indices = sorted(random.sample(range(n), k))
-            rows = self._forward_and_render_rows(
-                model, self.test_dataset, test_indices, self.best_conf_threshold)
-            if rows:
-                title = (f"Best checkpoint (test) — mAP50: {test_map:.4f}"
-                         if test_map is not None else "Best checkpoint (test)")
-                self._save_grid(rows, self.save_dir / "test_predictions" / "best.png",
-                                title, self.grid_cols)
-                logger.info("HFValPredictionCallback: saved test_predictions/best.png")
-
-            try:
-                self._write_error_analysis(
-                    model, self.test_dataset,
-                    self.save_dir / "test_predictions" / "error_analysis.json")
-            except Exception as e:
-                logger.warning("error_analysis skipped: %s", e)
-
-        if was_training:
-            model.train()
+        try:
+            run_post_train_artifacts(
+                model=model,
+                save_dir=self.save_dir,
+                val_dataset=val_ds,
+                test_dataset=self.test_dataset,
+                task=_infer_task_from_model(model),
+                class_names=self.class_names,
+                input_size=self.input_size,
+                style=VizStyle(),
+                best_num_samples=self.best_num_samples,
+                best_conf_threshold=self.best_conf_threshold,
+                log_history_best_map=best_map if best_map > 0 else None,
+                log_history_test_map=test_map,
+            )
+        except Exception as e:
+            logger.warning("post-train artifacts skipped: %s", e, exc_info=True)
         return control
 
-    def _write_error_analysis(self, model, dataset, out_path,
-                               iou_threshold=0.5, conf_threshold=0.3):
-        """Per-class TP / FP / FN on dataset using best weights. One JSON
-        file; ~3s on a 29-image test split.
-        """
-        import cv2, json, torch
-        raw_dataset, idx_map = self._unwrap(dataset)
-        device = next(model.parameters()).device
-        input_h, input_w = self.input_size
 
-        per_class = {int(cid): {"tp": 0, "fp": 0, "fn": 0} for cid in self.class_names}
-        per_image = []
-
-        for i in range(len(dataset)):
-            real_idx = idx_map(i)
-            raw_img = raw_dataset.get_raw_item(real_idx)["image"]
-            resized = cv2.resize(raw_img, (input_w, input_h))
-            tensor = torch.from_numpy(np.ascontiguousarray(
-                (resized.astype(np.float32) / 255.0).transpose(2, 0, 1))).unsqueeze(0).to(device)
-            with torch.no_grad():
-                preds_raw = model(pixel_values=tensor)
-            decoded = model.postprocess(
-                preds_raw, conf_threshold,
-                torch.tensor([[input_h, input_w]], device=device))[0]
-
-            gt = raw_dataset._load_label(raw_dataset.img_paths[real_idx])
-            if gt is not None and len(gt) > 0:
-                cx, cy, w, h = gt[:,1], gt[:,2], gt[:,3], gt[:,4]
-                gt_xyxy = np.stack([(cx-w/2)*input_w, (cy-h/2)*input_h,
-                                     (cx+w/2)*input_w, (cy+h/2)*input_h], axis=1)
-                gt_cls = gt[:,0].astype(np.int64)
-            else:
-                gt_xyxy = np.zeros((0,4)); gt_cls = np.zeros(0, dtype=np.int64)
-
-            pb = np.asarray(decoded.get("boxes", []), dtype=np.float64).reshape(-1,4)
-            pl = np.asarray(decoded.get("labels", []), dtype=np.int64).ravel()
-            matched = np.zeros(len(gt_xyxy), dtype=bool)
-            img_tp = img_fp = 0
-            for bi in range(len(pb)):
-                best_iou, best_j = 0.0, -1
-                for j in range(len(gt_xyxy)):
-                    if matched[j] or gt_cls[j] != pl[bi]: continue
-                    xa=max(pb[bi,0],gt_xyxy[j,0]); ya=max(pb[bi,1],gt_xyxy[j,1])
-                    xb=min(pb[bi,2],gt_xyxy[j,2]); yb=min(pb[bi,3],gt_xyxy[j,3])
-                    inter = max(0, xb-xa) * max(0, yb-ya)
-                    union = ((pb[bi,2]-pb[bi,0])*(pb[bi,3]-pb[bi,1]) +
-                             (gt_xyxy[j,2]-gt_xyxy[j,0])*(gt_xyxy[j,3]-gt_xyxy[j,1]) - inter)
-                    iou = inter/union if union > 0 else 0
-                    if iou > best_iou: best_iou, best_j = iou, j
-                if best_iou >= iou_threshold:
-                    matched[best_j] = True
-                    per_class[int(pl[bi])]["tp"] += 1; img_tp += 1
-                else:
-                    per_class[int(pl[bi])]["fp"] += 1; img_fp += 1
-            for j in np.where(~matched)[0]:
-                per_class[int(gt_cls[j])]["fn"] += 1
-            img_fn = int((~matched).sum())
-            per_image.append({
-                "idx": int(real_idx),
-                "path": str(raw_dataset.img_paths[real_idx]),
-                "tp": img_tp, "fp": img_fp, "fn": img_fn,
-            })
-
-        summary = {}
-        for cid, c in per_class.items():
-            tp, fp, fn = c["tp"], c["fp"], c["fn"]
-            prec = tp/(tp+fp) if (tp+fp) else 0.0
-            rec  = tp/(tp+fn) if (tp+fn) else 0.0
-            summary[self.class_names.get(cid, str(cid))] = {
-                "tp": tp, "fp": fp, "fn": fn,
-                "precision": round(prec, 4), "recall": round(rec, 4),
-            }
-
-        per_image.sort(key=lambda r: -(r["fn"] + r["fp"]))
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        import json as _json
-        with open(out_path, "w") as f:
-            _json.dump({
-                "iou_threshold": iou_threshold,
-                "conf_threshold": conf_threshold,
-                "per_class": summary,
-                "hardest_10": per_image[:10],
-            }, f, indent=2)
-        logger.info("HFValPredictionCallback: wrote %s", out_path)
+def _infer_task_from_model(model) -> str:
+    """Map ``model.output_format`` → canonical task for the post-train runner."""
+    of = getattr(model, "output_format", None) or "detection"
+    of = of.lower()
+    if of in {"detr", "yolox", "detection"}:
+        return "detection"
+    if of in {"classification", "cls"}:
+        return "classification"
+    if of in {"segmentation", "seg"}:
+        return "segmentation"
+    if of in {"keypoint", "pose"}:
+        return "keypoint"
+    return "detection"

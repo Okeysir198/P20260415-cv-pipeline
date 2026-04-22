@@ -16,6 +16,52 @@ IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
 
+def denormalize_tensor(
+    tensor,
+    mean=IMAGENET_MEAN,
+    std=IMAGENET_STD,
+    to_bgr: bool = True,
+) -> np.ndarray:
+    """Invert ``(image/255 - mean) / std`` back to HWC uint8 for visualization.
+
+    Accepts either a torch.Tensor ``(3, H, W)`` / ``(B, 3, H, W)`` in
+    float32 [0..1] post-normalize space, or a numpy array with the same shape
+    in CHW layout. Returns HWC uint8 — BGR by default (matches cv2 call sites)
+    or RGB if ``to_bgr=False``.
+
+    Single source of truth: replaces inline reconstructions that previously
+    lived in callbacks.py, hf_callbacks.py, and notebook viz cells.
+    """
+    try:
+        import torch  # deferred
+    except Exception:  # pragma: no cover — torch is a hard dep in this project
+        torch = None
+
+    if torch is not None and hasattr(tensor, "detach") and hasattr(tensor, "cpu"):
+        arr = tensor.detach().cpu().numpy()
+    else:
+        arr = np.asarray(tensor)
+
+    if arr.ndim == 4:
+        # batch dim — take first
+        arr = arr[0]
+
+    if arr.ndim != 3 or arr.shape[0] != 3:
+        raise ValueError(
+            f"denormalize_tensor expects (3, H, W) CHW input, got shape {arr.shape}"
+        )
+
+    mean_arr = np.asarray(mean, dtype=np.float32).reshape(3, 1, 1)
+    std_arr = np.asarray(std, dtype=np.float32).reshape(3, 1, 1)
+    out = arr.astype(np.float32) * std_arr + mean_arr
+    out = np.clip(out * 255.0, 0, 255).astype(np.uint8)
+    # RGB CHW → RGB HWC
+    out = np.ascontiguousarray(out.transpose(1, 2, 0))
+    if to_bgr:
+        out = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
+    return out
+
+
 class BaseDataset(Dataset, ABC):
     """Base dataset that handles image discovery and loading.
 

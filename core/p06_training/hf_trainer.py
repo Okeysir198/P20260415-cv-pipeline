@@ -1036,17 +1036,47 @@ def _build_callbacks(
         ))
 
     val_viz = train_cfg.get("val_viz", {})
-    if val_viz.get("enabled", True):
-        class_names = {int(k): str(v) for k, v in data_config.get("names", {}).items()}
-        best_viz = train_cfg.get("best_viz", {})
-        callbacks.append(HFValPredictionCallback(
+    best_viz = train_cfg.get("best_viz", {})
+    class_names = {int(k): str(v) for k, v in data_config.get("names", {}).items()}
+    # Register the callback whenever EITHER per-epoch val grids OR post-train
+    # best/test artifacts are wanted. Internal gates below disable each hook
+    # independently so HPO sweeps can opt into post-train-only.
+    want_val_viz = val_viz.get("enabled", True)
+    want_best_viz = best_viz.get("enabled", True)
+    if want_val_viz or want_best_viz:
+        cb = HFValPredictionCallback(
             save_dir=save_dir, class_names=class_names, input_size=input_size,
             num_samples=val_viz.get("num_samples", 12),
             conf_threshold=val_viz.get("conf_threshold", 0.05),
             grid_cols=val_viz.get("grid_cols", 2),
-            test_dataset=test_dataset if best_viz.get("enabled", True) else None,
+            test_dataset=test_dataset if want_best_viz else None,
             best_num_samples=best_viz.get("num_samples", 16),
             best_conf_threshold=best_viz.get("conf_threshold", 0.3),
+        )
+        # If per-epoch grids are off, suppress on_epoch_end but keep on_train_end.
+        if not want_val_viz:
+            cb.on_epoch_end = lambda args, state, control, **kwargs: control  # type: ignore[assignment]
+        # If post-train best viz is off, suppress on_train_end.
+        if not want_best_viz:
+            cb.on_train_end = lambda args, state, control, **kwargs: control  # type: ignore[assignment]
+        callbacks.append(cb)
+
+    # Normalization sanity-check preview — fires ONCE on_train_start, saves
+    # data_preview/normalized_input_preview.png and never touches training
+    # again. Catches double/missing-normalize footguns + box-format drift
+    # before the first GPU forward pass of epoch 1.
+    norm_viz = train_cfg.get("norm_viz", {})
+    if norm_viz.get("enabled", True):
+        from core.p06_training.callbacks_viz import NormalizedInputPreviewCallback
+        task = "detection" if output_format == "detr" else output_format
+        callbacks.append(NormalizedInputPreviewCallback(
+            save_dir=save_dir,
+            class_names=class_names,
+            mean=(data_config.get("mean") or IMAGENET_MEAN),
+            std=(data_config.get("std") or IMAGENET_STD),
+            num_samples=norm_viz.get("num_samples", 8),
+            grid_cols=norm_viz.get("grid_cols", 4),
+            task=task,
         ))
 
     # train_viz would run the same viz on the train_dataloader — not wired

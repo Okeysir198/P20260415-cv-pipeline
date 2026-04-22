@@ -679,7 +679,9 @@ class ValPredictionLogger(Callback):
         fig.suptitle(f"Epoch {epoch + 1} — mAP50: {map_val:.4f}", fontsize=14)
         fig.tight_layout()
 
-        out_dir = self.save_dir / f"{self.split}_predictions"
+        # Per-epoch grids go under <split>_predictions/epochs/ so best.png
+        # and error_analysis/ (post-train) stay at the split root alongside.
+        out_dir = self.save_dir / f"{self.split}_predictions" / "epochs"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"epoch_{epoch + 1:03d}.png"
         fig.savefig(str(out_path), dpi=self.dpi, bbox_inches="tight")

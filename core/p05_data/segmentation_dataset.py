@@ -108,6 +108,38 @@ class SegmentationDataset(Dataset):
     def __len__(self) -> int:
         return len(self.img_paths)
 
+    # ------------------------------------------------------------------ #
+    # Uniform dataset surface used by viz callbacks + error analysis.    #
+    # Mirrors YOLOXDataset / KeypointDataset / ClassificationDataset.    #
+    # ------------------------------------------------------------------ #
+
+    def get_raw_item(self, idx: int) -> dict:
+        """Return un-transformed BGR uint8 HWC image + mask target."""
+        img_path = self.img_paths[idx]
+        image = cv2.imread(str(img_path))
+        if image is None:
+            image = np.full(
+                (self.input_size[0], self.input_size[1], 3), 114, dtype=np.uint8
+            )
+        mask_path = self.mask_dir / f"{img_path.stem}.png"
+        if mask_path.exists():
+            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+            if mask is None:
+                mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        else:
+            mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        return {"image": image, "targets": mask, "path": str(img_path)}
+
+    def _load_label(self, img_path):
+        """Mask array lookup by image path (used by error analysis)."""
+        img_path = Path(img_path)
+        mask_path = self.mask_dir / f"{img_path.stem}.png"
+        if mask_path.exists():
+            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+            if mask is not None:
+                return mask
+        return np.zeros((1, 1), dtype=np.uint8)
+
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, str]:
         """Get a single sample.
 

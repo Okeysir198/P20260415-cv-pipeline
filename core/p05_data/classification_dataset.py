@@ -158,6 +158,39 @@ class ClassificationDataset(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
 
+    # ------------------------------------------------------------------ #
+    # Uniform dataset surface used by viz callbacks + error analysis.    #
+    # Mirrors YOLOXDataset / KeypointDataset so every task-aware render  #
+    # site can speak the same API.                                       #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def img_paths(self) -> list[Path]:
+        """List of image paths in dataset order — same surface as detection."""
+        return [p for p, _ in self.samples]
+
+    def get_raw_item(self, idx: int) -> dict:
+        """Return an un-transformed BGR uint8 HWC image + class-id target.
+
+        Used by viz callbacks to render raw / augmented / best-checkpoint
+        grids without re-applying the training transform chain.
+        """
+        img_path, class_idx = self.samples[idx]
+        image = cv2.imread(str(img_path))
+        if image is None:
+            image = np.full(
+                (self.input_size[0], self.input_size[1], 3), 114, dtype=np.uint8
+            )
+        return {"image": image, "targets": int(class_idx), "path": str(img_path)}
+
+    def _load_label(self, img_path) -> int:
+        """Class-id lookup by path (detection/keypoint parity helper)."""
+        img_path = Path(img_path)
+        for p, cls in self.samples:
+            if p == img_path:
+                return int(cls)
+        return -1
+
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, str]:
         """Get a sample: (image_tensor, class_label, image_path).
 

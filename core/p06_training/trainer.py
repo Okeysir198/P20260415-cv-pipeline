@@ -42,6 +42,20 @@ from core.p06_training.lr_scheduler import build_scheduler
 from core.p06_training.metrics_registry import compute_metrics
 from core.p06_training.postprocess import postprocess as _postprocess_registry
 from utils.config import load_config, merge_configs, validate_config
+
+
+def _task_from_output(output_format: str | None) -> str:
+    """Normalize model.output_format → canonical task for the post-train runner."""
+    of = (output_format or "detection").lower()
+    if of in {"detr", "yolox", "detection"}:
+        return "detection"
+    if of in {"classification", "cls"}:
+        return "classification"
+    if of in {"segmentation", "seg"}:
+        return "segmentation"
+    if of in {"keypoint", "pose"}:
+        return "keypoint"
+    return "detection"
 from utils.device import get_device, set_seed
 from utils.progress import TrainingProgress
 
@@ -513,6 +527,26 @@ class DetectionTrainer:
                 )
             )
 
+        # Normalization sanity-check (stage-3 from the reference notebook).
+        norm_viz_cfg = self.config.get("training", {}).get("norm_viz", {})
+        if norm_viz_cfg.get("enabled", True):
+            from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
+            from core.p06_training.callbacks_viz import NormalizedInputPreviewCallback
+            class_names = {int(k): str(v)
+                           for k, v in (loaded_data_cfg.get("names", {}) or {}).items()}
+            task = _task_from_output(getattr(self.model, "output_format", None))
+            callbacks.append(
+                NormalizedInputPreviewCallback(
+                    save_dir=save_dir,
+                    class_names=class_names,
+                    mean=loaded_data_cfg.get("mean", IMAGENET_MEAN),
+                    std=loaded_data_cfg.get("std", IMAGENET_STD),
+                    num_samples=norm_viz_cfg.get("num_samples", 8),
+                    grid_cols=norm_viz_cfg.get("grid_cols", 4),
+                    task=task,
+                )
+            )
+
         return CallbackRunner(callbacks)
 
     def _build_loss(self) -> nn.Module:
@@ -726,6 +760,17 @@ class DetectionTrainer:
 
         self.callback_runner.on_train_end(self)
 
+        # Backend-agnostic post-train finalize: reload best checkpoint, run
+        # test-set eval if a `test` split exists, and dispatch post-train
+        # artifacts (best.png for val+test, error_analysis/* with charts +
+        # per-error/per-class galleries). Default on; opt out via
+        # training.post_train.enabled: false.
+        test_metrics = None
+        try:
+            test_metrics = self._finalize_training()
+        except Exception as e:  # pragma: no cover — never block
+            logger.warning("post-train finalize skipped: %s", e, exc_info=True)
+
         summary = {
             "best_metric": progress.best_metric,
             "best_epoch": progress.best_epoch + 1,
@@ -733,8 +778,147 @@ class DetectionTrainer:
             "final_metrics": final_metrics,
             "best_metrics": best_metrics,
         }
+        if test_metrics is not None:
+            summary["test_metrics"] = test_metrics
         logger.info("Training summary: %s", summary)
         return summary
+
+    def _finalize_training(self) -> dict | None:
+        """Reload best.pth, run test-set eval, render post-train artifacts.
+
+        Mirrors HF backend's ``load_best_model_at_end`` + auto-test behavior.
+        Skippable via ``training.post_train.enabled: false``.
+        """
+        post_cfg = (self.config.get("training", {}) or {}).get("post_train", {}) or {}
+        if not post_cfg.get("enabled", True):
+            return None
+
+        save_dir = Path(self.save_dir)
+        best_path = save_dir / "best.pth"
+        if best_path.exists():
+            logger.info("Reloading best checkpoint from %s", best_path)
+            try:
+                self.load_checkpoint(str(best_path))
+            except Exception as e:
+                logger.warning("best.pth reload failed, using last-epoch weights: %s", e)
+
+        # Build test loader if a test split is present; if not, skip test eval.
+        data_cfg_resolved = getattr(self, "_loaded_data_cfg", None) or self.config.get("data", {})
+        base_dir = data_cfg_resolved.get("dataset_path") or data_cfg_resolved.get("path") or ""
+        test_loader = None
+        try:
+            test_loader = self._maybe_build_test_loader(data_cfg_resolved, base_dir)
+        except Exception as e:
+            logger.warning("failed to build test loader (skipping test eval): %s", e)
+
+        test_metrics = None
+        if test_loader is not None:
+            try:
+                logger.info("Running final test-set evaluation on best checkpoint...")
+                test_metrics = self._validate(test_loader)
+                with open(save_dir / "test_results.json", "w") as f:
+                    import json as _json
+                    _json.dump(test_metrics, f, indent=2, sort_keys=True, default=str)
+                logger.info("Test metrics written to %s", save_dir / "test_results.json")
+            except Exception as e:
+                logger.warning("test-set eval skipped: %s", e, exc_info=True)
+
+        # Post-train artifacts (best-checkpoint val+test grids + error analysis)
+        try:
+            from core.p06_training.post_train import run_post_train_artifacts
+            from core.p10_inference.supervision_bridge import VizStyle
+
+            class_names = {int(k): str(v)
+                           for k, v in (data_cfg_resolved.get("names", {}) or {}).items()}
+            input_size = tuple(data_cfg_resolved.get("input_size", (640, 640)))
+            style = VizStyle.from_config(self.config)
+
+            val_ds = getattr(self.val_loader, "dataset", None) if hasattr(self, "val_loader") else None
+            test_ds = getattr(test_loader, "dataset", None) if test_loader is not None else None
+
+            run_post_train_artifacts(
+                model=self.model,
+                save_dir=save_dir,
+                val_dataset=val_ds,
+                test_dataset=test_ds,
+                task=_task_from_output(getattr(self.model, "output_format", None)),
+                class_names=class_names,
+                input_size=input_size,
+                style=style,
+                best_num_samples=int(post_cfg.get("num_samples", 16)),
+                best_conf_threshold=float(post_cfg.get("conf_threshold", 0.3)),
+                error_analysis_conf_threshold=float(post_cfg.get("error_conf_threshold", 0.3)),
+                error_analysis_iou_threshold=float(post_cfg.get("error_iou_threshold", 0.5)),
+                error_analysis_max_samples=post_cfg.get("error_max_samples", 500),
+                error_analysis_hard_images_per_class=int(post_cfg.get("hard_images_per_class", 20)),
+            )
+        except Exception as e:
+            logger.warning("post-train artifacts skipped: %s", e, exc_info=True)
+
+        return test_metrics
+
+    def _maybe_build_test_loader(self, data_cfg: dict, base_dir: str):
+        """Construct a test DataLoader if the dataset has a test split on disk.
+
+        Kept minimal and best-effort — if dataset layout differs from the
+        canonical ``<root>/test/{images,labels}/`` the function returns None
+        and callers skip test eval without failing the whole run.
+        """
+        from pathlib import Path as _P
+        from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD  # noqa: F401
+        from torch.utils.data import DataLoader
+
+        # Check whether a test split exists
+        dataset_root = data_cfg.get("dataset_path") or data_cfg.get("path")
+        if not dataset_root:
+            return None
+        test_img_dir = _P(dataset_root) / "test" / "images"
+        if not test_img_dir.exists():
+            return None
+
+        # Reuse the same dataset class + transforms as val
+        output_format = getattr(self.model, "output_format", "yolox")
+        try:
+            if output_format in {"detr", "yolox"}:
+                from core.p05_data.detection_dataset import YOLOXDataset
+                from core.p05_data.transforms import build_transforms
+                transform = build_transforms(self.config, data_cfg, is_train=False,
+                                             image_processor=getattr(self.model, "processor", None))
+                ds = YOLOXDataset(
+                    data_dir=_P(dataset_root), split="test",
+                    input_size=tuple(data_cfg.get("input_size", (640, 640))),
+                    transform=transform,
+                )
+            elif output_format == "classification":
+                from core.p05_data.classification_dataset import ClassificationDataset, build_classification_transforms
+                transforms = build_classification_transforms(self.config, data_cfg, is_train=False)
+                ds = ClassificationDataset(
+                    data_dir=_P(dataset_root), split="test",
+                    input_size=tuple(data_cfg.get("input_size", (224, 224))),
+                    transforms=transforms,
+                    num_classes=int(data_cfg.get("nc", len(data_cfg.get("names", {})))),
+                )
+            elif output_format == "segmentation":
+                from core.p05_data.segmentation_dataset import SegmentationDataset, build_segmentation_transforms
+                transforms = build_segmentation_transforms(self.config, data_cfg, is_train=False)
+                ds = SegmentationDataset(
+                    data_dir=_P(dataset_root), split="test",
+                    input_size=tuple(data_cfg.get("input_size", (512, 512))),
+                    transform=transforms,
+                )
+            else:
+                return None
+        except Exception as e:
+            logger.warning("test dataset build failed: %s", e)
+            return None
+
+        batch_size = (self.config.get("data", {}) or {}).get("batch_size", 8)
+        return DataLoader(
+            ds, batch_size=batch_size, shuffle=False,
+            num_workers=(self.config.get("data", {}) or {}).get("num_workers", 2),
+            pin_memory=True,
+            collate_fn=getattr(self.val_loader, "collate_fn", None) if hasattr(self, "val_loader") else None,
+        )
 
     def _train_one_epoch(
         self,

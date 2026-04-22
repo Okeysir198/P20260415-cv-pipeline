@@ -210,6 +210,71 @@ _DEFAULT_GT_COLOR = sv.Color(r=160, g=32, b=240)    # purple
 _DEFAULT_PRED_COLOR = sv.Color(r=0, g=200, b=0)      # green
 
 
+# ---------------------------------------------------------------------------
+# VizStyle — single source of truth for GT-vs-Pred rendering across callbacks,
+# error-analysis, and post-train artifacts. Consumed by annotate_gt_pred.
+# ---------------------------------------------------------------------------
+
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class VizStyle:
+    """Shared visual language for every GT-vs-Pred rendering site.
+
+    Built once per run from ``config["visualization"]`` via
+    :meth:`VizStyle.from_config` and threaded through the post-train runner,
+    callbacks, and error-analysis galleries so artifacts are byte-consistent.
+
+    Colors are RGB tuples; supervision internals convert to BGR at draw time.
+    """
+
+    gt_color_rgb: tuple[int, int, int] = (160, 32, 240)    # purple
+    pred_color_rgb: tuple[int, int, int] = (0, 200, 0)     # green
+    gt_thickness: int = 2
+    pred_thickness: int = 1
+    text_scale: float = 0.4
+    mask_alpha: float = 0.5             # segmentation overlay opacity
+    skeleton_color_rgb: tuple[int, int, int] = (0, 140, 255)  # keypoint
+    draw_legend: bool = True
+
+    @property
+    def gt_color(self) -> sv.Color:
+        r, g, b = self.gt_color_rgb
+        return sv.Color(r=r, g=g, b=b)
+
+    @property
+    def pred_color(self) -> sv.Color:
+        r, g, b = self.pred_color_rgb
+        return sv.Color(r=r, g=g, b=b)
+
+    @classmethod
+    def from_config(cls, config: dict | None) -> "VizStyle":
+        """Build a VizStyle from the top-level ``visualization:`` block.
+
+        Accepts None or missing block → returns defaults. Unknown keys are
+        ignored so forward-compat additions don't break older configs.
+        """
+        if not config:
+            return cls()
+        viz = (config or {}).get("visualization", {}) if isinstance(config, dict) else {}
+        kwargs: dict = {}
+        for key in ("gt_color_rgb", "pred_color_rgb", "skeleton_color_rgb"):
+            if key in viz:
+                v = viz[key]
+                kwargs[key] = tuple(int(x) for x in v)
+        for key in ("gt_thickness", "pred_thickness"):
+            if key in viz:
+                kwargs[key] = int(viz[key])
+        for key in ("text_scale", "mask_alpha"):
+            if key in viz:
+                kwargs[key] = float(viz[key])
+        if "draw_legend" in viz:
+            kwargs["draw_legend"] = bool(viz["draw_legend"])
+        return cls(**kwargs)
+
+
 def annotate_gt_pred(
     image: np.ndarray,
     gt_xyxy: np.ndarray | None,
@@ -222,6 +287,7 @@ def annotate_gt_pred(
     pred_thickness: int = 1,
     text_scale: float = 0.4,
     draw_legend: bool = True,
+    style: VizStyle | None = None,
 ) -> np.ndarray:
     """Annotate a BGR image with GT boxes (solid, thick) and pred boxes (solid, thin).
 
@@ -244,6 +310,16 @@ def annotate_gt_pred(
     Returns:
         Annotated BGR image (copy).
     """
+    # VizStyle, when provided, overrides the legacy per-arg defaults.
+    # Kept arg compat so existing call sites don't need immediate migration.
+    if style is not None:
+        gt_color = style.gt_color
+        pred_color = style.pred_color
+        gt_thickness = style.gt_thickness
+        pred_thickness = style.pred_thickness
+        text_scale = style.text_scale
+        draw_legend = style.draw_legend
+
     gt_box_ann = sv.BoxAnnotator(color=gt_color, thickness=gt_thickness)
     gt_lbl_ann = sv.LabelAnnotator(
         color=gt_color, text_scale=text_scale, text_thickness=1,
