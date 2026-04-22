@@ -608,12 +608,13 @@ def _plot_per_class_pr_f1(per_class, class_names, path: Path,
         title += f"  (conf ≥ {conf_threshold}, IoU ≥ 0.5)"
     ax.set_title(title)
     ax.legend(loc="upper right", fontsize=9); ax.grid(axis="y", alpha=0.3)
-    fig.text(0.02, 0.01,
-             "Higher bars = better. Precision low → too many false alarms. "
-             "Recall low → missing real objects. See pr_curves.png for the tradeoff, "
-             "f1_vs_threshold.png for the optimal per-class threshold.",
-             fontsize=8, style="italic")
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.text(0.02, 0.02,
+             "• Higher bar = better (1.0 = perfect)\n"
+             "• Low precision → too many false alarms (lots of FP)\n"
+             "• Low recall → missing real objects (lots of FN)\n"
+             "• F1 = single metric combining both; see f1_vs_threshold.png for optimal per-class conf",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -642,11 +643,13 @@ def _plot_confusion_matrix(cm: np.ndarray, class_names: dict[int, str],
             ax.text(j, i, str(int(v)), ha="center", va="center",
                     color="white" if v > cm.max() / 2 else "black", fontsize=9)
     # Caption at bottom
-    fig.text(0.02, 0.01,
-             "Diagonal = correct class (TP). Off-diagonal (non-last) = class confusion. "
-             "Last col (→ none) = missed GT (FN). Last row (none →) = background FP.",
-             fontsize=8, style="italic", wrap=True)
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.text(0.02, 0.02,
+             "• Diagonal cells = correct class (TP)\n"
+             "• Off-diagonal (non-last row/col) = class confusion — right localization, wrong label\n"
+             "• Last column ‘(none)’ = GT never matched any prediction (missed = FN)\n"
+             "• Last row ‘(none)’ = prediction with no GT match (background FP)",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -672,12 +675,13 @@ def _plot_confidence_hist(tp_scores: list[float], fp_scores: list[float], path: 
     ax.set_ylabel("# of detections")
     ax.set_title("Confidence calibration — are wrong predictions less confident than right ones?")
     ax.grid(alpha=0.3); ax.legend(loc="upper right", fontsize=9)
-    fig.text(0.02, 0.01,
-             "Well-calibrated model: FP histogram mass shifts LEFT of TP (FP mean < TP mean). "
-             "Overlapping histograms → the model has no confident way to tell TPs from FPs; "
-             "no single threshold will cleanly separate them. Dashed lines = class means.",
-             fontsize=8, style="italic", wrap=True)
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.text(0.02, 0.02,
+             "• Well-calibrated: FP histogram shifts LEFT of TP (FP mean < TP mean)\n"
+             "• Overlapping histograms → no single threshold cleanly separates TPs from FPs\n"
+             "• Dashed lines = mean of each distribution\n"
+             "• Dominant mass near 0 = model is under-confident (typical for DETR-family)",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -711,7 +715,13 @@ def _plot_size_recall(size_stats: dict, path: Path) -> Path:
     ax.set_ylim(0, 1.25); ax.set_ylabel("score (0 = worst, 1 = perfect)")
     ax.set_title("Size-stratified detection performance (COCO box-area tiers)")
     ax.legend(loc="lower right"); ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
+    fig.text(0.02, 0.02,
+             "• Tiers are by GT-box area (pixels², on the model's input size)\n"
+             "• Low recall on ‘small’ tier → model misses small objects (try Mosaic / higher input size)\n"
+             "• Low precision on any tier → model makes many false alarms at that size\n"
+             "• TP/FP/FN counts above each tier are the raw matches that drive the bars",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -765,7 +775,12 @@ def _plot_data_distribution(
     ax2.legend(loc="upper right", fontsize=8)
     ax2.grid(axis="y", alpha=0.3)
 
-    fig.tight_layout()
+    fig.text(0.02, 0.02,
+             "• Left: total GT boxes per class (count + % of total) — reveals class imbalance\n"
+             "• Right: same count broken down by COCO size tier — reveals which classes are small vs large\n"
+             "• If one tier dominates a class → check size_recall.png to see if the model handles it",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -878,15 +893,16 @@ def _plot_pr_curves(detections, gt_per_class, class_names, iou_thr, path: Path) 
     ax.set_ylabel("Precision (= TP / TP+FP = how often detections are correct)")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1.02)
     ax.set_title(f"Precision–Recall curves per class @ IoU ≥ {iou_thr}   "
-                  f"mean AP = {mean_ap:.3f}")
+                  f"mean AP = mAP = {mean_ap:.3f}  (unweighted average of per-class AP)")
     ax.grid(alpha=0.3); ax.legend(loc="lower left", fontsize=9,
-                                   title="Area under curve = AP (bigger = better)")
-    fig.text(0.02, 0.01,
-             "Curves are generated by sweeping confidence from 1.0 → 0.0 and plotting each "
-             "(recall, precision) point. A curve hugging the top-right = strong model. "
-             "Curves dropping sharply = confidence poorly separates TPs from FPs.",
-             fontsize=8, style="italic", wrap=True)
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+                                   title="Area under curve = AP (1.0 = perfect)")
+    fig.text(0.02, 0.02,
+             "• Each curve is built by sweeping confidence 1.0 → 0.0 — each point is (recall, precision) at that threshold\n"
+             "• AP per class = area under its curve; higher = better\n"
+             "• mean AP (mAP) shown in title = (Σ per-class AP) / num classes\n"
+             "• Curve hugging top-right = strong model; steep drop = confidence poorly separates TPs from FPs",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path
@@ -926,12 +942,13 @@ def _plot_f1_vs_threshold(detections, gt_per_class, class_names, iou_thr, path: 
     ax.set_title(f"F1 vs confidence threshold per class @ IoU ≥ {iou_thr}")
     ax.grid(alpha=0.3); ax.legend(loc="best", fontsize=9,
                                    title="Deploy each class at its peak (dotted line)")
-    fig.text(0.02, 0.01,
-             "For deployment, pick the per-class confidence threshold that maximizes F1. "
-             "Falling F1 at high threshold = too few detections (recall↓). "
-             "Falling F1 at low threshold = too many false alarms (precision↓).",
-             fontsize=8, style="italic", wrap=True)
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.text(0.02, 0.02,
+             "• Each curve: F1 of one class across conf thresholds 0.01 → 0.99 (fine grid, step 0.01)\n"
+             "• Peak (dotted line + scatter) = best-F1 threshold for that class → use for deployment\n"
+             "• F1 drops at HIGH threshold → too few detections (recall↓)\n"
+             "• F1 drops at LOW threshold → too many false alarms (precision↓)",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path
@@ -963,12 +980,14 @@ def _plot_map_vs_iou(detections, gt_per_class, class_names, path: Path) -> Path:
     ax.set_title(f"mAP vs IoU   —   AP50 = {ap50:.3f}   AP75 = {ap75:.3f}   "
                   f"AP@[.5:.95] = {ap:.3f} (COCO metric)")
     ax.grid(alpha=0.3); ax.legend(loc="upper right", fontsize=9)
-    fig.text(0.02, 0.01,
-             "Flat curve (0.50 → 0.75) = good localization — boxes align well with GT. "
-             "Steep drop = boxes are 'close but not tight'. "
-             "AP50 ≈ 'found the right objects'. AP75 ≈ 'found them with precise boxes'.",
-             fontsize=8, style="italic", wrap=True)
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.text(0.02, 0.02,
+             "• IoU = area(overlap) / area(union) of pred-box vs GT-box; higher IoU = tighter match required\n"
+             "• AP50 ≈ ‘found the right objects’ (loose localization)\n"
+             "• AP75 ≈ ‘found them with precise boxes’ (tight localization)\n"
+             "• COCO AP = mean over IoU 0.50 → 0.95 step 0.05 (dashed line)\n"
+             "• Flat 0.50 → 0.75 = good localization. Steep drop = boxes are close but not tight",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path
@@ -992,7 +1011,13 @@ def _plot_boxes_per_image(counts: list[int], path: Path) -> Path:
         f"Boxes per image — mean {mean:.1f} / median {median:.0f} / p95 {p95:.0f} / max {max_n}"
     )
     ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
+    fig.text(0.02, 0.02,
+             "• Each bar = # images that contain exactly that many GT boxes\n"
+             "• Long right tail = a few very crowded images — check if model handles them\n"
+             "• Compare train/val/test distributions — mismatch = possible domain gap\n"
+             "• p95 is a good indicator of upper-end crowdedness",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path
@@ -1017,12 +1042,16 @@ def _plot_bbox_aspect_ratio(gt_aspect_ratios, class_names, path: Path) -> Path:
     ax.set_xscale("log")
     ax.set_xlabel("bbox aspect ratio (w / h, log scale)")
     ax.set_ylabel("count")
-    ax.set_title(
-        "GT bbox aspect-ratio distribution per class  "
-        "(dashed = square; <1 = taller-than-wide; >1 = wider-than-tall)"
-    )
+    ax.set_title("GT bbox aspect-ratio distribution per class")
     ax.legend(fontsize=9); ax.grid(alpha=0.3, which="both")
-    fig.tight_layout()
+    fig.text(0.02, 0.02,
+             "• Aspect ratio = box width / height (log-scale x-axis so 0.5 and 2.0 are symmetric)\n"
+             "• Dashed vertical line at 1.0 = square box\n"
+             "• Left of 1.0 (< 1) = taller-than-wide (portrait); Right (> 1) = wider-than-tall (landscape)\n"
+             "• Strongly asymmetric distribution → aspect-ratio-aware augmentation may help\n"
+             "• Multi-modal distribution within one class → check sub-categories or imaging angle",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.12, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path
@@ -1069,7 +1098,11 @@ def _render_hardest_overview(
     if not rows:
         return None
     from core.p06_training.post_train import _save_grid
-    _save_grid(rows, path, "Hardest images (sorted by FP+FN)", ncols=4, dpi=130)
+    _save_grid(
+        rows, path,
+        "Hardest images — top 12 by (FP + FN) count.  Purple = GT, Green = Pred",
+        ncols=4, dpi=130,
+    )
     return path
 
 
