@@ -54,24 +54,36 @@ def _forward_batch_detection(model, tensors, target_sizes, conf_threshold):
     """Run a detection model forward and decode to xyxy-pixel preds.
 
     Returns a list of dicts ``{boxes, scores, labels}`` aligned to ``tensors``.
-    Dispatches on the model's ``postprocess`` attribute (all our wrappers
-    implement it: `HFDetectionModel`, `YOLOXModel` via `POSTPROCESSOR_REGISTRY`).
+
+    Two dispatch paths:
+    * Model has ``.postprocess(predictions, conf_threshold, target_sizes)`` —
+      HF detection wrappers (`HFDetectionModel`). Call directly.
+    * Model has no ``.postprocess`` — YOLOX / custom. Use the shared
+      :func:`core.p06_training.postprocess.postprocess` dispatcher which knows
+      each arch's nms_threshold vs target_sizes parameter order via the
+      :data:`POSTPROCESSOR_REGISTRY`.
     """
     device = next(model.parameters()).device
     batch = torch.stack(tensors).to(device)
     with torch.no_grad():
         preds_raw = model(pixel_values=batch) if hasattr(model, "hf_model") else model(batch)
-    if not hasattr(model, "postprocess"):
-        # Last-resort fallback: ask the registry.
-        from core.p06_training.postprocess import POSTPROCESSOR_REGISTRY
-
-        output_format = getattr(model, "output_format", "yolox")
-        decoder = POSTPROCESSOR_REGISTRY.get(output_format)
-        if decoder is None:
-            return [{"boxes": np.zeros((0, 4)), "scores": np.zeros(0),
-                     "labels": np.zeros(0, dtype=np.int64)}] * len(tensors)
-        return decoder(preds_raw, conf_threshold, target_sizes.to(device))
-    return model.postprocess(preds_raw, conf_threshold, target_sizes.to(device))
+    if hasattr(model, "postprocess"):
+        return model.postprocess(preds_raw, conf_threshold, target_sizes.to(device))
+    from core.p06_training.postprocess import postprocess as _registry_postprocess
+    output_format = getattr(model, "output_format", "yolox")
+    try:
+        return _registry_postprocess(
+            output_format=output_format,
+            model=model,
+            predictions=preds_raw,
+            conf_threshold=conf_threshold,
+            target_sizes=target_sizes.to(device) if hasattr(target_sizes, "to") else target_sizes,
+        )
+    except Exception as e:
+        logger.warning("post-train decode failed for output_format=%s: %s",
+                       output_format, e)
+        return [{"boxes": np.zeros((0, 4)), "scores": np.zeros(0),
+                 "labels": np.zeros(0, dtype=np.int64)}] * len(tensors)
 
 
 # ---------------------------------------------------------------------------
@@ -103,20 +115,25 @@ def render_prediction_grid(
     per-class galleries — is byte-consistent in color, thickness, and layout.
     """
     if not indices:
+        logger.warning("render_prediction_grid(%s): no indices", out_path.name)
         return None
 
     raw_dataset, idx_map = _unwrap_subset(dataset)
     input_h, input_w = int(input_size[0]), int(input_size[1])
 
     samples = []
+    skipped = 0
     for idx in indices:
         real_idx = idx_map(idx)
         try:
             raw = raw_dataset.get_raw_item(real_idx)
-        except Exception:
+        except Exception as e:
+            skipped += 1
+            logger.debug("get_raw_item(%s) failed: %s", real_idx, e)
             continue
         image = raw["image"]
         if image is None:
+            skipped += 1
             continue
         resized = cv2.resize(image, (input_w, input_h))
         tensor = torch.from_numpy(
@@ -127,6 +144,10 @@ def render_prediction_grid(
         samples.append((real_idx, image, resized, tensor, raw.get("targets")))
 
     if not samples:
+        logger.warning(
+            "render_prediction_grid(%s): 0 samples from %d indices (%d skipped) — grid not saved",
+            out_path.name, len(indices), skipped,
+        )
         return None
 
     rows: list[np.ndarray] = []
@@ -313,6 +334,7 @@ def run_post_train_artifacts(
     error_analysis_hard_images_per_class: int = 20,
     log_history_best_map: float | None = None,
     log_history_test_map: float | None = None,
+    training_config: dict | None = None,
 ) -> dict[str, Any]:
     """Render best-checkpoint val/test grids + full error analysis.
 
@@ -390,6 +412,7 @@ def run_post_train_artifacts(
                     iou_threshold=error_analysis_iou_threshold,
                     max_samples=error_analysis_max_samples,
                     hard_images_per_class=error_analysis_hard_images_per_class,
+                    training_config=training_config,
                 )
                 artifacts["val_error_analysis"] = val_report
             except Exception as e:
@@ -429,6 +452,7 @@ def run_post_train_artifacts(
                     iou_threshold=error_analysis_iou_threshold,
                     max_samples=error_analysis_max_samples,
                     hard_images_per_class=error_analysis_hard_images_per_class,
+                    training_config=training_config,
                 )
                 artifacts["test_error_analysis"] = test_report
             except Exception as e:

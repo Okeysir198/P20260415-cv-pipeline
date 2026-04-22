@@ -63,7 +63,8 @@ def render_normalized_input_preview(
 
     pixel_values = sample_batch.get("pixel_values")
     if pixel_values is None:
-        return out_path  # nothing to render
+        logger.warning("normalized_input_preview skipped — no pixel_values in batch")
+        return out_path
 
     B = pixel_values.shape[0]
     take = min(num_samples, B)
@@ -123,32 +124,37 @@ def render_normalized_input_preview(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     _save_grid(rows, out_path, title, ncols=grid_cols, dpi=130)
+    logger.info("NormalizedInputPreviewCallback: saved %s (%d samples)",
+                out_path, len(rows))
     return out_path
 
 
-try:
-    from transformers import TrainerCallback as _HFTrainerCallback
-except Exception:  # pragma: no cover
-    class _HFTrainerCallback:  # type: ignore[no-redef]
-        """Fallback stub when `transformers` is unavailable — keeps the hook
-        signatures so our pytorch-backend path still imports cleanly."""
+class _AnyHook:
+    """Base that turns every attribute access into a permissive no-op method.
 
-        def on_train_begin(self, *args, **kwargs): return None
+    Lets one callback class satisfy both the pytorch CallbackRunner surface
+    (``on_train_start(trainer)``, ``on_epoch_end(trainer, epoch, metrics)``,
+    ``on_batch_end(trainer, i, metrics)``) AND the HF ``TrainerCallback``
+    surface (``on_init_end(args, state, control, **kwargs)``,
+    ``on_pre_optimizer_step(...)``, etc.) without tracking either API's
+    growing list. Only the hooks we actually implement override this.
+    """
+
+    def __getattr__(self, name):
+        if name.startswith("on_"):
+            def _noop(*args, **kwargs):
+                return kwargs.get("control")  # HF expects control back; pytorch ignores
+            return _noop
+        raise AttributeError(name)
 
 
-class NormalizedInputPreviewCallback(_HFTrainerCallback):
+class NormalizedInputPreviewCallback(_AnyHook):
     """Task-agnostic callback for both backends.
 
-    Pulls one batch from the train dataloader on `on_train_start` (pytorch)
-    or `on_train_begin` (HF), denormalizes it, and writes
-    ``data_preview/normalized_input_preview.png``. Inherits from
-    :class:`transformers.TrainerCallback` so the HF CallbackHandler has the
-    full default hook surface (``on_init_end`` etc.) without us needing to
-    define no-op implementations for each one.
-
-    For the pytorch backend, :class:`core.p06_training.callbacks.CallbackRunner`
-    duck-types on ``on_train_start(trainer)`` so the HF base-class methods
-    are ignored and ours takes effect.
+    Real work happens in two hook methods below — everything else is swallowed
+    by :class:`_AnyHook`'s permissive no-op so the CallbackHandler of either
+    backend (pytorch CallbackRunner or transformers.CallbackHandler) can
+    dispatch without crashing on attribute lookups.
     """
 
     def __init__(
@@ -211,15 +217,59 @@ class NormalizedInputPreviewCallback(_HFTrainerCallback):
 
     # ---------------- batch normalization helper ----------------
     def _batch_to_sample_dict(self, batch: Any) -> dict:
-        """Coerce any backend's batch into ``{"pixel_values", "labels"}``."""
+        """Coerce any backend's batch into ``{"pixel_values", "labels"}``.
+
+        Handles:
+          * HF detection collator → ``{"pixel_values", "labels": [{class_labels, boxes}]}``
+          * pytorch YOLOX collator → ``(images_tensor, targets_list, paths_list)``
+          * classification collator → ``(images, labels_tensor)``
+          * segmentation collator → ``(images, masks_tensor, paths)``
+        """
         if isinstance(batch, dict):
             if "pixel_values" in batch:
                 return batch
             if "image" in batch:
                 return {"pixel_values": batch["image"], "labels": batch.get("labels")}
+            # Pytorch detection collator: {"images", "targets": [..], "paths": [..]}
+            if "images" in batch:
+                labels = batch.get("targets") or batch.get("labels")
+                if self.task == "detection" and isinstance(labels, (list, tuple)) and labels and isinstance(labels[0], torch.Tensor):
+                    converted = []
+                    for t in labels:
+                        if t.numel() == 0:
+                            converted.append({
+                                "class_labels": torch.zeros(0, dtype=torch.long),
+                                "boxes": torch.zeros(0, 4, dtype=torch.float32),
+                            })
+                        else:
+                            converted.append({
+                                "class_labels": t[:, 0].long(),
+                                "boxes": t[:, 1:5].float(),
+                            })
+                    labels = converted
+                return {"pixel_values": batch["images"], "labels": labels}
         if isinstance(batch, (list, tuple)):
             if len(batch) >= 2 and isinstance(batch[0], torch.Tensor):
-                return {"pixel_values": batch[0], "labels": batch[1]}
+                images = batch[0]
+                labels = batch[1]
+                # Detection's collated targets is usually a list of (N,5)
+                # tensors in YOLO cxcywh-normalized space. Convert each row
+                # to an HF-shaped dict so the detection render path works.
+                if self.task == "detection" and isinstance(labels, (list, tuple)) and labels and isinstance(labels[0], torch.Tensor):
+                    converted = []
+                    for t in labels:
+                        if t.numel() == 0:
+                            converted.append({
+                                "class_labels": torch.zeros(0, dtype=torch.long),
+                                "boxes": torch.zeros(0, 4, dtype=torch.float32),
+                            })
+                        else:
+                            converted.append({
+                                "class_labels": t[:, 0].long(),
+                                "boxes": t[:, 1:5].float(),
+                            })
+                    labels = converted
+                return {"pixel_values": images, "labels": labels}
         # Fallback: take first tensor we see
         if isinstance(batch, torch.Tensor):
             return {"pixel_values": batch, "labels": None}

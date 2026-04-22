@@ -22,15 +22,23 @@ def denormalize_tensor(
     std=IMAGENET_STD,
     to_bgr: bool = True,
 ) -> np.ndarray:
-    """Invert ``(image/255 - mean) / std`` back to HWC uint8 for visualization.
+    """Invert the normalize-or-rescale step back to HWC uint8 for visualization.
 
-    Accepts either a torch.Tensor ``(3, H, W)`` / ``(B, 3, H, W)`` in
-    float32 [0..1] post-normalize space, or a numpy array with the same shape
-    in CHW layout. Returns HWC uint8 — BGR by default (matches cv2 call sites)
-    or RGB if ``to_bgr=False``.
+    Auto-detects the input space:
+    * If values look ImageNet-normalized (roughly in ``[-3, 3]``) → apply
+      ``x * std + mean`` then ``* 255``.
+    * If values look already-rescaled to ``[0, 1]`` (max ≤ ~1.5) → skip
+      mean/std and just ``* 255``.
+    * If values look like raw uint8-range ``[0, 255]`` (max > ~2.0) → cast
+      directly; inputs arrived without normalization (e.g. YOLOX pipelines
+      with ``augmentation.normalize: false``).
 
-    Single source of truth: replaces inline reconstructions that previously
-    lived in callbacks.py, hf_callbacks.py, and notebook viz cells.
+    This way the callback renders correctly across HF (ImageNet-norm),
+    torchvision (rescale-only), and YOLOX (raw-pixel) training recipes with
+    no per-arch branching at the call site.
+
+    Accepts torch.Tensor or numpy array, ``(3, H, W)`` or ``(B, 3, H, W)``.
+    Returns HWC uint8 BGR (default) or RGB.
     """
     try:
         import torch  # deferred
@@ -43,19 +51,27 @@ def denormalize_tensor(
         arr = np.asarray(tensor)
 
     if arr.ndim == 4:
-        # batch dim — take first
         arr = arr[0]
-
     if arr.ndim != 3 or arr.shape[0] != 3:
         raise ValueError(
             f"denormalize_tensor expects (3, H, W) CHW input, got shape {arr.shape}"
         )
 
-    mean_arr = np.asarray(mean, dtype=np.float32).reshape(3, 1, 1)
-    std_arr = np.asarray(std, dtype=np.float32).reshape(3, 1, 1)
-    out = arr.astype(np.float32) * std_arr + mean_arr
-    out = np.clip(out * 255.0, 0, 255).astype(np.uint8)
-    # RGB CHW → RGB HWC
+    arr = arr.astype(np.float32)
+    max_abs = float(np.max(np.abs(arr))) if arr.size else 0.0
+    if max_abs > 3.0:
+        # Raw pixel space [0, 255] — no mean/std applied; cast directly.
+        out = np.clip(arr, 0, 255).astype(np.uint8)
+    elif max_abs <= 1.5 and float(arr.min()) >= -0.05:
+        # Rescale-only space [0, 1] — the ImageNet mean/std step was skipped.
+        out = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
+    else:
+        # ImageNet-normalized — apply the inverse.
+        mean_arr = np.asarray(mean, dtype=np.float32).reshape(3, 1, 1)
+        std_arr = np.asarray(std, dtype=np.float32).reshape(3, 1, 1)
+        out = arr * std_arr + mean_arr
+        out = np.clip(out * 255.0, 0, 255).astype(np.uint8)
+
     out = np.ascontiguousarray(out.transpose(1, 2, 0))
     if to_bgr:
         out = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)

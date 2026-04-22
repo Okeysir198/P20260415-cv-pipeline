@@ -411,6 +411,9 @@ class DetectionTrainer:
             save_dir = str(generate_run_dir(
                 feature_name_from_config_path(self.config_path), "06_training"
             ))
+        # Expose for _finalize_training to reach after the main loop
+        # (post-train runner + test eval both need it).
+        self.save_dir = save_dir
 
         callbacks.append(
             CheckpointSaver(
@@ -791,7 +794,10 @@ class DetectionTrainer:
 
         # Build test loader if a test split is present; if not, skip test eval.
         data_cfg_resolved = getattr(self, "_loaded_data_cfg", None) or self.config.get("data", {})
-        base_dir = data_cfg_resolved.get("dataset_path") or data_cfg_resolved.get("path") or ""
+        # base_dir must be the training-config's directory so YOLOXDataset can
+        # resolve `data_cfg["path"]` (e.g. `"../../../dataset_store/..."`) the
+        # same way it does for train/val during training — NOT CWD.
+        base_dir = str(self.config_path.parent)
         test_loader = None
         try:
             test_loader = self._maybe_build_test_loader(data_cfg_resolved, base_dir)
@@ -823,6 +829,9 @@ class DetectionTrainer:
             val_ds = getattr(self.val_loader, "dataset", None) if hasattr(self, "val_loader") else None
             test_ds = getattr(test_loader, "dataset", None) if test_loader is not None else None
 
+            training_config = self._build_pytorch_training_config(
+                data_cfg_resolved=data_cfg_resolved, test_metrics=test_metrics,
+            )
             run_post_train_artifacts(
                 model=self.model,
                 save_dir=save_dir,
@@ -838,64 +847,120 @@ class DetectionTrainer:
                 error_analysis_iou_threshold=float(post_cfg.get("error_iou_threshold", 0.5)),
                 error_analysis_max_samples=post_cfg.get("error_max_samples", 500),
                 error_analysis_hard_images_per_class=int(post_cfg.get("hard_images_per_class", 20)),
+                training_config=training_config,
             )
         except Exception as e:
             logger.warning("post-train artifacts skipped: %s", e, exc_info=True)
 
         return test_metrics
 
+    def _safe_best_metric(self):
+        """Return the CheckpointSaver's best value if available, else None."""
+        try:
+            cb = self.callback_runner.get_callback(CheckpointSaver)
+            return getattr(cb, "best_value", None)
+        except Exception:
+            return None
+
+    def _build_pytorch_training_config(self, *, data_cfg_resolved: dict,
+                                        test_metrics: dict | None) -> dict:
+        """Compact training-config snapshot for the error-analysis report.
+
+        Mirrors the HF backend helper (`_build_hf_training_config`) so both
+        backends attach the same sections to `summary.json`.
+        """
+        train_cfg = self._train_cfg or {}
+        model_cfg = self._model_cfg or {}
+        aug_cfg = self.config.get("augmentation", {}) or {}
+        try:
+            params = int(sum(p.numel() for p in self.model.parameters() if p.requires_grad))
+        except Exception:
+            params = None
+        return {
+            "model": {
+                "arch": model_cfg.get("arch"),
+                "trainable_params": params,
+                "input_size": tuple(data_cfg_resolved.get("input_size",
+                                    model_cfg.get("input_size", (640, 640)))),
+            },
+            "training": {
+                "backend": "pytorch",
+                "epochs": train_cfg.get("epochs"),
+                "batch_size": (self.config.get("data", {}) or {}).get("batch_size"),
+                "lr": train_cfg.get("lr"),
+                "optimizer": train_cfg.get("optimizer"),
+                "scheduler": train_cfg.get("scheduler"),
+                "warmup_epochs": train_cfg.get("warmup_epochs"),
+                "weight_decay": train_cfg.get("weight_decay"),
+                "amp": train_cfg.get("amp"),
+                "ema": train_cfg.get("ema"),
+                "seed": self.config.get("seed"),
+                "max_grad_norm": train_cfg.get("grad_clip") or train_cfg.get("max_grad_norm"),
+            },
+            "augmentation": {
+                k: aug_cfg.get(k) for k in (
+                    "library", "normalize", "mosaic", "mixup", "copypaste",
+                    "fliplr", "flipud", "perspective_p", "brightness_contrast_p",
+                    "hsv_p", "scale", "degrees", "translate", "shear",
+                )
+            },
+            "run": {
+                "best_val_metric": self._safe_best_metric(),
+                "total_epochs": getattr(self, "_last_epoch", None),
+                "test_metrics": test_metrics,
+            },
+        }
+
     def _maybe_build_test_loader(self, data_cfg: dict, base_dir: str):
         """Construct a test DataLoader if the dataset has a test split on disk.
 
-        Kept minimal and best-effort — if dataset layout differs from the
-        canonical ``<root>/test/{images,labels}/`` the function returns None
-        and callers skip test eval without failing the whole run.
+        Delegates split resolution to the dataset class itself — matches the
+        HF-backend pattern in ``hf_trainer._try_build_test_dataset``:
+        ``YOLOXDataset(split="test")`` raises ``FileNotFoundError`` cleanly
+        when the split is absent, so no pre-existence check is needed.
         """
-        from pathlib import Path as _P
-        from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD  # noqa: F401
         from torch.utils.data import DataLoader
 
-        # Check whether a test split exists
-        dataset_root = data_cfg.get("dataset_path") or data_cfg.get("path")
-        if not dataset_root:
-            return None
-        test_img_dir = _P(dataset_root) / "test" / "images"
-        if not test_img_dir.exists():
-            return None
-
-        # Reuse the same dataset class + transforms as val
         output_format = getattr(self.model, "output_format", "yolox")
         try:
             if output_format in {"detr", "yolox"}:
                 from core.p05_data.detection_dataset import YOLOXDataset
                 from core.p05_data.transforms import build_transforms
-                transform = build_transforms(self.config, data_cfg, is_train=False,
-                                             image_processor=getattr(self.model, "processor", None))
+                input_size = tuple(data_cfg.get("input_size", (640, 640)))
+                eval_transforms = build_transforms(
+                    config=self.config.get("augmentation", {}),
+                    is_train=False, input_size=input_size,
+                    mean=data_cfg.get("mean"), std=data_cfg.get("std"),
+                )
                 ds = YOLOXDataset(
-                    data_dir=_P(dataset_root), split="test",
-                    input_size=tuple(data_cfg.get("input_size", (640, 640))),
-                    transform=transform,
+                    data_cfg, split="test",
+                    transforms=eval_transforms,
+                    base_dir=base_dir,
                 )
             elif output_format == "classification":
-                from core.p05_data.classification_dataset import ClassificationDataset, build_classification_transforms
-                transforms = build_classification_transforms(self.config, data_cfg, is_train=False)
+                from core.p05_data.classification_dataset import (
+                    ClassificationDataset, build_classification_transforms,
+                )
+                transforms = build_classification_transforms(
+                    self.config, data_cfg, is_train=False)
                 ds = ClassificationDataset(
-                    data_dir=_P(dataset_root), split="test",
-                    input_size=tuple(data_cfg.get("input_size", (224, 224))),
-                    transforms=transforms,
-                    num_classes=int(data_cfg.get("nc", len(data_cfg.get("names", {})))),
+                    data_cfg, split="test", transforms=transforms, base_dir=base_dir,
                 )
             elif output_format == "segmentation":
-                from core.p05_data.segmentation_dataset import SegmentationDataset, build_segmentation_transforms
-                transforms = build_segmentation_transforms(self.config, data_cfg, is_train=False)
+                from core.p05_data.segmentation_dataset import (
+                    SegmentationDataset, build_segmentation_transforms,
+                )
+                transforms = build_segmentation_transforms(
+                    self.config, data_cfg, is_train=False)
                 ds = SegmentationDataset(
-                    data_dir=_P(dataset_root), split="test",
-                    input_size=tuple(data_cfg.get("input_size", (512, 512))),
-                    transform=transforms,
+                    data_cfg, split="test", transform=transforms, base_dir=base_dir,
                 )
             else:
                 return None
-        except Exception as e:
+        except FileNotFoundError:
+            logger.info("No test split on disk — skipping test-set evaluation.")
+            return None
+        except Exception as e:  # pragma: no cover
             logger.warning("test dataset build failed: %s", e)
             return None
 

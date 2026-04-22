@@ -42,7 +42,20 @@ from core.p06_training._common import (
     unwrap_subset as _unwrap,
     yolo_targets_to_xyxy,
 )
-from core.p08_evaluation.error_analysis import _size_category
+from core.p06_training.postprocess import postprocess as _registry_postprocess
+from core.p08_evaluation.error_analysis import (
+    _LARGE_AREA,
+    _SMALL_AREA,
+    _size_category,
+)
+
+# Human-readable labels used by charts + JSON so every consumer sees the same
+# exact threshold definition (COCO convention, expressed in input-size pixels).
+SIZE_TIER_LABELS = {
+    "small":  f"small (<{int(_SMALL_AREA ** 0.5)}²px, i.e. <{_SMALL_AREA} px²)",
+    "medium": f"medium ({int(_SMALL_AREA ** 0.5)}²–{int(_LARGE_AREA ** 0.5)}²px)",
+    "large":  f"large (≥{int(_LARGE_AREA ** 0.5)}²px, i.e. ≥{_LARGE_AREA} px²)",
+}
 from core.p10_inference.supervision_bridge import VizStyle, annotate_gt_pred
 
 logger = logging.getLogger(__name__)
@@ -82,6 +95,23 @@ def _dispatch_forward(model, tensor_batch: torch.Tensor):
     return model(tensor_batch)
 
 
+def _dispatch_postprocess(model, preds_raw, conf_threshold, target_sizes):
+    """HF wrappers have ``.postprocess``; our YOLOX models go through the
+    registry dispatcher which handles conf_threshold / nms_threshold /
+    target_sizes keyword separation per arch.
+    """
+    if hasattr(model, "postprocess"):
+        return model.postprocess(preds_raw, conf_threshold, target_sizes)
+    output_format = getattr(model, "output_format", "yolox")
+    return _registry_postprocess(
+        output_format=output_format,
+        model=model,
+        predictions=preds_raw,
+        conf_threshold=conf_threshold,
+        target_sizes=target_sizes,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public: dispatcher
 # ---------------------------------------------------------------------------
@@ -100,6 +130,7 @@ def run_error_analysis(
     iou_threshold: float = 0.5,
     max_samples: int | None = 500,
     hard_images_per_class: int = 20,
+    training_config: dict | None = None,
 ) -> dict[str, Any]:
     """Dispatch error analysis to the right task-specific analyzer.
 
@@ -118,6 +149,7 @@ def run_error_analysis(
             conf_threshold=conf_threshold, iou_threshold=iou_threshold,
             max_samples=max_samples,
             hard_images_per_class=hard_images_per_class,
+            training_config=training_config,
         )
     if task == "classification":
         return _analyze_classification(
@@ -154,6 +186,7 @@ def _analyze_detection(
     class_names: dict[int, str], input_size: tuple[int, int], style: VizStyle,
     conf_threshold: float, iou_threshold: float,
     max_samples: int | None, hard_images_per_class: int,
+    training_config: dict | None = None,
 ) -> dict[str, Any]:
     raw_ds, idx_map = _unwrap(dataset)
     n = len(dataset)
@@ -175,6 +208,19 @@ def _analyze_detection(
         "large":  {"tp": 0, "fp": 0, "fn": 0},
     }
     per_image: list[dict] = []
+    # Data-distribution accumulators
+    gt_per_class: dict[int, int] = {c: 0 for c in class_names}
+    gt_per_class_size: dict[int, dict[str, int]] = {
+        c: {"small": 0, "medium": 0, "large": 0} for c in class_names
+    }
+    total_images_with_gt = 0
+    boxes_per_image_counts: list[int] = []        # for crowdedness histogram
+    gt_aspect_ratios: dict[int, list[float]] = {c: [] for c in class_names}
+    # Per-prediction records — drives PR curves, F1-vs-threshold, mAP-vs-IoU
+    # without re-running inference. Each entry: predicted class, confidence,
+    # best IoU against any same-class GT (for AP at arbitrary IoU threshold),
+    # best IoU against any GT (for the confusion branch).
+    detections: list[dict] = []
     fp_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
     fn_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
     conf_gallery: dict[tuple[int, int], list[dict]] = {}
@@ -197,9 +243,7 @@ def _analyze_detection(
         with torch.no_grad():
             preds_raw = _dispatch_forward(model, tensor)
         target_sizes = torch.tensor([[input_h, input_w]], device=device)
-        if not hasattr(model, "postprocess"):
-            continue
-        decoded = model.postprocess(preds_raw, conf_threshold, target_sizes)[0]
+        decoded = _dispatch_postprocess(model, preds_raw, conf_threshold, target_sizes)[0]
 
         pb = np.asarray(decoded.get("boxes", []), dtype=np.float64).reshape(-1, 4)
         pl = np.asarray(decoded.get("labels", []), dtype=np.int64).ravel()
@@ -211,6 +255,21 @@ def _analyze_detection(
             pb[:, [1, 3]] *= orig_h / input_h
 
         gt_xyxy, gt_cls = yolo_targets_to_xyxy(raw.get("targets"), orig_w, orig_h)
+
+        # Data-distribution counts — class + size-tier + aspect-ratio per GT box.
+        if len(gt_xyxy) > 0:
+            total_images_with_gt += 1
+        boxes_per_image_counts.append(int(len(gt_xyxy)))
+        for j in range(len(gt_xyxy)):
+            cid = int(gt_cls[j])
+            gt_per_class[cid] = gt_per_class.get(cid, 0) + 1
+            bw = max(1.0, gt_xyxy[j, 2] - gt_xyxy[j, 0])
+            bh = max(1.0, gt_xyxy[j, 3] - gt_xyxy[j, 1])
+            gt_area = bw * bh
+            tier = _size_category(gt_area)
+            gt_per_class_size.setdefault(cid,
+                {"small": 0, "medium": 0, "large": 0})[tier] += 1
+            gt_aspect_ratios.setdefault(cid, []).append(float(bw / bh))
 
         # Cache everything gallery renderers need — image bytes stay on disk
         # (we only keep the path) so 500-image analysis doesn't balloon RAM.
@@ -240,6 +299,15 @@ def _analyze_detection(
 
             area = max(0.0, (pb[bi, 2] - pb[bi, 0])) * max(0.0, (pb[bi, 3] - pb[bi, 1]))
             size = _size_category(area)
+
+            # Per-pred record — drives threshold/IoU sweeps below.
+            detections.append({
+                "pred_cls": int(pl[bi]),
+                "score": float(ps[bi]),
+                "best_iou_same_class": float(best_same_class_iou),
+                "best_iou_any": float(best_iou),
+                "gt_cls_at_best_iou": int(gt_cls[best_j]) if best_j >= 0 else -1,
+            })
 
             if best_same_class_iou >= iou_threshold:
                 matched_gt[best_same_class_j] = True
@@ -299,21 +367,44 @@ def _analyze_detection(
 
     # ---- summary ----
     summary = _summarize_detection(per_class, size_stats, confidence_tp, confidence_fp, class_names)
-    _write_json_md(
-        output_dir / "summary.json", output_dir / "summary.md",
-        summary,
-        title="Detection Error Analysis",
-        header=[
-            f"- Samples analyzed: **{len(per_image)}**",
-            f"- IoU threshold: {iou_threshold}",
-            f"- Confidence threshold: {conf_threshold}",
-        ],
-    )
-
-    artifacts = {"summary_json": output_dir / "summary.json",
-                 "summary_md": output_dir / "summary.md"}
+    if training_config:
+        summary["training_config"] = training_config
+    # Attach data distribution + explicit size-tier definitions so readers
+    # see the underlying counts behind precision/recall and the exact area
+    # thresholds used for the size breakdown.
+    summary["size_tier_definitions"] = {
+        "small":  {"max_area_px2": _SMALL_AREA, "description": SIZE_TIER_LABELS["small"]},
+        "medium": {"min_area_px2": _SMALL_AREA, "max_area_px2": _LARGE_AREA,
+                   "description": SIZE_TIER_LABELS["medium"]},
+        "large":  {"min_area_px2": _LARGE_AREA, "description": SIZE_TIER_LABELS["large"]},
+    }
+    summary["data_distribution"] = {
+        "total_images_with_gt": total_images_with_gt,
+        "total_gt_boxes": int(sum(gt_per_class.values())),
+        "per_class": {class_names.get(cid, str(cid)): int(v)
+                      for cid, v in gt_per_class.items()},
+        "per_class_per_size": {
+            class_names.get(cid, str(cid)): {
+                k: int(v) for k, v in tiers.items()
+            }
+            for cid, tiers in gt_per_class_size.items()
+        },
+    }
+    artifacts = {}
 
     # ---- charts ----
+    # Dataset-shape (axis 1)
+    artifacts["data_distribution"] = _plot_data_distribution(
+        gt_per_class, gt_per_class_size, class_names,
+        output_dir / "data_distribution.png",
+    )
+    artifacts["boxes_per_image"] = _plot_boxes_per_image(
+        boxes_per_image_counts, output_dir / "boxes_per_image.png",
+    )
+    artifacts["bbox_aspect_ratio"] = _plot_bbox_aspect_ratio(
+        gt_aspect_ratios, class_names, output_dir / "bbox_aspect_ratio.png",
+    )
+    # Model-performance (axis 3)
     artifacts["per_class_pr_f1"] = _plot_per_class_pr_f1(
         per_class, class_names, output_dir / "per_class_pr_f1.png",
     )
@@ -326,6 +417,50 @@ def _analyze_detection(
     artifacts["size_recall"] = _plot_size_recall(
         size_stats, output_dir / "size_recall.png",
     )
+    # Threshold-sweep charts (from per-pred records — no re-inference)
+    artifacts["pr_curves"] = _plot_pr_curves(
+        detections, gt_per_class, class_names, iou_threshold,
+        output_dir / "pr_curves.png",
+    )
+    artifacts["f1_vs_threshold"] = _plot_f1_vs_threshold(
+        detections, gt_per_class, class_names, iou_threshold,
+        output_dir / "f1_vs_threshold.png",
+    )
+    artifacts["map_vs_iou"] = _plot_map_vs_iou(
+        detections, gt_per_class, class_names,
+        output_dir / "map_vs_iou.png",
+    )
+
+    # Expose the numbers the sweep charts are built from in summary.json
+    summary["model_metrics"] = {
+        "ap50_per_class": _per_class_ap(detections, gt_per_class, class_names, 0.5),
+        "ap75_per_class": _per_class_ap(detections, gt_per_class, class_names, 0.75),
+        "map_vs_iou": _map_at_iou_sweep(detections, gt_per_class,
+                                         np.arange(0.5, 1.0, 0.05)),
+        "best_f1_per_class": _best_f1_and_threshold(
+            detections, gt_per_class, class_names, iou_threshold,
+        ),
+    }
+
+    # Persist the full report now that every section is populated.
+    _write_json_md(
+        output_dir / "summary.json", output_dir / "summary.md",
+        summary,
+        title="Detection Error Analysis",
+        header=[
+            f"- Samples analyzed: **{len(per_image)}**",
+            f"- Images with ≥1 GT box: **{total_images_with_gt}**",
+            f"- Total GT boxes: **{int(sum(gt_per_class.values()))}**",
+            f"- IoU threshold (base): {iou_threshold}",
+            f"- Confidence threshold (base): {conf_threshold}",
+            f"- Size tiers (COCO, in pixels² of box area):",
+            f"    * {SIZE_TIER_LABELS['small']}",
+            f"    * {SIZE_TIER_LABELS['medium']}",
+            f"    * {SIZE_TIER_LABELS['large']}",
+        ],
+    )
+    artifacts["summary_json"] = output_dir / "summary.json"
+    artifacts["summary_md"] = output_dir / "summary.md"
 
     # ---- hardest images overview grid (top 12 by FP+FN) ----
     per_image.sort(key=lambda r: -(r["fn"] + r["fp"]))
@@ -480,21 +615,297 @@ def _plot_size_recall(size_stats: dict, path: Path) -> Path:
         tp = size_stats[t]["tp"]; fp = size_stats[t]["fp"]; fn = size_stats[t]["fn"]
         rec.append(tp / (tp + fn) if (tp + fn) else 0.0)
         prec.append(tp / (tp + fp) if (tp + fp) else 0.0)
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(8, 5))
     x = np.arange(3); w = 0.4
     ax.bar(x - w/2, prec, w, label="Precision", color="#4c72b0")
     ax.bar(x + w/2, rec,  w, label="Recall",    color="#55a868")
     for i, t in enumerate(tiers):
         c = size_stats[t]
         ax.text(i, 1.02, f"TP {c['tp']} FP {c['fp']} FN {c['fn']}", ha="center", fontsize=9)
-    ax.set_xticks(x); ax.set_xticklabels(tiers)
+    ax.set_xticks(x)
+    # Explicit thresholds in the tick labels so readers know what "small" means
+    ax.set_xticklabels([SIZE_TIER_LABELS[t] for t in tiers], fontsize=9)
     ax.set_ylim(0, 1.2); ax.set_ylabel("score")
-    ax.set_title("Size-stratified recall / precision (COCO tiers)")
+    ax.set_title("Size-stratified recall / precision (COCO tiers, box area in pixels²)")
     ax.legend(loc="lower right"); ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
+    return path
+
+
+def _plot_data_distribution(
+    gt_per_class: dict, gt_per_class_size: dict,
+    class_names: dict[int, str], path: Path,
+) -> Path:
+    """Two-panel chart: (left) total GT boxes per class, (right) stacked by
+    size tier. Answers "what data does the model see?" at a glance — essential
+    context for interpreting per-class recall + size-recall charts.
+    """
+    ordered_cids = sorted(gt_per_class.keys())
+    names = [class_names.get(cid, str(cid)) for cid in ordered_cids]
+    totals = [gt_per_class[cid] for cid in ordered_cids]
+    small = [gt_per_class_size.get(cid, {}).get("small", 0) for cid in ordered_cids]
+    medium = [gt_per_class_size.get(cid, {}).get("medium", 0) for cid in ordered_cids]
+    large = [gt_per_class_size.get(cid, {}).get("large", 0) for cid in ordered_cids]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(max(11, len(names) * 1.3), 5))
+    x = np.arange(len(names))
+
+    # Left: bar per class (absolute counts + percentage)
+    total = max(1, sum(totals))
+    ax1.bar(x, totals, color="#4c72b0")
+    for i, v in enumerate(totals):
+        pct = 100.0 * v / total
+        ax1.text(i, v + total * 0.01, f"{v} ({pct:.1f}%)",
+                 ha="center", fontsize=9)
+    ax1.set_xticks(x); ax1.set_xticklabels(names, rotation=30, ha="right")
+    ax1.set_ylabel("GT box count")
+    ax1.set_title(f"Class distribution (total GT boxes = {total})")
+    ax1.grid(axis="y", alpha=0.3)
+
+    # Right: stacked by COCO size tier
+    ax2.bar(x, small, label=SIZE_TIER_LABELS["small"], color="#dd8452")
+    ax2.bar(x, medium, bottom=small, label=SIZE_TIER_LABELS["medium"], color="#8172b3")
+    bottom_ml = [s + m for s, m in zip(small, medium)]
+    ax2.bar(x, large, bottom=bottom_ml, label=SIZE_TIER_LABELS["large"], color="#64b5cd")
+    ax2.set_xticks(x); ax2.set_xticklabels(names, rotation=30, ha="right")
+    ax2.set_ylabel("GT box count")
+    ax2.set_title("Per-class × per-size-tier distribution")
+    ax2.legend(loc="upper right", fontsize=8)
+    ax2.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Threshold-sweep + dataset-shape helpers
+# ---------------------------------------------------------------------------
+
+
+def _per_class_ap_curve(
+    detections: list[dict], gt_count: int, target_cls: int, iou_thr: float,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Compute PR curve + AP for one class at a given IoU threshold.
+
+    Inputs are the flat per-prediction records from the analyzer's matching
+    loop. A detection counts as TP if its best-same-class IoU ≥ iou_thr,
+    counted in score-descending order; duplicate matches on the same GT are
+    handled by the earlier greedy matcher (detections already carry the
+    matched-GT identity). Returns (recall, precision, ap) where ap is the
+    all-points AUC (standard COCO definition).
+    """
+    # Filter to this class, sort by score desc.
+    class_dets = [d for d in detections if d["pred_cls"] == target_cls]
+    class_dets.sort(key=lambda r: -r["score"])
+    if not class_dets or gt_count == 0:
+        return np.zeros(1), np.zeros(1), 0.0
+    tp = np.array([1 if d["best_iou_same_class"] >= iou_thr else 0
+                    for d in class_dets], dtype=np.float32)
+    fp = 1 - tp
+    cum_tp = np.cumsum(tp)
+    cum_fp = np.cumsum(fp)
+    recall = cum_tp / max(1, gt_count)
+    precision = cum_tp / np.maximum(cum_tp + cum_fp, 1e-12)
+    # All-points AP
+    prec_interp = np.concatenate([[1.0], precision, [0.0]])
+    rec_interp = np.concatenate([[0.0], recall, [1.0]])
+    for i in range(len(prec_interp) - 1, 0, -1):
+        prec_interp[i - 1] = max(prec_interp[i - 1], prec_interp[i])
+    idx = np.where(rec_interp[1:] != rec_interp[:-1])[0]
+    ap = float(np.sum((rec_interp[idx + 1] - rec_interp[idx]) * prec_interp[idx + 1]))
+    return recall, precision, ap
+
+
+def _per_class_ap(detections, gt_per_class, class_names, iou_thr) -> dict:
+    out = {}
+    for cid in class_names:
+        _, _, ap = _per_class_ap_curve(detections, int(gt_per_class.get(cid, 0)), cid, iou_thr)
+        out[class_names.get(cid, str(cid))] = round(float(ap), 4)
+    return out
+
+
+def _map_at_iou_sweep(detections, gt_per_class, iou_values) -> dict:
+    """mAP computed at a grid of IoU thresholds (COCO 0.5..0.95 step 0.05)."""
+    out = {}
+    for iou in iou_values:
+        aps = []
+        for cid, gt_count in gt_per_class.items():
+            if gt_count == 0:
+                continue
+            _, _, ap = _per_class_ap_curve(detections, int(gt_count), int(cid), float(iou))
+            aps.append(ap)
+        out[f"iou_{iou:.2f}"] = round(float(np.mean(aps)) if aps else 0.0, 4)
+    return out
+
+
+def _best_f1_and_threshold(detections, gt_per_class, class_names, iou_thr) -> dict:
+    """Per-class best-F1 threshold via a 19-point conf sweep."""
+    thresholds = np.linspace(0.05, 0.95, 19)
+    out = {}
+    for cid in class_names:
+        class_dets = [d for d in detections if d["pred_cls"] == cid]
+        gt_count = int(gt_per_class.get(cid, 0))
+        if not class_dets or gt_count == 0:
+            out[class_names.get(cid, str(cid))] = {"threshold": None, "f1": 0.0,
+                                                    "precision": 0.0, "recall": 0.0}
+            continue
+        best = {"threshold": None, "f1": 0.0, "precision": 0.0, "recall": 0.0}
+        for thr in thresholds:
+            kept = [d for d in class_dets if d["score"] >= thr]
+            tp = sum(1 for d in kept if d["best_iou_same_class"] >= iou_thr)
+            fp = len(kept) - tp
+            fn = gt_count - tp
+            prec = tp / (tp + fp) if (tp + fp) else 0.0
+            rec = tp / (tp + fn) if (tp + fn) else 0.0
+            f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
+            if f1 > best["f1"]:
+                best = {"threshold": round(float(thr), 2),
+                        "f1": round(f1, 4),
+                        "precision": round(prec, 4),
+                        "recall": round(rec, 4)}
+        out[class_names.get(cid, str(cid))] = best
+    return out
+
+
+def _plot_pr_curves(detections, gt_per_class, class_names, iou_thr, path: Path) -> Path:
+    """One PR curve per class at the base IoU threshold. AP in legend."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
+    for i, cid in enumerate(sorted(class_names)):
+        gt_count = int(gt_per_class.get(cid, 0))
+        recall, precision, ap = _per_class_ap_curve(detections, gt_count, cid, iou_thr)
+        ax.plot(recall, precision, color=colors[i % 10], lw=1.8,
+                label=f"{class_names.get(cid, str(cid))}  AP={ap:.3f}")
+    ax.set_xlabel("Recall"); ax.set_ylabel("Precision")
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1.02)
+    ax.set_title(f"PR curves per class @ IoU={iou_thr}")
+    ax.grid(alpha=0.3); ax.legend(loc="lower left", fontsize=9)
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
+    return path
+
+
+def _plot_f1_vs_threshold(detections, gt_per_class, class_names, iou_thr, path: Path) -> Path:
+    """F1 vs conf_threshold per class — answers "what threshold to deploy at?"."""
+    thresholds = np.linspace(0.05, 0.95, 19)
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
+    for i, cid in enumerate(sorted(class_names)):
+        class_dets = [d for d in detections if d["pred_cls"] == cid]
+        gt_count = int(gt_per_class.get(cid, 0))
+        if not class_dets or gt_count == 0:
+            continue
+        f1s = []
+        for thr in thresholds:
+            kept = [d for d in class_dets if d["score"] >= thr]
+            tp = sum(1 for d in kept if d["best_iou_same_class"] >= iou_thr)
+            fp = len(kept) - tp
+            fn = gt_count - tp
+            prec = tp / (tp + fp) if (tp + fp) else 0.0
+            rec = tp / (tp + fn) if (tp + fn) else 0.0
+            f1s.append(2 * prec * rec / (prec + rec) if (prec + rec) else 0.0)
+        best_idx = int(np.argmax(f1s))
+        ax.plot(thresholds, f1s, color=colors[i % 10], lw=1.8,
+                label=f"{class_names.get(cid, str(cid))} (best F1={f1s[best_idx]:.2f} @ thr={thresholds[best_idx]:.2f})")
+        ax.axvline(thresholds[best_idx], color=colors[i % 10], ls=":", alpha=0.4)
+    ax.set_xlabel("Confidence threshold"); ax.set_ylabel("F1")
+    ax.set_xlim(0.05, 0.95); ax.set_ylim(0, 1.02)
+    ax.set_title(f"F1 vs confidence threshold per class @ IoU={iou_thr}")
+    ax.grid(alpha=0.3); ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
+    return path
+
+
+def _plot_map_vs_iou(detections, gt_per_class, class_names, path: Path) -> Path:
+    """mAP vs IoU threshold (0.50 → 0.95). Shows localization vs classification bottleneck."""
+    iou_values = np.arange(0.5, 1.0, 0.05)
+    map_values = []
+    for iou in iou_values:
+        aps = []
+        for cid, gt_count in gt_per_class.items():
+            if gt_count == 0: continue
+            _, _, ap = _per_class_ap_curve(detections, int(gt_count), int(cid), float(iou))
+            aps.append(ap)
+        map_values.append(float(np.mean(aps)) if aps else 0.0)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(iou_values, map_values, marker="o", color="#4c72b0", lw=2)
+    for x, y in zip(iou_values, map_values):
+        ax.text(x, y + 0.02, f"{y:.3f}", ha="center", fontsize=8)
+    ax.set_xlabel("IoU threshold")
+    ax.set_ylabel("mAP (mean over classes with ≥1 GT)")
+    ax.set_xlim(0.48, 0.97); ax.set_ylim(0, min(1.05, max(map_values) * 1.3 + 0.1))
+    ax.set_title(
+        f"mAP vs IoU  —  AP50={map_values[0]:.3f}  AP75={map_values[5]:.3f}  "
+        f"AP@[.5:.95]={np.mean(map_values):.3f}"
+    )
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
+    return path
+
+
+def _plot_boxes_per_image(counts: list[int], path: Path) -> Path:
+    """Histogram of #GT boxes per image. Crowdedness diagnostic."""
+    if not counts:
+        return path
+    counts_arr = np.asarray(counts, dtype=np.int32)
+    max_n = max(1, int(counts_arr.max()))
+    bins = np.arange(0, max_n + 2) - 0.5
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.hist(counts_arr, bins=bins, color="#4c72b0", edgecolor="white", linewidth=0.5)
+    ax.set_xlabel("GT boxes per image")
+    ax.set_ylabel("# images")
+    mean = float(counts_arr.mean())
+    median = float(np.median(counts_arr))
+    p95 = float(np.percentile(counts_arr, 95))
+    ax.set_title(
+        f"Boxes per image — mean {mean:.1f} / median {median:.0f} / p95 {p95:.0f} / max {max_n}"
+    )
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
+    return path
+
+
+def _plot_bbox_aspect_ratio(gt_aspect_ratios, class_names, path: Path) -> Path:
+    """Per-class aspect-ratio (w/h) distribution. Reveals shape bias."""
+    flat = [(cid, r) for cid, ratios in gt_aspect_ratios.items() for r in ratios]
+    if not flat:
+        return path
+    # Use log scale for aspect ratio so 0.5 (tall) and 2.0 (wide) are symmetric.
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    bins = np.logspace(np.log10(0.1), np.log10(10.0), 26)
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
+    for i, cid in enumerate(sorted(gt_aspect_ratios.keys())):
+        ratios = gt_aspect_ratios.get(cid, [])
+        if not ratios:
+            continue
+        ax.hist(ratios, bins=bins, alpha=0.55, color=colors[i % 10],
+                label=f"{class_names.get(cid, str(cid))} (n={len(ratios)})")
+    ax.axvline(1.0, color="black", ls="--", lw=1, alpha=0.5)
+    ax.set_xscale("log")
+    ax.set_xlabel("bbox aspect ratio (w / h, log scale)")
+    ax.set_ylabel("count")
+    ax.set_title(
+        "GT bbox aspect-ratio distribution per class  "
+        "(dashed = square; <1 = taller-than-wide; >1 = wider-than-tall)"
+    )
+    ax.legend(fontsize=9); ax.grid(alpha=0.3, which="both")
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path
 
 
@@ -895,9 +1306,7 @@ def _analyze_keypoint(
         with torch.no_grad():
             preds_raw = _dispatch_forward(model, tensor)
         target_sizes = torch.tensor([[input_h, input_w]], device=device)
-        if not hasattr(model, "postprocess"):
-            continue
-        decoded = model.postprocess(preds_raw, conf_threshold, target_sizes)[0]
+        decoded = _dispatch_postprocess(model, preds_raw, conf_threshold, target_sizes)[0]
         pred_kp = np.asarray(decoded.get("keypoints", []), dtype=np.float32).reshape(-1, 3)
 
         # Normalize threshold by GT bbox diagonal (PCK@0.2)

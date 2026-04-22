@@ -396,6 +396,7 @@ class HFValPredictionCallback(TrainerCallback):
         val_ds = val_loader.dataset if val_loader is not None else None
 
         try:
+            training_config = _build_hf_training_config(args, state, model, best_map, test_map)
             run_post_train_artifacts(
                 model=model,
                 save_dir=self.save_dir,
@@ -409,10 +410,57 @@ class HFValPredictionCallback(TrainerCallback):
                 best_conf_threshold=self.best_conf_threshold,
                 log_history_best_map=best_map if best_map > 0 else None,
                 log_history_test_map=test_map,
+                training_config=training_config,
             )
         except Exception as e:
             logger.warning("post-train artifacts skipped: %s", e, exc_info=True)
         return control
+
+
+def _build_hf_training_config(args, state, model, best_map: float, test_map: float | None) -> dict:
+    """Extract a compact training-config snapshot from the HF trainer state.
+
+    Shape matches the contract in the plan: model / training / augmentation / run.
+    Missing fields are set to None — summary.md prints what's available.
+    """
+    inner = getattr(model, "hf_model", None)
+    arch = None
+    params = None
+    if inner is not None:
+        arch = getattr(getattr(inner, "config", None), "model_type", None) or \
+               type(inner).__name__
+        try:
+            params = int(sum(p.numel() for p in inner.parameters() if p.requires_grad))
+        except Exception:
+            params = None
+    best_epoch = None
+    for e in state.log_history:
+        if "eval_map_50" in e and float(e["eval_map_50"]) >= best_map - 1e-9:
+            best_epoch = e.get("epoch"); break
+    return {
+        "model": {"arch": arch, "trainable_params": params,
+                  "input_size": getattr(args, "_input_size", None)},
+        "training": {
+            "backend": "hf",
+            "epochs": getattr(args, "num_train_epochs", None),
+            "batch_size": getattr(args, "per_device_train_batch_size", None),
+            "lr": getattr(args, "learning_rate", None),
+            "optimizer": getattr(args, "optim", None),
+            "scheduler": getattr(args, "lr_scheduler_type", None),
+            "warmup_steps": getattr(args, "warmup_steps", None),
+            "weight_decay": getattr(args, "weight_decay", None),
+            "bf16": getattr(args, "bf16", None),
+            "fp16": getattr(args, "fp16", None),
+            "seed": getattr(args, "seed", None),
+            "max_grad_norm": getattr(args, "max_grad_norm", None),
+        },
+        "run": {
+            "best_val_map_50": round(float(best_map), 4) if best_map else None,
+            "best_epoch": best_epoch,
+            "total_epochs": state.epoch,
+            "test_map_50": round(float(test_map), 4) if test_map is not None else None,
+        },
+    }
 
 
 def _infer_task_from_model(model) -> str:
