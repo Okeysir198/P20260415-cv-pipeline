@@ -475,6 +475,16 @@ class HFValPredictionCallback(TrainerCallback):
                                 self.grid_cols)
                 logger.info("HFValPredictionCallback: saved val_predictions/best.png")
 
+            # Val-set error analysis on best checkpoint — same breakdown as
+            # test, but scoped to the val split so train/val/test all have
+            # matching FP/FN/TP diagnostics.
+            try:
+                self._write_error_analysis(
+                    model, val_ds,
+                    self.save_dir / "val_predictions" / "error_analysis.json")
+            except Exception as e:
+                logger.warning("val error_analysis skipped: %s", e)
+
         if self.test_dataset is not None and len(self.test_dataset) > 0:
             n = len(self.test_dataset)
             k = min(self.best_num_samples, n)

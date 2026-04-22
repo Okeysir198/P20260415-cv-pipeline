@@ -1006,7 +1006,7 @@ def _build_callbacks(
         dpi=data_viz.get("dpi", 120),
     ))
 
-    if data_viz.get("enabled", False):
+    if data_viz.get("enabled", True):
         callbacks.append(HFDataLabelGridCallback(
             save_dir=save_dir, splits=splits,
             data_config=data_config, base_dir=base_dir or "",
@@ -1019,7 +1019,7 @@ def _build_callbacks(
         ))
 
     aug_viz = train_cfg.get("aug_viz", {})
-    if aug_viz.get("enabled", False):
+    if aug_viz.get("enabled", True):
         callbacks.append(HFAugLabelGridCallback(
             save_dir=save_dir,
             splits=aug_viz.get("splits", ["train"]),
@@ -1036,7 +1036,7 @@ def _build_callbacks(
         ))
 
     val_viz = train_cfg.get("val_viz", {})
-    if val_viz.get("enabled", False):
+    if val_viz.get("enabled", True):
         class_names = {int(k): str(v) for k, v in data_config.get("names", {}).items()}
         best_viz = train_cfg.get("best_viz", {})
         callbacks.append(HFValPredictionCallback(
