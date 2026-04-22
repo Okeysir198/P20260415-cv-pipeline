@@ -52,10 +52,64 @@ fast at the top of `train_with_hf` rather than silently degrading.
 | `hf_callbacks.py` | Native `TrainerCallback` subclasses — `HFDatasetStatsCallback`, `HFDataLabelGridCallback`, `HFAugLabelGridCallback`, `HFValPredictionCallback` — that run the same viz outputs as the pytorch backend's `callbacks.py` counterparts but consume HF's documented hook kwargs (`model`, `eval_dataloader`, `state.log_history`) rather than a proxy trainer object. |
 | `train.py` | CLI entry point — `auto_select_gpu`, determinism knobs (CUBLAS env var + `torch.use_deterministic_algorithms(True, warn_only=True)`), 3-warning filter for known-harmless PyTorch messages, dispatches to backend. |
 | `callbacks.py` | `Callback` base class (pytorch backend only), `CheckpointSaver`, `EarlyStopping`, `WandBLogger`, `ValPredictionLogger`, `DatasetStatsLogger`, `DataLabelGridLogger`, `AugLabelGridLogger`, `CallbackRunner`. Also `_run_splits_and_subsets(trainer)` — now iterates train/val/test so the HF bridge's stub test-loader shows up in data_preview. |
+| `callbacks_viz.py` | `NormalizedInputPreviewCallback` — fires once on train-start, denormalizes one collated batch, renders `data_preview/normalized_input_preview.png`. Dual-backend (permissive `_AnyHook` base satisfies both pytorch `CallbackRunner` and HF `CallbackHandler` hook surfaces). |
+| `post_train.py` | Backend-agnostic post-train runner. `run_post_train_artifacts(model, save_dir, val_dataset, test_dataset, task, class_names, input_size, style, training_config, …)` renders best-checkpoint val+test grids and dispatches to `error_analysis_runner`. `render_prediction_grid` is the **single** grid renderer (per-epoch, best, hardest-overview all route here via `annotate_gt_pred`). |
+| `_common.py` | Shared helpers: `unwrap_subset`, `task_from_output_format`, `yolo_targets_to_xyxy`. Dedupes logic that previously had 3 copies across HF + pytorch backends. |
 | `losses.py` | `DetectionLoss` ABC, `YOLOXLoss` (SimOTA), `FocalLoss`, `IoULoss`, `_DETRPassthroughLoss`, registry + `build_loss()`. |
 | `lr_scheduler.py` | `WarmupScheduler`, `CosineScheduler`, `PlateauScheduler`, `StepScheduler`, `OneCycleScheduler` + `build_scheduler()`. |
 | `postprocess.py` | `POSTPROCESSOR_REGISTRY`, YOLOX-only decoding (HF models use built-in `post_process_object_detection`). |
 | `metrics_registry.py` | `METRICS_REGISTRY`, `register_metrics()`, per-format validation metrics dispatch (pytorch backend only). |
+
+## Post-train observability (on `on_train_end`, both backends)
+
+Every training run produces a uniform per-run artifact tree — no per-config opt-in. Driven by `post_train.run_post_train_artifacts` + `core/p08_evaluation/error_analysis_runner.run_error_analysis`.
+
+```
+runs/<ts>/
+├── data_preview/               (on_train_start, ~2 s total)
+│   ├── dataset_stats.{png,json}
+│   ├── data_labels_{train,val,test}.png
+│   ├── aug_labels_train[_mosaic].png
+│   └── normalized_input_preview.png  ← stage-3 sanity: denormalize(batch) + GT
+├── val_predictions/
+│   ├── epochs/epoch_NNN.png    (per-epoch, ~2 s each — the only mid-run hook)
+│   ├── best.png                (on_train_end, best-checkpoint weights)
+│   └── error_analysis/         (task-dispatched; ~10 s total)
+│       ├── summary.{json,md}       3-axis: data_distribution + training_config + model_metrics
+│       ├── data_distribution.png   class count + per-class × size-tier
+│       ├── boxes_per_image.png     crowdedness (mean/median/p95/max)
+│       ├── bbox_aspect_ratio.png   per-class log-scale w/h
+│       ├── per_class_pr_f1.png     P / R / F1 bars
+│       ├── confusion_matrix.png    GT×Pred (last col/row = background)
+│       ├── confidence_calibration.png  TP vs FP score histogram
+│       ├── size_recall.png         small / medium / large with explicit COCO px² thresholds
+│       ├── pr_curves.png           per-class PR curve + AP in legend
+│       ├── f1_vs_threshold.png     per-class F1 sweep + best-F1 threshold marker
+│       ├── map_vs_iou.png          mAP at IoU 0.50 → 0.95 (AP50 / AP75 / AP[.5:.95])
+│       ├── hardest_images.png      top-12 overview
+│       └── hard_images/            per-error-type × per-class GT-vs-Pred galleries
+│           ├── false_positives/<class>/<stem>__fp_score_0.87.png
+│           ├── false_negatives/<class>/<stem>__fn.png
+│           └── class_confusion/<pred>__from__<gt>/<stem>__iou_0.62.png
+├── test_predictions/           same layout as val_predictions/
+└── test_results.json           HF Trainer metrics on the test split
+```
+
+`VizStyle` (core/p10_inference/supervision_bridge.py) is the single source of truth for colors/thickness/text — no per-site drawing constants. `training_config` in `summary.json` snapshots arch / params / lr / optimizer / scheduler / bf16 / best-metric / test-metrics from both backends.
+
+Opt out per block in YAML (all default true):
+```yaml
+training:
+  data_viz:  { enabled: false }
+  aug_viz:   { enabled: false }
+  norm_viz:  { enabled: false }
+  val_viz:   { enabled: false }    # still leaves best_viz + error_analysis on
+  best_viz:  { enabled: false }
+  error_analysis: { enabled: false }
+  post_train: { enabled: false }   # pytorch-backend only: skip best-reload + test eval
+```
+
+**pytorch-backend `_finalize_training`** (trainer.py): on train-end, reloads `best.pth`, auto-builds the test-split loader via `YOLOXDataset(split="test")` with `base_dir=self.config_path.parent` (so `05_data.yaml::path: "../../../dataset_store/..."` resolves correctly), runs `_validate(test_loader)` → writes `test_results.json`, then dispatches to `run_post_train_artifacts`. Brings pytorch backend to parity with HF's `load_best_model_at_end` + auto-test convention.
 
 ## Config templates
 
@@ -156,3 +210,16 @@ Gotchas
   — `core/p00_data_prep/parsers/_image_dims.py::actual_image_dims`. Verified
   necessary: ~6% of CPPE-5 validation rows have wrong HF metadata width/height.
   Use this helper in any new COCO/VOC/HF-dataset parser.
+- **HF detection analyzer requires `model.processor`**: the error-analysis
+  runner calls `_preprocess_for_model(image, input_size, model=model)`, which
+  delegates to `model.processor` (HF `AutoImageProcessor`) when present.
+  Without this path, DETR-family decoders receive un-normalized [0, 1] inputs
+  and produce **zero predictions** — summary.json shows all-FN, pr_curves are
+  empty, best.png shows only GT boxes. `HFDetectionModel` sets `self.processor`
+  in `build_hf_model`; any new HF detection wrapper MUST do the same or wire
+  a custom preprocess path. YOLOX (`output_format == "yolox"`) bypasses this
+  and feeds raw [0, 255] to match the Megvii recipe.
+- **`self.save_dir` is an instance attribute** (set inside `_build_callbacks`)
+  so `_finalize_training` and `_build_pytorch_training_config` can read it
+  after the main loop. Do not convert it back to a local variable — it's the
+  only link between the callback setup phase and post-train finalization.

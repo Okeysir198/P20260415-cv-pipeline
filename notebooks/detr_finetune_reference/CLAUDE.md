@@ -16,11 +16,12 @@ our in-repo pipeline can't make a DETR-family model converge.
 ├── reference_rtdetr_v2/            qubvel's RT-DETRv2 reference (.py port of .ipynb)
 ├── reference_dfine/                qubvel's D-FINE reference     (.py port of .ipynb)
 │
-├── our_rtdetr_v2_albumentations/   our pipeline, RT-DETRv2, Albu
-├── our_rtdetr_v2_torchvision/      our pipeline, RT-DETRv2, torchvision v2
+├── our_rtdetr_v2_albumentations/   our pipeline, RT-DETRv2-R50, Albu
+├── our_rtdetr_v2_torchvision/      our pipeline, RT-DETRv2-R50, torchvision v2
 ├── our_dfine_albumentations/       our pipeline, D-FINE-n, Albu
 ├── our_dfine_torchvision/          our pipeline, D-FINE-n, torchvision v2
-└── our_yolox/                      placeholder
+├── our_yolox/                      our pipeline, YOLOX-m (official), Albu, 50 ep
+└── our_yolox_torchvision/          our pipeline, YOLOX-m (official), TV + Mosaic + MixUp, 100 ep
 ```
 
 Two-kind folder convention:
@@ -49,42 +50,45 @@ CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
   --config notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training.yaml
 ```
 
-## Results — current truth (2026-04-22)
+## Results — 6-way CPPE-5 reference reproduction (seed=42, 2026-04-23)
 
-### RT-DETRv2 on CPPE-5 (seed=42, 40 ep, bs=16, lr=1e-4, bf16, cosine, WD=1e-4)
+All six `our_*/` runs were rerun sequentially on 2 GPUs (one model per GPU, 3 batches) after the observability overhaul landed. Configs use codebase defaults for every viz block (see `core/p06_training/CLAUDE.md` → "Post-train observability").
 
-| Run | Backbone | Params | test_mAP | test_mAP₅₀ | Δ vs qubvel | runtime |
+### Detection performance
+
+| Run | Backend | Arch | Epochs | Aug | test_mAP | test_mAP₅₀ |
 |---|---|---|---|---|---|---|
-| qubvel published | R50 | 42M | 0.5789 | 0.8674 | — | — |
-| `reference_rtdetr_v2/` port | R50 | 42M | 0.5464 | 0.8043 | −0.033 | 617 s |
-| our_torchvision | R50 | 42M | 0.5607 | 0.8237 | −0.018 | 568 s |
-| **our_albumentations** | **R50** | **42M** | **0.5698** | 0.8226 | **−0.009** | 667 s |
-| our_torchvision (R18) | R18 | 20M | 0.5389 | 0.7374 | −0.040 | 507 s |
-| our_albumentations (R18) | R18 | 20M | 0.5160 | 0.7249 | −0.063 | 619 s |
+| qubvel RT-DETRv2 | — | R50 | 40 | Albu basic | 0.5789 | 0.8674 |
+| qubvel D-FINE | — | dfine-large | 30 | Albu basic | 0.4485 | — |
+| **our_rtdetr_v2_torchvision** | HF | R50 | 40 | torchvision v2 | **0.5600** | **0.8231** |
+| **our_rtdetr_v2_albumentations** | HF | R50 | 40 | Albumentations | **0.5483** | **0.8264** |
+| **our_dfine_torchvision** | HF | dfine-n | 30 | torchvision v2 | **0.4532** | **0.6828** |
+| **our_dfine_albumentations** | HF | dfine-n | 30 | Albumentations | **0.4473** | **0.6778** |
+| **our_yolox_torchvision** | pytorch | yolox-m (official) | 100 | TV + Mosaic + MixUp | — | **0.8668** |
+| **our_yolox** | pytorch | yolox-m (official) | 50 | Albumentations | — | **0.7388** |
 
-All R50 runs within ±0.03 of qubvel — pipeline is empirically indistinguishable
-from reference. **R18 trails R50 by ~0.04** — unlike D-FINE, RT-DETRv2 is not
-over-parameterized at R50 for CPPE-5; the R50 backbone carries real signal.
+Takeaways:
+- **RT-DETRv2-R50** is the strongest DETR recipe on CPPE-5 — inside ±0.03 of qubvel on both aug libraries. Default for Phase 2 features.
+- **D-FINE-n** beats `reference_dfine/` port (0.4294) at 4M params vs 80M. Both our D-FINE configs pin `arch: dfine-n`; do not use `dfine-large` on sub-2k-image training sets.
+- **YOLOX-m + Mosaic + MixUp + 100 ep** (our_yolox_torchvision) scores **val mAP₅₀ 0.867** — highest of any run in this folder. Wins when speed matters more than test-split framing.
 
-**Default for Phase 2 (fire/helmet/PPE features)**: RT-DETRv2-R50.
+### Capacity heuristic (CPPE-5 = 850 train images)
 
-### D-FINE on CPPE-5 (seed=42, 30 ep, bs=8, lr=5e-5, fp32, linear, WD=0)
+| Family | Variant | Params | test_mAP₅₀ |
+|---|---|---|---|
+| YOLOX (Mosaic, 100 ep) | m | 25M | **0.867** |
+| RT-DETRv2 | R50 | 42M | **0.823–0.826** |
+| D-FINE | **n** | **4M** | **0.677–0.683** |
+| RT-DETRv2 | R18 | 20M | 0.72–0.73 (earlier runs) |
+| D-FINE | large | 80M | 0.38–0.49 (overfits) |
 
-**D-FINE-n (4M params) beats D-FINE-large (80M params) on this dataset.**
-850-image CPPE-5 train split is under-determined for 80M params — the
-smaller variant generalizes better.
+Sweet spot for CPPE-5-scale (~1k-image) detection: 4M–42M params. Above that overfits; below that still works if the loss geometry is right (dfine-n's distribution focal).
 
-| Run | Arch | Params | test_mAP | test_mAP₅₀ | Goggles | runtime |
-|---|---|---|---|---|---|---|
-| qubvel published | dfine-large | 80M | 0.4485 | — | — | — |
-| `reference_dfine/` port | dfine-large | 80M | 0.4294 | 0.617 | — | ~1100 s |
-| our, dfine-large 5-seed mean | dfine-large | 80M | 0.383 ± 0.042 | — | 0.17 | — |
-| **our, dfine-n Albu** | **dfine-n** | **4M** | **0.4781** | **0.697** | **0.271** | **583 s** |
-| **our, dfine-n TV** | **dfine-n** | **4M** | **0.4685** | 0.680 | 0.268 | 497 s |
+## Per-run observability (every run)
 
-Both dfine-n runs **beat qubvel's dfine-large** (+0.020–0.030 test_mAP),
-with 20× fewer params in half the wall-time. Both `our_dfine_*/06_training.yaml`
-default to `arch: dfine-n`.
+Each `our_*/runs/seed42/` now holds a full 3-axis report — identical layout on both backends. See `core/p06_training/CLAUDE.md` for the tree + config toggles. Expect ~2–3 GB per run (checkpoints + preview PNGs + error_analysis gallery).
+
+Known gotcha: `_finalize_training` on HF backend can create a stray `notebooks/.../runs/` nested dir when `logging.save_dir` is relative and the override path contains `notebooks/`. Safe to `rm -rf our_*/notebooks/` post-hoc — the real artifacts live under `runs/seed42/`.
 
 ### Capacity vs dataset-size heuristic (CPPE-5 has 850 train images)
 

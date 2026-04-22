@@ -21,6 +21,12 @@ uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs
 uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml --dry-run
 
 # Train (each feature has arch-specific configs: 06_training_{yolox,rtdetr,dfine}.yaml)
+#   Every run auto-produces the full observability tree on on_train_end:
+#     <save_dir>/{best.pt, test_results.json,
+#                 data_preview/{dataset_stats,label_grids,aug_preview,normalized_input_preview},
+#                 val_predictions/{epochs/, best.png, error_analysis/{11 charts, hard_images/}},
+#                 test_predictions/{best.png, error_analysis/...}}
+#   Details + opt-out knobs: core/p06_training/CLAUDE.md
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml \
   --override training.lr=0.005 training.epochs=100

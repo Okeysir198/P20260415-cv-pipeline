@@ -15,7 +15,7 @@ Most phases expose a CLI under `run_*.py`; p05/p06_models/p10 are library-only. 
 | **p04** Label Studio bridge | `core/p04_label_studio/bridge.py` (subcommands `setup`, `import`, `export`) | `05_data.yaml`, LS REST API, `LS_API_KEY` env | LS project tasks on import; YOLO `.txt` over `labels/` on export |
 | **p05** data | library only — `YOLOXDataset`, `ClassificationDataset`, `SegmentationDataset`, `KeypointDataset` | `05_data.yaml` + split dirs | in-memory `Dataset` / `DataLoader` |
 | **p06_models** | library only — `build_model(config)` | `config["model"]["arch"]` | `nn.Module` |
-| **p06_training** | `core/p06_training/train.py` | `06_training.yaml` (refs `05_data.yaml` by filename) | `features/<f>/runs/<ds>/<ts>/{best.pt, last.pt}` (or absolute `save_dir`) |
+| **p06_training** | `core/p06_training/train.py` | `06_training.yaml` (refs `05_data.yaml` by filename) | `<save_dir>/{best.pt, last.pt, test_results.json, data_preview/, val_predictions/{epochs/, best.png, error_analysis/}, test_predictions/{best.png, error_analysis/}}` — full 3-axis observability tree produced on `on_train_end` (both backends). See `core/p06_training/CLAUDE.md` for the artifact map. |
 | **p07** HPO | `core/p07_hpo/run_hpo.py` | `06_training.yaml` + shared `08_hyperparameter_tuning.yaml` | `features/<f>/runs/hpo/<ds>/{study.pkl, best_config.yaml}` |
 | **p08** evaluation | `core/p08_evaluation/evaluate.py` | a `.pt` checkpoint + `05_data.yaml` | `metrics.json`, PR curves, confusion matrix |
 | **p09** export | `core/p09_export/export.py` | a `.pt` + `06_training.yaml` | `<save_dir>/<name>.onnx` |
