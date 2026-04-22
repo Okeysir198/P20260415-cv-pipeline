@@ -345,14 +345,24 @@ def _analyze_detection(
                 confidence_tp.append(float(ps[bi]))
                 img_tp += 1
             elif best_iou >= iou_threshold and best_j >= 0 and gt_cls[best_j] != pl[bi]:
-                # Class confusion: localized on wrong class
+                # Class confusion: localized correctly but wrong class.
+                # Count as FP for the predicted class AND FN for the GT's true
+                # class, so per_class TP+FN totals equal GT counts per class
+                # (otherwise the analyzer silently drops ~1–2% of GT from the
+                # denominator, causing precision/recall to drift vs HF eval).
                 matched_gt[best_j] = True
                 per_class[int(pl[bi])]["fp"] += 1
                 size_stats[size]["fp"] += 1
-                confusion[int(gt_cls[best_j]), int(pl[bi])] += 1
+                gt_true_cls = int(gt_cls[best_j])
+                per_class[gt_true_cls]["fn"] += 1
+                gt_area = max(0.0, (gt_xyxy[best_j, 2] - gt_xyxy[best_j, 0])) * \
+                          max(0.0, (gt_xyxy[best_j, 3] - gt_xyxy[best_j, 1]))
+                size_stats[_size_category(gt_area)]["fn"] += 1
+                confusion[gt_true_cls, int(pl[bi])] += 1
                 confidence_fp.append(float(ps[bi]))
                 img_fp += 1
-                key = (int(gt_cls[best_j]), int(pl[bi]))
+                img_fn += 1
+                key = (gt_true_cls, int(pl[bi]))
                 conf_gallery.setdefault(key, []).append({
                     "image_idx": int(real_idx),
                     "path": raw.get("path", ""),
@@ -435,9 +445,11 @@ def _analyze_detection(
     # Model-performance (axis 3)
     artifacts["per_class_pr_f1"] = _plot_per_class_pr_f1(
         per_class, class_names, output_dir / "per_class_pr_f1.png",
+        conf_threshold=conf_threshold,
     )
     artifacts["confusion_matrix"] = _plot_confusion_matrix(
         confusion, class_names, output_dir / "confusion_matrix.png",
+        conf_threshold=conf_threshold,
     )
     artifacts["confidence_calibration"] = _plot_confidence_hist(
         confidence_tp, confidence_fp, output_dir / "confidence_calibration.png",
@@ -569,7 +581,8 @@ def _summarize_detection(per_class, size_stats, tp_scores, fp_scores, class_name
     }
 
 
-def _plot_per_class_pr_f1(per_class, class_names, path: Path) -> Path:
+def _plot_per_class_pr_f1(per_class, class_names, path: Path,
+                           conf_threshold: float | None = None) -> Path:
     names = [class_names.get(cid, str(cid)) for cid in per_class]
     tp = np.array([c["tp"] for c in per_class.values()], dtype=np.float32)
     fp = np.array([c["fp"] for c in per_class.values()], dtype=np.float32)
@@ -578,32 +591,49 @@ def _plot_per_class_pr_f1(per_class, class_names, path: Path) -> Path:
     rec = np.where(tp + fn > 0, tp / (tp + fn + 1e-9), 0)
     f1 = np.where(prec + rec > 0, 2 * prec * rec / (prec + rec + 1e-9), 0)
 
-    fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.1), 5))
+    fig, ax = plt.subplots(figsize=(max(9, len(names) * 1.2), 5.5))
     x = np.arange(len(names))
     w = 0.28
-    ax.bar(x - w, prec, w, label="Precision", color="#4c72b0")
-    ax.bar(x,     rec,  w, label="Recall",    color="#55a868")
-    ax.bar(x + w, f1,   w, label="F1",         color="#c44e52")
+    ax.bar(x - w, prec, w, label="Precision = TP/(TP+FP)", color="#4c72b0")
+    ax.bar(x,     rec,  w, label="Recall = TP/(TP+FN)",    color="#55a868")
+    ax.bar(x + w, f1,   w, label="F1 = harmonic mean",       color="#c44e52")
+    for i, (p_val, r_val, f_val) in enumerate(zip(prec, rec, f1)):
+        ax.text(i - w, p_val + 0.02, f"{p_val:.2f}", ha="center", fontsize=7)
+        ax.text(i,     r_val + 0.02, f"{r_val:.2f}", ha="center", fontsize=7)
+        ax.text(i + w, f_val + 0.02, f"{f_val:.2f}", ha="center", fontsize=7)
     ax.set_xticks(x); ax.set_xticklabels(names, rotation=30, ha="right")
-    ax.set_ylim(0, 1.05); ax.set_ylabel("score")
-    ax.set_title("Per-class Precision / Recall / F1")
-    ax.legend(loc="upper right"); ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
+    ax.set_ylim(0, 1.15); ax.set_ylabel("score (0 = worst, 1 = perfect)")
+    title = "Per-class Precision / Recall / F1"
+    if conf_threshold is not None:
+        title += f"  (conf ≥ {conf_threshold}, IoU ≥ 0.5)"
+    ax.set_title(title)
+    ax.legend(loc="upper right", fontsize=9); ax.grid(axis="y", alpha=0.3)
+    fig.text(0.02, 0.01,
+             "Higher bars = better. Precision low → too many false alarms. "
+             "Recall low → missing real objects. See pr_curves.png for the tradeoff, "
+             "f1_vs_threshold.png for the optimal per-class threshold.",
+             fontsize=8, style="italic")
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def _plot_confusion_matrix(cm: np.ndarray, class_names: dict[int, str], path: Path) -> Path:
+def _plot_confusion_matrix(cm: np.ndarray, class_names: dict[int, str],
+                            path: Path, conf_threshold: float | None = None) -> Path:
     labels = [class_names.get(cid, str(cid)) for cid in class_names] + ["(none)"]
-    fig, ax = plt.subplots(figsize=(max(6, len(labels) * 0.8), max(5, len(labels) * 0.7)))
+    fig, ax = plt.subplots(figsize=(max(7, len(labels) * 0.9), max(6, len(labels) * 0.8)))
     im = ax.imshow(cm, cmap="Blues", aspect="auto")
     ax.set_xticks(range(len(labels))); ax.set_xticklabels(labels, rotation=35, ha="right")
     ax.set_yticks(range(len(labels))); ax.set_yticklabels(labels)
-    ax.set_xlabel("Predicted"); ax.set_ylabel("Ground-truth")
-    ax.set_title("Confusion matrix (rows: GT class; cols: pred class; last = none)")
-    fig.colorbar(im, ax=ax)
+    ax.set_xlabel("Predicted class (last column = missed / no prediction)")
+    ax.set_ylabel("Ground-truth class (last row = background / no GT)")
+    title = "Confusion matrix"
+    if conf_threshold is not None:
+        title += f"  (conf ≥ {conf_threshold}, IoU ≥ 0.5)"
+    ax.set_title(title)
+    fig.colorbar(im, ax=ax, label="count")
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
             v = cm[i, j]
@@ -611,7 +641,12 @@ def _plot_confusion_matrix(cm: np.ndarray, class_names: dict[int, str], path: Pa
                 continue
             ax.text(j, i, str(int(v)), ha="center", va="center",
                     color="white" if v > cm.max() / 2 else "black", fontsize=9)
-    fig.tight_layout()
+    # Caption at bottom
+    fig.text(0.02, 0.01,
+             "Diagonal = correct class (TP). Off-diagonal (non-last) = class confusion. "
+             "Last col (→ none) = missed GT (FN). Last row (none →) = background FP.",
+             fontsize=8, style="italic", wrap=True)
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -619,16 +654,30 @@ def _plot_confusion_matrix(cm: np.ndarray, class_names: dict[int, str], path: Pa
 
 
 def _plot_confidence_hist(tp_scores: list[float], fp_scores: list[float], path: Path) -> Path:
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(9, 5.5))
     bins = np.linspace(0, 1, 21)
+    tp_mean = float(np.mean(tp_scores)) if tp_scores else 0.0
+    fp_mean = float(np.mean(fp_scores)) if fp_scores else 0.0
     if tp_scores:
-        ax.hist(tp_scores, bins=bins, alpha=0.6, label=f"TP (n={len(tp_scores)})", color="#55a868")
+        ax.hist(tp_scores, bins=bins, alpha=0.6,
+                label=f"TP — correct detections (n={len(tp_scores)}, mean={tp_mean:.2f})",
+                color="#55a868")
+        ax.axvline(tp_mean, color="#2d6a4f", ls="--", lw=1, alpha=0.7)
     if fp_scores:
-        ax.hist(fp_scores, bins=bins, alpha=0.6, label=f"FP (n={len(fp_scores)})", color="#c44e52")
-    ax.set_xlabel("Confidence"); ax.set_ylabel("Count")
-    ax.set_title("Confidence calibration — TP vs FP score distribution")
-    ax.grid(alpha=0.3); ax.legend()
-    fig.tight_layout()
+        ax.hist(fp_scores, bins=bins, alpha=0.6,
+                label=f"FP — wrong / spurious detections (n={len(fp_scores)}, mean={fp_mean:.2f})",
+                color="#c44e52")
+        ax.axvline(fp_mean, color="#9d0208", ls="--", lw=1, alpha=0.7)
+    ax.set_xlabel("Prediction confidence score (sigmoid output)")
+    ax.set_ylabel("# of detections")
+    ax.set_title("Confidence calibration — are wrong predictions less confident than right ones?")
+    ax.grid(alpha=0.3); ax.legend(loc="upper right", fontsize=9)
+    fig.text(0.02, 0.01,
+             "Well-calibrated model: FP histogram mass shifts LEFT of TP (FP mean < TP mean). "
+             "Overlapping histograms → the model has no confident way to tell TPs from FPs; "
+             "no single threshold will cleanly separate them. Dashed lines = class means.",
+             fontsize=8, style="italic", wrap=True)
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -643,18 +692,24 @@ def _plot_size_recall(size_stats: dict, path: Path) -> Path:
         tp = size_stats[t]["tp"]; fp = size_stats[t]["fp"]; fn = size_stats[t]["fn"]
         rec.append(tp / (tp + fn) if (tp + fn) else 0.0)
         prec.append(tp / (tp + fp) if (tp + fp) else 0.0)
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(9, 5.5))
     x = np.arange(3); w = 0.4
-    ax.bar(x - w/2, prec, w, label="Precision", color="#4c72b0")
-    ax.bar(x + w/2, rec,  w, label="Recall",    color="#55a868")
+    pbars = ax.bar(x - w/2, prec, w, label="Precision (TP/(TP+FP))", color="#4c72b0")
+    rbars = ax.bar(x + w/2, rec,  w, label="Recall (TP/(TP+FN))",    color="#55a868")
+    # Value labels on each bar
+    for bars, vals in [(pbars, prec), (rbars, rec)]:
+        for b, v in zip(bars, vals):
+            ax.text(b.get_x() + b.get_width()/2, v + 0.015, f"{v:.2f}",
+                    ha="center", va="bottom", fontsize=9)
+    # TP/FP/FN counts at top of each tier
     for i, t in enumerate(tiers):
         c = size_stats[t]
-        ax.text(i, 1.02, f"TP {c['tp']} FP {c['fp']} FN {c['fn']}", ha="center", fontsize=9)
+        ax.text(i, 1.08, f"TP {c['tp']}   FP {c['fp']}   FN {c['fn']}",
+                ha="center", fontsize=9, weight="bold")
     ax.set_xticks(x)
-    # Explicit thresholds in the tick labels so readers know what "small" means
     ax.set_xticklabels([SIZE_TIER_LABELS[t] for t in tiers], fontsize=9)
-    ax.set_ylim(0, 1.2); ax.set_ylabel("score")
-    ax.set_title("Size-stratified recall / precision (COCO tiers, box area in pixels²)")
+    ax.set_ylim(0, 1.25); ax.set_ylabel("score (0 = worst, 1 = perfect)")
+    ax.set_title("Size-stratified detection performance (COCO box-area tiers)")
     ax.legend(loc="lower right"); ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -693,11 +748,17 @@ def _plot_data_distribution(
     ax1.set_title(f"Class distribution (total GT boxes = {total})")
     ax1.grid(axis="y", alpha=0.3)
 
-    # Right: stacked by COCO size tier
+    # Right: stacked by COCO size tier with per-segment numbers
     ax2.bar(x, small, label=SIZE_TIER_LABELS["small"], color="#dd8452")
     ax2.bar(x, medium, bottom=small, label=SIZE_TIER_LABELS["medium"], color="#8172b3")
     bottom_ml = [s + m for s, m in zip(small, medium)]
     ax2.bar(x, large, bottom=bottom_ml, label=SIZE_TIER_LABELS["large"], color="#64b5cd")
+    for i, (s_n, m_n, l_n) in enumerate(zip(small, medium, large)):
+        tot = s_n + m_n + l_n
+        if s_n > 0: ax2.text(i, s_n / 2, str(int(s_n)), ha="center", va="center", fontsize=8, color="white")
+        if m_n > 0: ax2.text(i, s_n + m_n / 2, str(int(m_n)), ha="center", va="center", fontsize=8, color="white")
+        if l_n > 0: ax2.text(i, s_n + m_n + l_n / 2, str(int(l_n)), ha="center", va="center", fontsize=8, color="white")
+        if tot > 0: ax2.text(i, tot + max(totals) * 0.02, str(int(tot)), ha="center", fontsize=9)
     ax2.set_xticks(x); ax2.set_xticklabels(names, rotation=30, ha="right")
     ax2.set_ylabel("GT box count")
     ax2.set_title("Per-class × per-size-tier distribution")
@@ -773,8 +834,8 @@ def _map_at_iou_sweep(detections, gt_per_class, iou_values) -> dict:
 
 
 def _best_f1_and_threshold(detections, gt_per_class, class_names, iou_thr) -> dict:
-    """Per-class best-F1 threshold via a 19-point conf sweep."""
-    thresholds = np.linspace(0.05, 0.95, 19)
+    """Per-class best-F1 threshold via a fine conf sweep (step 0.01)."""
+    thresholds = np.round(np.arange(0.01, 1.00, 0.01), 3)
     out = {}
     for cid in class_names:
         class_dets = [d for d in detections if d["pred_cls"] == cid]
@@ -803,27 +864,42 @@ def _best_f1_and_threshold(detections, gt_per_class, class_names, iou_thr) -> di
 
 def _plot_pr_curves(detections, gt_per_class, class_names, iou_thr, path: Path) -> Path:
     """One PR curve per class at the base IoU threshold. AP in legend."""
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(9, 6.5))
     colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
+    aps = []
     for i, cid in enumerate(sorted(class_names)):
         gt_count = int(gt_per_class.get(cid, 0))
         recall, precision, ap = _per_class_ap_curve(detections, gt_count, cid, iou_thr)
+        aps.append(ap)
         ax.plot(recall, precision, color=colors[i % 10], lw=1.8,
-                label=f"{class_names.get(cid, str(cid))}  AP={ap:.3f}")
-    ax.set_xlabel("Recall"); ax.set_ylabel("Precision")
+                label=f"{class_names.get(cid, str(cid))}  AP@{iou_thr}={ap:.3f}")
+    mean_ap = float(np.mean(aps)) if aps else 0.0
+    ax.set_xlabel("Recall (= TP / total GT = how many real objects found)")
+    ax.set_ylabel("Precision (= TP / TP+FP = how often detections are correct)")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1.02)
-    ax.set_title(f"PR curves per class @ IoU={iou_thr}")
-    ax.grid(alpha=0.3); ax.legend(loc="lower left", fontsize=9)
-    fig.tight_layout()
+    ax.set_title(f"Precision–Recall curves per class @ IoU ≥ {iou_thr}   "
+                  f"mean AP = {mean_ap:.3f}")
+    ax.grid(alpha=0.3); ax.legend(loc="lower left", fontsize=9,
+                                   title="Area under curve = AP (bigger = better)")
+    fig.text(0.02, 0.01,
+             "Curves are generated by sweeping confidence from 1.0 → 0.0 and plotting each "
+             "(recall, precision) point. A curve hugging the top-right = strong model. "
+             "Curves dropping sharply = confidence poorly separates TPs from FPs.",
+             fontsize=8, style="italic", wrap=True)
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path
 
 
 def _plot_f1_vs_threshold(detections, gt_per_class, class_names, iou_thr, path: Path) -> Path:
-    """F1 vs conf_threshold per class — answers "what threshold to deploy at?"."""
-    thresholds = np.linspace(0.05, 0.95, 19)
-    fig, ax = plt.subplots(figsize=(9, 5.5))
+    """F1 vs conf_threshold per class — answers "what threshold to deploy at?".
+
+    Uses a fine step (0.01) across [0.01, 0.99] so the per-class optimum is
+    located precisely; the summary JSON mirrors the chart's best threshold.
+    """
+    thresholds = np.round(np.arange(0.01, 1.00, 0.01), 3)
+    fig, ax = plt.subplots(figsize=(10, 6))
     colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
     for i, cid in enumerate(sorted(class_names)):
         class_dets = [d for d in detections if d["pred_cls"] == cid]
@@ -841,13 +917,21 @@ def _plot_f1_vs_threshold(detections, gt_per_class, class_names, iou_thr, path: 
             f1s.append(2 * prec * rec / (prec + rec) if (prec + rec) else 0.0)
         best_idx = int(np.argmax(f1s))
         ax.plot(thresholds, f1s, color=colors[i % 10], lw=1.8,
-                label=f"{class_names.get(cid, str(cid))} (best F1={f1s[best_idx]:.2f} @ thr={thresholds[best_idx]:.2f})")
-        ax.axvline(thresholds[best_idx], color=colors[i % 10], ls=":", alpha=0.4)
-    ax.set_xlabel("Confidence threshold"); ax.set_ylabel("F1")
+                label=f"{class_names.get(cid, str(cid))} → best F1={f1s[best_idx]:.2f} at conf={thresholds[best_idx]:.2f}")
+        ax.axvline(thresholds[best_idx], color=colors[i % 10], ls=":", alpha=0.5)
+        ax.scatter([thresholds[best_idx]], [f1s[best_idx]], color=colors[i % 10], s=30, zorder=5)
+    ax.set_xlabel("Confidence threshold applied at inference")
+    ax.set_ylabel("F1 score (= harmonic mean of precision & recall)")
     ax.set_xlim(0.05, 0.95); ax.set_ylim(0, 1.02)
-    ax.set_title(f"F1 vs confidence threshold per class @ IoU={iou_thr}")
-    ax.grid(alpha=0.3); ax.legend(loc="best", fontsize=8)
-    fig.tight_layout()
+    ax.set_title(f"F1 vs confidence threshold per class @ IoU ≥ {iou_thr}")
+    ax.grid(alpha=0.3); ax.legend(loc="best", fontsize=9,
+                                   title="Deploy each class at its peak (dotted line)")
+    fig.text(0.02, 0.01,
+             "For deployment, pick the per-class confidence threshold that maximizes F1. "
+             "Falling F1 at high threshold = too few detections (recall↓). "
+             "Falling F1 at low threshold = too many false alarms (precision↓).",
+             fontsize=8, style="italic", wrap=True)
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path
@@ -865,19 +949,26 @@ def _plot_map_vs_iou(detections, gt_per_class, class_names, path: Path) -> Path:
             aps.append(ap)
         map_values.append(float(np.mean(aps)) if aps else 0.0)
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(iou_values, map_values, marker="o", color="#4c72b0", lw=2)
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    ax.plot(iou_values, map_values, marker="o", color="#4c72b0", lw=2,
+            label="mAP at this IoU threshold")
     for x, y in zip(iou_values, map_values):
-        ax.text(x, y + 0.02, f"{y:.3f}", ha="center", fontsize=8)
-    ax.set_xlabel("IoU threshold")
+        ax.text(x, y + 0.025, f"{y:.3f}", ha="center", fontsize=8)
+    # Reference markers for AP50, AP75, AP[.5:.95]
+    ap50 = map_values[0]; ap75 = map_values[5]; ap = float(np.mean(map_values))
+    ax.axhline(ap, color="gray", ls="--", lw=1, alpha=0.5, label=f"COCO AP (mean) = {ap:.3f}")
+    ax.set_xlabel("IoU threshold (how tight pred box must match GT box)")
     ax.set_ylabel("mAP (mean over classes with ≥1 GT)")
     ax.set_xlim(0.48, 0.97); ax.set_ylim(0, min(1.05, max(map_values) * 1.3 + 0.1))
-    ax.set_title(
-        f"mAP vs IoU  —  AP50={map_values[0]:.3f}  AP75={map_values[5]:.3f}  "
-        f"AP@[.5:.95]={np.mean(map_values):.3f}"
-    )
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
+    ax.set_title(f"mAP vs IoU   —   AP50 = {ap50:.3f}   AP75 = {ap75:.3f}   "
+                  f"AP@[.5:.95] = {ap:.3f} (COCO metric)")
+    ax.grid(alpha=0.3); ax.legend(loc="upper right", fontsize=9)
+    fig.text(0.02, 0.01,
+             "Flat curve (0.50 → 0.75) = good localization — boxes align well with GT. "
+             "Steep drop = boxes are 'close but not tight'. "
+             "AP50 ≈ 'found the right objects'. AP75 ≈ 'found them with precise boxes'.",
+             fontsize=8, style="italic", wrap=True)
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
     return path

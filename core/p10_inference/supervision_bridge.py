@@ -360,23 +360,27 @@ def annotate_gt_pred(
 
 
 def draw_gt_pred_legend(image: np.ndarray, gt_bgr: tuple, pred_bgr: tuple) -> np.ndarray:
-    """Overlay a small legend: GT color solid thick, Pred color solid thin.
-
-    Args:
-        image: BGR image to draw on (modified in-place on a copy).
-        gt_bgr: GT box color as BGR tuple.
-        pred_bgr: Pred box color as BGR tuple.
-
-    Returns:
-        Image with legend drawn.
+    """Overlay a legend: GT (thick solid), Pred (thin solid) with black backing
+    so the swatches are readable on both light and dark images.
     """
     import cv2
     img = image.copy()
-    font, margin, line_len, y = cv2.FONT_HERSHEY_SIMPLEX, 6, 30, 16
-    cv2.line(img, (margin, y), (margin + line_len, y), gt_bgr, 2, cv2.LINE_AA)
-    cv2.putText(img, "GT", (margin + line_len + 4, y + 4), font, 0.4, gt_bgr, 1)
-    cv2.line(img, (margin, y + 18), (margin + line_len, y + 18), pred_bgr, 1, cv2.LINE_AA)
-    cv2.putText(img, "Pred", (margin + line_len + 4, y + 22), font, 0.4, pred_bgr, 1)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    pad, line_len, w_bar = 6, 34, 80
+    y0 = 10
+    # Semi-transparent black backing for readability
+    overlay = img.copy()
+    cv2.rectangle(overlay, (pad - 3, y0 - 4), (pad + line_len + w_bar, y0 + 32),
+                  (0, 0, 0), -1)
+    img = cv2.addWeighted(overlay, 0.55, img, 0.45, 0)
+    # GT — thick line
+    cv2.line(img, (pad, y0 + 6), (pad + line_len, y0 + 6), gt_bgr, 3, cv2.LINE_AA)
+    cv2.putText(img, "GT (thick)", (pad + line_len + 4, y0 + 10), font, 0.42,
+                (255, 255, 255), 1, cv2.LINE_AA)
+    # Pred — thin line
+    cv2.line(img, (pad, y0 + 22), (pad + line_len, y0 + 22), pred_bgr, 1, cv2.LINE_AA)
+    cv2.putText(img, "Pred (thin)", (pad + line_len + 4, y0 + 26), font, 0.42,
+                (255, 255, 255), 1, cv2.LINE_AA)
     return img
 
 
