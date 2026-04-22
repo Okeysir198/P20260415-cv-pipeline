@@ -488,6 +488,10 @@ def train_with_hf(
         data_config, config, output_format, base_dir,
         image_processor=_ip,
     )
+    # Build test dataset up-front so the val-prediction callback can render
+    # best-checkpoint predictions on it (on_train_end). `None` when no test
+    # split exists — callback handles that case gracefully.
+    test_dataset = _try_build_test_dataset(data_config, config, output_format, base_dir)
 
     # Map our config → HF TrainingArguments
     training_args = _config_to_training_args(config, output_format, config_path)
@@ -543,6 +547,7 @@ def train_with_hf(
         base_dir=base_dir,
         save_dir=training_args.output_dir,
         subset_map=subset_map,
+        test_dataset=test_dataset,
     )
 
     # Create HF Trainer. Detection uses a subclass that avoids safetensors'
@@ -575,10 +580,8 @@ def train_with_hf(
 
     # Final test-set eval, matching the reference notebook's
     # `trainer.evaluate(eval_dataset=test_dataset, metric_key_prefix="eval")`
-    # call. Only attempted for tasks that have a functioning eval path on
-    # the HF backend (detection / classification / segmentation) and when a
-    # `test` split is actually present on disk.
-    test_dataset = _try_build_test_dataset(data_config, config, output_format, base_dir)
+    # call. `test_dataset` was built earlier (before _build_callbacks so
+    # val-prediction callback could render best-checkpoint grids on it).
     if test_dataset is not None:
         logger.info("Running final test-set evaluation on best checkpoint...")
         try:
@@ -944,6 +947,7 @@ def _build_callbacks(
     base_dir: str | None = None,
     save_dir: str | None = None,
     subset_map: dict[str, list[int] | None] | None = None,
+    test_dataset=None,
 ) -> list:
     """Build HF Trainer callbacks from our config.
 
@@ -1034,11 +1038,15 @@ def _build_callbacks(
     val_viz = train_cfg.get("val_viz", {})
     if val_viz.get("enabled", False):
         class_names = {int(k): str(v) for k, v in data_config.get("names", {}).items()}
+        best_viz = train_cfg.get("best_viz", {})
         callbacks.append(HFValPredictionCallback(
             save_dir=save_dir, class_names=class_names, input_size=input_size,
             num_samples=val_viz.get("num_samples", 12),
             conf_threshold=val_viz.get("conf_threshold", 0.05),
             grid_cols=val_viz.get("grid_cols", 2),
+            test_dataset=test_dataset if best_viz.get("enabled", True) else None,
+            best_num_samples=best_viz.get("num_samples", 16),
+            best_conf_threshold=best_viz.get("conf_threshold", 0.3),
         ))
 
     # train_viz would run the same viz on the train_dataloader — not wired
