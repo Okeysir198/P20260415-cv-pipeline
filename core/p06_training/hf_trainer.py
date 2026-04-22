@@ -1051,7 +1051,7 @@ def _build_callbacks(
             grid_cols=val_viz.get("grid_cols", 2),
             test_dataset=test_dataset if want_best_viz else None,
             best_num_samples=best_viz.get("num_samples", 16),
-            best_conf_threshold=best_viz.get("conf_threshold", 0.3),
+            best_conf_threshold=best_viz.get("conf_threshold", 0.1),
             enable_epoch_end=want_val_viz,
             enable_train_end=want_best_viz,
         ))

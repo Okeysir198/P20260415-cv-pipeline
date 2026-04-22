@@ -293,7 +293,7 @@ class HFValPredictionCallback(TrainerCallback):
         dpi: int = 150,
         test_dataset: Any = None,
         best_num_samples: int = 16,
-        best_conf_threshold: float = 0.3,
+        best_conf_threshold: float = 0.1,
         enable_epoch_end: bool = True,
         enable_train_end: bool = True,
     ) -> None:
