@@ -77,24 +77,6 @@ training:
                                  # (D-FINE often peaks ep 2-15 on CPPE-5; extra epochs
                                  # waste compute while eval_loss drifts upward)
 
-  val_viz:
-    enabled: true
-    num_samples: 8
-    conf_threshold: 0.05
-    grid_cols: 2
-  train_viz:
-    enabled: false
-  data_viz:
-    enabled: true
-    splits: [train, val, test]
-    num_samples: 16
-    grid_cols: 4
-  aug_viz:
-    enabled: true
-    splits: [train]
-    num_samples: 16
-    grid_cols: 4
-
 loss:
   type: detr
 

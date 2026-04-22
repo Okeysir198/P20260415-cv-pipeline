@@ -85,36 +85,6 @@ training:
   ema_decay: 0.9998
   gpu_augment: false             # Albumentations stays on CPU — no GPU aug path
 
-  val_viz:
-    enabled: true
-    num_samples: 8
-    conf_threshold: 0.25
-    grid_cols: 2
-    gt_color_rgb: [160, 32, 240]
-    pred_color_rgb: [0, 200, 0]
-    gt_thickness: 2
-    pred_thickness: 1
-    text_scale: 0.4
-    dpi: 150
-  train_viz:
-    enabled: false
-  data_viz:
-    enabled: true
-    splits: [train, val, test]
-    num_samples: 16
-    grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
-  aug_viz:
-    enabled: true
-    splits: [train]
-    num_samples: 16
-    grid_cols: 4
-    thickness: 2
-    text_scale: 0.4
-    dpi: 120
-
 loss:
   type: yolox
 

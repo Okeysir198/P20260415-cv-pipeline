@@ -69,24 +69,6 @@ training:
 
   # Viz callbacks — ported to HF Trainer via `_HFVizBridge` in hf_trainer.py.
   # Leave on; they each produce a few hundred KB of PNGs under the run dir.
-  val_viz:
-    enabled: true
-    num_samples: 8
-    conf_threshold: 0.05
-    grid_cols: 2
-  train_viz:
-    enabled: false              # skip per-epoch train preds (val is enough)
-  data_viz:
-    enabled: true
-    splits: [train, val, test]
-    num_samples: 16
-    grid_cols: 4
-  aug_viz:
-    enabled: true
-    splits: [train]
-    num_samples: 16
-    grid_cols: 4
-
 loss:
   type: detr
 
