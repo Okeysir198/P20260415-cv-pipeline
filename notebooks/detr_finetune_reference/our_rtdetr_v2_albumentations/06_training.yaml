@@ -100,11 +100,17 @@ logging:
   # Path is resolved relative to this config file. HF Trainer puts its usual
   # `checkpoint-N/` + tensorboard `runs/` + `trainer_state.json` inside.
   save_dir: runs/seed42
+  report_to: none                 # avoid wandb auth hard-fail under HF Trainer
 
 checkpoint:
   save_best: true
   metric: eval_map               # HF Trainer convention (torchmetrics "map")
   mode: max
   save_interval: 1               # save every epoch; HF Trainer prunes via save_total_limit
+
+evaluation:
+  # Canonical mAP uses 0.0 (torchmetrics ranks the full PR curve).
+  # Raise only to match an external baseline; higher values lower reported mAP.
+  score_threshold: 0.0
 
 seed: 42

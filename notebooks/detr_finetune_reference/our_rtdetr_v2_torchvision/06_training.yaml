@@ -86,11 +86,18 @@ logging:
   wandb_project: smart-camera
   run_name: cppe5_our_torchvision
   save_dir: runs/seed42
+  report_to: none
 
 checkpoint:
   save_best: true
   metric: eval_map
   mode: max
   save_interval: 1
+
+evaluation:
+  # Canonical mAP uses 0.0 (full PR curve via torchmetrics ranking).
+  # Raise only to match an external baseline (e.g. custom notebook's 0.1);
+  # higher values mechanically lower reported mAP.
+  score_threshold: 0.0
 
 seed: 42

@@ -16,8 +16,10 @@
 #  test_results.json)
 
 model:
-  arch: dfine-large
-  pretrained: ustc-community/dfine-large-coco
+  arch: dfine-n                  # ~4 M params (was dfine-large ~80 M) —
+                                 # better matched to CPPE-5's 850 train images
+                                 # to reduce overfit and improve generalization.
+  pretrained: ustc-community/dfine_n_coco
   num_classes: 5
   input_size: [480, 480]
 
@@ -54,9 +56,9 @@ augmentation:
 
 training:
   backend: hf
-  epochs: 50                     # bumped from qubvel's 30 — see our_dfine_torchvision
-                                 # runs/seed42_50ep: +0.06 test mAP (0.43→0.49) at 50 ep.
-                                 # Applies to Albu path too (same under-training).
+  epochs: 30                     # matches reference_dfine notebook exactly
+                                 # (50ep variant kept in runs/seed42_rerun/ for comparison;
+                                 # on albu path it did NOT help — test_map 0.380 vs 30ep mean 0.383).
   optimizer: adamw
   lr: 0.00005                    # qubvel's learning_rate=5e-5
   weight_decay: 0.0              # qubvel's default (not set)
@@ -71,6 +73,9 @@ training:
   amp: false                     # D-FINE decoder overflows in fp16
   gpu_augment: false             # HF Trainer uses its own DataLoader
   ema: false                     # reference doesn't use EMA
+  patience: 8                    # early-stop if eval_map doesn't improve for 8 epochs
+                                 # (D-FINE often peaks ep 2-15 on CPPE-5; extra epochs
+                                 # waste compute while eval_loss drifts upward)
 
   val_viz:
     enabled: true
@@ -103,5 +108,10 @@ checkpoint:
   metric: eval_map
   mode: max
   save_interval: 1
+
+evaluation:
+  # Canonical mAP uses 0.0 (torchmetrics ranks the full PR curve).
+  # Raise only to match an external baseline; higher values lower reported mAP.
+  score_threshold: 0.0
 
 seed: 42
