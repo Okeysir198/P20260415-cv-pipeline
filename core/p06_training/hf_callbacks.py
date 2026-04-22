@@ -294,6 +294,8 @@ class HFValPredictionCallback(TrainerCallback):
         test_dataset: Any = None,
         best_num_samples: int = 16,
         best_conf_threshold: float = 0.3,
+        enable_epoch_end: bool = True,
+        enable_train_end: bool = True,
     ) -> None:
         self.save_dir = Path(save_dir)
         self.class_names = class_names
@@ -308,101 +310,17 @@ class HFValPredictionCallback(TrainerCallback):
         self.test_dataset = test_dataset
         self.best_num_samples = best_num_samples
         self.best_conf_threshold = best_conf_threshold
+        self.enable_epoch_end = enable_epoch_end
+        self.enable_train_end = enable_train_end
         self._sample_indices: list[int] | None = None
 
-    @staticmethod
-    def _unwrap(dataset: Any):
-        if hasattr(dataset, "indices"):  # torch.utils.data.Subset
-            indices = dataset.indices
-            return dataset.dataset, (lambda i: indices[i])
-        return dataset, (lambda i: i)
-
-    def _forward_and_render_rows(self, model, dataset, indices, conf_threshold):
-        """Run best-checkpoint forward on dataset[indices] and return annotated
-        rows (list of BGR ndarrays). Shared by on_epoch_end and on_train_end
-        so the per-epoch and best-checkpoint grids use identical rendering.
-        """
-        import cv2
-        import supervision as sv
-        import torch
-        from core.p10_inference.supervision_bridge import annotate_gt_pred
-
-        raw_dataset, idx_map = self._unwrap(dataset)
-        device = next(model.parameters()).device
-        input_h, input_w = self.input_size
-
-        samples = []
-        for idx in indices:
-            real_idx = idx_map(idx)
-            img_path = raw_dataset.img_paths[real_idx]
-            image = cv2.imread(str(img_path))
-            if image is None:
-                continue
-            raw_img = raw_dataset.get_raw_item(real_idx)["image"]
-            resized = cv2.resize(raw_img, (input_w, input_h))
-            tensor = torch.from_numpy(
-                np.ascontiguousarray(
-                    (resized.astype(np.float32) / 255.0).transpose(2, 0, 1)
-                )
-            )
-            samples.append((real_idx, image, tensor))
-        if not samples or not hasattr(model, "postprocess"):
-            return []
-
-        batch = torch.stack([t for _, _, t in samples]).to(device)
-        with torch.no_grad():
-            preds_raw = model(pixel_values=batch)
-        target_sizes = torch.tensor([[input_h, input_w]] * batch.shape[0], device=device)
-        all_decoded = model.postprocess(preds_raw, conf_threshold, target_sizes)
-
-        rows: list[np.ndarray] = []
-        for i, (real_idx, image, _) in enumerate(samples):
-            orig_h, orig_w = image.shape[:2]
-            gt_xyxy, gt_class_ids = None, None
-            gt_targets = raw_dataset._load_label(raw_dataset.img_paths[real_idx])
-            if gt_targets is not None and len(gt_targets) > 0:
-                cx, cy, w, h = (gt_targets[:, 1], gt_targets[:, 2],
-                                gt_targets[:, 3], gt_targets[:, 4])
-                gt_xyxy = np.stack([
-                    (cx - w / 2) * orig_w, (cy - h / 2) * orig_h,
-                    (cx + w / 2) * orig_w, (cy + h / 2) * orig_h,
-                ], axis=1)
-                gt_class_ids = gt_targets[:, 0].astype(np.int64)
-
-            pred = all_decoded[i] if i < len(all_decoded) else {}
-            pred_boxes = np.asarray(pred.get("boxes", []), dtype=np.float64).reshape(-1, 4)
-            pred_labels = np.asarray(pred.get("labels", []), dtype=np.int64).ravel()
-            pred_scores = np.asarray(pred.get("scores", []), dtype=np.float64).ravel()
-            if pred_boxes.shape[0] > 0:
-                pred_boxes[:, [0, 2]] *= orig_w / input_w
-                pred_boxes[:, [1, 3]] *= orig_h / input_h
-            pred_dets = sv.Detections(xyxy=pred_boxes, class_id=pred_labels, confidence=pred_scores)
-
-            rows.append(annotate_gt_pred(
-                image, gt_xyxy, gt_class_ids, pred_dets, self.class_names,
-                gt_thickness=self.gt_thickness, pred_thickness=self.pred_thickness,
-                text_scale=self.text_scale, draw_legend=True,
-            ))
-        return rows
-
-    def _save_grid(self, rows, out_path, title, ncols):
-        import cv2, matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        nrows = math.ceil(len(rows) / ncols)
-        fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 6, nrows * 5))
-        axes = np.asarray(axes).ravel()
-        for i in range(nrows * ncols):
-            axes[i].axis("off")
-            if i < len(rows):
-                axes[i].imshow(cv2.cvtColor(rows[i], cv2.COLOR_BGR2RGB))
-        fig.suptitle(title, fontsize=14)
-        fig.tight_layout()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(out_path), dpi=self.dpi, bbox_inches="tight")
-        plt.close(fig)
-
     def on_epoch_end(self, args, state, control, **kwargs):
+        """Per-epoch val grid. Delegates rendering to the shared
+        :func:`core.p06_training.post_train.render_prediction_grid` so the
+        per-epoch grid is byte-consistent with best.png and the error-analysis
+        galleries."""
+        if not self.enable_epoch_end:
+            return control
         eval_loader = kwargs.get("eval_dataloader")
         model = kwargs.get("model")
         if eval_loader is None or model is None:
@@ -416,12 +334,6 @@ class HFValPredictionCallback(TrainerCallback):
 
         was_training = model.training
         model.eval()
-        rows = self._forward_and_render_rows(
-            model, eval_loader.dataset, self._sample_indices, self.conf_threshold,
-        )
-        if not rows:
-            if was_training: model.train()
-            return control
 
         epoch_idx = int(round(state.epoch or 0.0))
         map_val = 0.0
@@ -430,12 +342,21 @@ class HFValPredictionCallback(TrainerCallback):
                 if "eval_map_50" in entry:
                     map_val = float(entry["eval_map_50"]); break
 
-        # Per-epoch grids land under val_predictions/epochs/ to keep
-        # val_predictions/ itself short (just epochs/, best.png, error_analysis/).
-        out_dir = self.save_dir / "val_predictions" / "epochs"
-        self._save_grid(rows, out_dir / f"epoch_{epoch_idx:03d}.png",
-                        f"Epoch {epoch_idx} — mAP50: {map_val:.4f}", self.grid_cols)
-        logger.info("HFValPredictionCallback: saved epochs/epoch_%03d.png", epoch_idx)
+        from core.p06_training.post_train import render_prediction_grid
+        from core.p10_inference.supervision_bridge import VizStyle
+        out_path = self.save_dir / "val_predictions" / "epochs" / f"epoch_{epoch_idx:03d}.png"
+        try:
+            render_prediction_grid(
+                model, eval_loader.dataset, self._sample_indices, out_path,
+                title=f"Epoch {epoch_idx} — mAP50: {map_val:.4f}",
+                class_names=self.class_names, input_size=self.input_size,
+                style=VizStyle(), task=_infer_task_from_model(model),
+                conf_threshold=self.conf_threshold, grid_cols=self.grid_cols,
+                dpi=self.dpi,
+            )
+            logger.info("HFValPredictionCallback: saved epochs/epoch_%03d.png", epoch_idx)
+        except Exception as e:
+            logger.warning("per-epoch val grid skipped: %s", e)
 
         if was_training:
             model.train()
@@ -452,6 +373,8 @@ class HFValPredictionCallback(TrainerCallback):
         so the pytorch backend and HF backend produce byte-identical artifact
         trees.
         """
+        if not self.enable_train_end:
+            return control
         model = kwargs.get("model")
         if model is None:
             return control

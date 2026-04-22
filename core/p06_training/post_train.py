@@ -32,46 +32,17 @@ import cv2
 import numpy as np
 import torch
 
+from core.p06_training._common import (
+    task_from_output_format as _task_from_output_format,
+    unwrap_subset as _unwrap_subset,
+    yolo_targets_to_xyxy as _gt_xyxy_from_yolo,
+)
 from core.p10_inference.supervision_bridge import (
     VizStyle,
     annotate_gt_pred,
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Dataset unwrap (handles torch Subset) + uniform sample fetch.
-# ---------------------------------------------------------------------------
-
-
-def _unwrap_subset(dataset):
-    """Return ``(underlying_dataset, idx_map_fn)``.
-
-    ``idx_map_fn`` converts an index in *the Subset's* coordinate space to an
-    index in the underlying dataset so ``get_raw_item`` / ``_load_label``
-    work regardless of whether the caller passed a Subset or a full dataset.
-    """
-    if hasattr(dataset, "indices") and hasattr(dataset, "dataset"):
-        indices = dataset.indices
-        return dataset.dataset, (lambda i: indices[i])
-    return dataset, (lambda i: i)
-
-
-def _task_from_output_format(output_format: str | None) -> str:
-    """Normalize `model.output_format` → canonical task string."""
-    if not output_format:
-        return "detection"
-    of = output_format.lower()
-    if of in {"detr", "yolox", "detection"}:
-        return "detection"
-    if of in {"classification", "cls"}:
-        return "classification"
-    if of in {"segmentation", "seg"}:
-        return "segmentation"
-    if of in {"keypoint", "pose"}:
-        return "keypoint"
-    return "detection"
 
 
 # ---------------------------------------------------------------------------
@@ -101,18 +72,6 @@ def _forward_batch_detection(model, tensors, target_sizes, conf_threshold):
                      "labels": np.zeros(0, dtype=np.int64)}] * len(tensors)
         return decoder(preds_raw, conf_threshold, target_sizes.to(device))
     return model.postprocess(preds_raw, conf_threshold, target_sizes.to(device))
-
-
-def _gt_xyxy_from_yolo(targets: np.ndarray, w: int, h: int):
-    """Denormalize YOLO (cls, cx, cy, w, h) rows → xyxy pixel + class ids."""
-    if targets is None or len(targets) == 0:
-        return np.zeros((0, 4), dtype=np.float32), np.zeros(0, dtype=np.int64)
-    cx, cy, bw, bh = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
-    xyxy = np.stack([
-        (cx - bw / 2) * w, (cy - bh / 2) * h,
-        (cx + bw / 2) * w, (cy + bh / 2) * h,
-    ], axis=1).astype(np.float32)
-    return xyxy, targets[:, 0].astype(np.int64)
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,11 @@ import torch
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from core.p06_training._common import (
+    unwrap_subset as _unwrap,
+    yolo_targets_to_xyxy,
+)
+from core.p08_evaluation.error_analysis import _size_category
 from core.p10_inference.supervision_bridge import VizStyle, annotate_gt_pred
 
 logger = logging.getLogger(__name__)
@@ -54,12 +59,6 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 def _safe_name(name: str) -> str:
     """Filesystem-safe version of a class/image name."""
     return _SAFE_NAME.sub("_", str(name))[:80]
-
-
-def _unwrap(ds):
-    if hasattr(ds, "indices") and hasattr(ds, "dataset"):
-        return ds.dataset, (lambda i: ds.indices[i])
-    return ds, (lambda i: i)
 
 
 def _preprocess_for_model(raw_image: np.ndarray, input_size: tuple[int, int]) -> torch.Tensor:
@@ -179,6 +178,10 @@ def _analyze_detection(
     fp_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
     fn_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
     conf_gallery: dict[tuple[int, int], list[dict]] = {}
+    # Cache raw image + predictions + GT per image so gallery renderers
+    # below don't re-run inference (plan's efficiency acceptance criterion:
+    # galleries must reuse analyzer predictions rather than forwarding again).
+    pred_cache: dict[int, dict] = {}
 
     for local_i, ds_idx in enumerate(indices):
         real_idx = idx_map(ds_idx)
@@ -207,16 +210,16 @@ def _analyze_detection(
             pb[:, [0, 2]] *= orig_w / input_w
             pb[:, [1, 3]] *= orig_h / input_h
 
-        targets = raw.get("targets")
-        gt_xyxy = np.zeros((0, 4), dtype=np.float32)
-        gt_cls = np.zeros(0, dtype=np.int64)
-        if isinstance(targets, np.ndarray) and targets.size > 0:
-            tcx, tcy, tw, th = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
-            gt_xyxy = np.stack([
-                (tcx - tw / 2) * orig_w, (tcy - th / 2) * orig_h,
-                (tcx + tw / 2) * orig_w, (tcy + th / 2) * orig_h,
-            ], axis=1).astype(np.float32)
-            gt_cls = targets[:, 0].astype(np.int64)
+        gt_xyxy, gt_cls = yolo_targets_to_xyxy(raw.get("targets"), orig_w, orig_h)
+
+        # Cache everything gallery renderers need — image bytes stay on disk
+        # (we only keep the path) so 500-image analysis doesn't balloon RAM.
+        pred_cache[int(real_idx)] = {
+            "path": raw.get("path", ""),
+            "pb": pb, "pl": pl, "ps": ps,
+            "gt_xyxy": gt_xyxy, "gt_cls": gt_cls,
+            "orig_shape": (orig_h, orig_w),
+        }
 
         matched_gt = np.zeros(len(gt_xyxy), dtype=bool)
         img_tp, img_fp, img_fn = 0, 0, 0
@@ -327,25 +330,38 @@ def _analyze_detection(
     # ---- hardest images overview grid (top 12 by FP+FN) ----
     per_image.sort(key=lambda r: -(r["fn"] + r["fp"]))
     artifacts["hardest_images"] = _render_hardest_overview(
-        raw_ds, per_image[:12], model, class_names, input_size, style,
+        raw_ds, per_image[:12], class_names, style, pred_cache,
         output_dir / "hardest_images.png",
     )
 
-    # ---- per-class galleries ----
+    # ---- per-class galleries — all three share the same rendering path,
+    # differing only in which dict they iterate and the filename suffix. ----
     if hard_images_per_class > 0:
         gallery_root = output_dir / "hard_images"
         artifacts["hard_images_root"] = gallery_root
-        _render_fp_gallery(
-            raw_ds, model, fp_gallery, class_names, input_size, style,
-            gallery_root / "false_positives", hard_images_per_class,
+
+        def _fp_name(rec): return f"fp_score_{rec['score']:.2f}"
+        def _fn_name(rec): return "fn"
+        def _conf_name(rec): return f"iou_{rec['iou']:.2f}"
+
+        _render_gallery(
+            raw_ds, class_names, style, pred_cache, hard_images_per_class,
+            grouped=fp_gallery, class_labeler=lambda cid: class_names.get(cid, str(cid)),
+            root=gallery_root / "false_positives", suffix_fn=_fp_name,
+            sort_key=lambda r: -r["score"],
         )
-        _render_fn_gallery(
-            raw_ds, model, fn_gallery, class_names, input_size, style,
-            gallery_root / "false_negatives", hard_images_per_class,
+        _render_gallery(
+            raw_ds, class_names, style, pred_cache, hard_images_per_class,
+            grouped=fn_gallery, class_labeler=lambda cid: class_names.get(cid, str(cid)),
+            root=gallery_root / "false_negatives", suffix_fn=_fn_name,
+            sort_key=None,
         )
-        _render_confusion_gallery(
-            raw_ds, model, conf_gallery, class_names, input_size, style,
-            gallery_root / "class_confusion", hard_images_per_class,
+        _render_gallery(
+            raw_ds, class_names, style, pred_cache, hard_images_per_class,
+            grouped=conf_gallery,
+            class_labeler=lambda pair: f"{_safe_name(class_names.get(pair[1], str(pair[1])))}__from__{_safe_name(class_names.get(pair[0], str(pair[0])))}",
+            root=gallery_root / "class_confusion", suffix_fn=_conf_name,
+            sort_key=lambda r: -r["iou"],
         )
 
     return artifacts
@@ -364,14 +380,6 @@ def _iou(a, b) -> float:
     area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
     union = area_a + area_b - inter
     return float(inter / union) if union > 0 else 0.0
-
-
-def _size_category(area: float) -> str:
-    if area < 32 * 32:
-        return "small"
-    if area < 96 * 96:
-        return "medium"
-    return "large"
 
 
 def _summarize_detection(per_class, size_stats, tp_scores, fp_scores, class_names):
@@ -490,17 +498,35 @@ def _plot_size_recall(size_stats: dict, path: Path) -> Path:
     return path
 
 
+def _annotate_from_cache(image, entry, class_names, style) -> np.ndarray:
+    """Render GT + Pred overlay using cached analyzer predictions.
+
+    No forward pass — reuses pb/pl/ps/gt_xyxy/gt_cls stored by
+    :func:`_analyze_detection`. This is the efficiency win: galleries that
+    previously re-ran inference now read from the cache.
+    """
+    pb = entry.get("pb", np.zeros((0, 4)))
+    pl = entry.get("pl", np.zeros(0, dtype=np.int64))
+    ps = entry.get("ps", np.zeros(0, dtype=np.float64))
+    pred_dets = sv.Detections(xyxy=pb, class_id=pl, confidence=ps)
+    return annotate_gt_pred(
+        image, entry.get("gt_xyxy"), entry.get("gt_cls"),
+        pred_dets, class_names, style=style,
+    )
+
+
 def _render_hardest_overview(
-    raw_ds, hardest: list[dict], model, class_names, input_size, style, path: Path,
+    raw_ds, hardest: list[dict], class_names, style, pred_cache: dict, path: Path,
 ) -> Path | None:
-    """Grid of the top-N hardest images (full GT vs Pred on each)."""
+    """Grid of the top-N hardest images, reusing cached predictions."""
     if not hardest:
         return None
-    input_h, input_w = int(input_size[0]), int(input_size[1])
-    device = next(model.parameters()).device
     rows = []
     for rec in hardest:
         idx = rec["idx"]
+        entry = pred_cache.get(idx)
+        if entry is None:
+            continue
         try:
             raw = raw_ds.get_raw_item(idx)
         except Exception:
@@ -508,130 +534,48 @@ def _render_hardest_overview(
         image = raw["image"]
         if image is None:
             continue
-        orig_h, orig_w = image.shape[:2]
-        tensor = _preprocess_for_model(image, (input_h, input_w)).unsqueeze(0).to(device)
-        with torch.no_grad():
-            preds_raw = _dispatch_forward(model, tensor)
-        target_sizes = torch.tensor([[input_h, input_w]], device=device)
-        decoded = model.postprocess(preds_raw, 0.3, target_sizes)[0]
-        pb = np.asarray(decoded.get("boxes", []), dtype=np.float64).reshape(-1, 4)
-        pl = np.asarray(decoded.get("labels", []), dtype=np.int64).ravel()
-        ps = np.asarray(decoded.get("scores", []), dtype=np.float64).ravel()
-        if len(pb):
-            pb[:, [0, 2]] *= orig_w / input_w
-            pb[:, [1, 3]] *= orig_h / input_h
-        pred_dets = sv.Detections(xyxy=pb, class_id=pl, confidence=ps)
+        rows.append(_annotate_from_cache(image, entry, class_names, style))
 
-        targets = raw.get("targets")
-        gt_xyxy = gt_cls = None
-        if isinstance(targets, np.ndarray) and targets.size > 0:
-            tcx, tcy, tw, th = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
-            gt_xyxy = np.stack([
-                (tcx - tw / 2) * orig_w, (tcy - th / 2) * orig_h,
-                (tcx + tw / 2) * orig_w, (tcy + th / 2) * orig_h,
-            ], axis=1).astype(np.float32)
-            gt_cls = targets[:, 0].astype(np.int64)
-        rows.append(annotate_gt_pred(image, gt_xyxy, gt_cls, pred_dets, class_names, style=style))
-
+    if not rows:
+        return None
     from core.p06_training.post_train import _save_grid
     _save_grid(rows, path, "Hardest images (sorted by FP+FN)", ncols=4, dpi=130)
     return path
 
 
-def _render_fp_gallery(raw_ds, model, fp_gallery, class_names, input_size, style, root: Path, cap: int):
-    """Draw one PNG per (class, FP image): full image with all GT + all preds."""
-    input_h, input_w = int(input_size[0]), int(input_size[1])
-    device = next(model.parameters()).device
-    for cid, items in fp_gallery.items():
-        items = sorted(items, key=lambda r: -r["score"])[:cap]
-        class_dir = root / _safe_name(class_names.get(cid, str(cid)))
-        class_dir.mkdir(parents=True, exist_ok=True)
-        for rec in items:
-            stem = Path(rec["path"]).stem or f"img_{rec['image_idx']}"
-            try:
-                raw = raw_ds.get_raw_item(rec["image_idx"])
-            except Exception:
-                continue
-            image = raw["image"]
-            if image is None:
-                continue
-            annotated = _annotate_full_image(image, raw, model, class_names, style,
-                                             (input_h, input_w), device)
-            out = class_dir / f"{_safe_name(stem)}__fp_score_{rec['score']:.2f}.png"
-            cv2.imwrite(str(out), annotated)
-
-
-def _render_fn_gallery(raw_ds, model, fn_gallery, class_names, input_size, style, root: Path, cap: int):
-    input_h, input_w = int(input_size[0]), int(input_size[1])
-    device = next(model.parameters()).device
-    for cid, items in fn_gallery.items():
+def _render_gallery(
+    raw_ds, class_names, style, pred_cache: dict, cap: int,
+    *, grouped: dict, class_labeler, root: Path, suffix_fn, sort_key,
+):
+    """Unified per-class gallery renderer — replaces FP / FN / confusion
+    copy-paste. ``grouped`` maps a key (int class id or (gt_cid, pred_cid) pair)
+    to a list of records; ``class_labeler(key)`` returns the class-dir name;
+    ``suffix_fn(rec)`` builds the trailing filename discriminator; ``sort_key``
+    ranks records (None → preserve insertion order)."""
+    for key, items in grouped.items():
+        if sort_key is not None:
+            items = sorted(items, key=sort_key)
         items = items[:cap]
-        class_dir = root / _safe_name(class_names.get(cid, str(cid)))
+        if not items:
+            continue
+        class_dir = root / _safe_name(class_labeler(key))
         class_dir.mkdir(parents=True, exist_ok=True)
         for rec in items:
-            stem = Path(rec["path"]).stem or f"img_{rec['image_idx']}"
+            idx = rec["image_idx"]
+            entry = pred_cache.get(idx)
+            if entry is None:
+                continue
             try:
-                raw = raw_ds.get_raw_item(rec["image_idx"])
+                raw = raw_ds.get_raw_item(idx)
             except Exception:
                 continue
             image = raw["image"]
             if image is None:
                 continue
-            annotated = _annotate_full_image(image, raw, model, class_names, style,
-                                             (input_h, input_w), device)
-            out = class_dir / f"{_safe_name(stem)}__fn.png"
+            annotated = _annotate_from_cache(image, entry, class_names, style)
+            stem = Path(rec["path"]).stem or f"img_{idx}"
+            out = class_dir / f"{_safe_name(stem)}__{suffix_fn(rec)}.png"
             cv2.imwrite(str(out), annotated)
-
-
-def _render_confusion_gallery(raw_ds, model, conf_gallery, class_names, input_size, style, root: Path, cap: int):
-    input_h, input_w = int(input_size[0]), int(input_size[1])
-    device = next(model.parameters()).device
-    for (gt_cid, pred_cid), items in conf_gallery.items():
-        items = sorted(items, key=lambda r: -r["iou"])[:cap]
-        sub = root / f"{_safe_name(class_names.get(pred_cid, str(pred_cid)))}__from__{_safe_name(class_names.get(gt_cid, str(gt_cid)))}"
-        sub.mkdir(parents=True, exist_ok=True)
-        for rec in items:
-            stem = Path(rec["path"]).stem or f"img_{rec['image_idx']}"
-            try:
-                raw = raw_ds.get_raw_item(rec["image_idx"])
-            except Exception:
-                continue
-            image = raw["image"]
-            if image is None:
-                continue
-            annotated = _annotate_full_image(image, raw, model, class_names, style,
-                                             (input_h, input_w), device)
-            out = sub / f"{_safe_name(stem)}__iou_{rec['iou']:.2f}.png"
-            cv2.imwrite(str(out), annotated)
-
-
-def _annotate_full_image(image, raw, model, class_names, style, input_size, device) -> np.ndarray:
-    """Run model on image, overlay full GT+Pred via shared annotate_gt_pred."""
-    input_h, input_w = int(input_size[0]), int(input_size[1])
-    orig_h, orig_w = image.shape[:2]
-    tensor = _preprocess_for_model(image, (input_h, input_w)).unsqueeze(0).to(device)
-    with torch.no_grad():
-        preds_raw = _dispatch_forward(model, tensor)
-    target_sizes = torch.tensor([[input_h, input_w]], device=device)
-    decoded = model.postprocess(preds_raw, 0.25, target_sizes)[0]
-    pb = np.asarray(decoded.get("boxes", []), dtype=np.float64).reshape(-1, 4)
-    pl = np.asarray(decoded.get("labels", []), dtype=np.int64).ravel()
-    ps = np.asarray(decoded.get("scores", []), dtype=np.float64).ravel()
-    if len(pb):
-        pb[:, [0, 2]] *= orig_w / input_w
-        pb[:, [1, 3]] *= orig_h / input_h
-    pred_dets = sv.Detections(xyxy=pb, class_id=pl, confidence=ps)
-
-    targets = raw.get("targets")
-    gt_xyxy = gt_cls = None
-    if isinstance(targets, np.ndarray) and targets.size > 0:
-        tcx, tcy, tw, th = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
-        gt_xyxy = np.stack([
-            (tcx - tw / 2) * orig_w, (tcy - th / 2) * orig_h,
-            (tcx + tw / 2) * orig_w, (tcy + th / 2) * orig_h,
-        ], axis=1).astype(np.float32)
-        gt_cls = targets[:, 0].astype(np.int64)
-    return annotate_gt_pred(image, gt_xyxy, gt_cls, pred_dets, class_names, style=style)
 
 
 # ===========================================================================

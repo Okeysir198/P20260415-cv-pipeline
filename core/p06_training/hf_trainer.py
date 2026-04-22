@@ -1044,7 +1044,7 @@ def _build_callbacks(
     want_val_viz = val_viz.get("enabled", True)
     want_best_viz = best_viz.get("enabled", True)
     if want_val_viz or want_best_viz:
-        cb = HFValPredictionCallback(
+        callbacks.append(HFValPredictionCallback(
             save_dir=save_dir, class_names=class_names, input_size=input_size,
             num_samples=val_viz.get("num_samples", 12),
             conf_threshold=val_viz.get("conf_threshold", 0.05),
@@ -1052,14 +1052,9 @@ def _build_callbacks(
             test_dataset=test_dataset if want_best_viz else None,
             best_num_samples=best_viz.get("num_samples", 16),
             best_conf_threshold=best_viz.get("conf_threshold", 0.3),
-        )
-        # If per-epoch grids are off, suppress on_epoch_end but keep on_train_end.
-        if not want_val_viz:
-            cb.on_epoch_end = lambda args, state, control, **kwargs: control  # type: ignore[assignment]
-        # If post-train best viz is off, suppress on_train_end.
-        if not want_best_viz:
-            cb.on_train_end = lambda args, state, control, **kwargs: control  # type: ignore[assignment]
-        callbacks.append(cb)
+            enable_epoch_end=want_val_viz,
+            enable_train_end=want_best_viz,
+        ))
 
     # Normalization sanity-check preview — fires ONCE on_train_start, saves
     # data_preview/normalized_input_preview.png and never touches training

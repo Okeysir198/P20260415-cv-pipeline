@@ -41,21 +41,8 @@ from core.p06_training.losses import build_loss
 from core.p06_training.lr_scheduler import build_scheduler
 from core.p06_training.metrics_registry import compute_metrics
 from core.p06_training.postprocess import postprocess as _postprocess_registry
+from core.p06_training._common import task_from_output_format as _task_from_output
 from utils.config import load_config, merge_configs, validate_config
-
-
-def _task_from_output(output_format: str | None) -> str:
-    """Normalize model.output_format → canonical task for the post-train runner."""
-    of = (output_format or "detection").lower()
-    if of in {"detr", "yolox", "detection"}:
-        return "detection"
-    if of in {"classification", "cls"}:
-        return "classification"
-    if of in {"segmentation", "seg"}:
-        return "segmentation"
-    if of in {"keypoint", "pose"}:
-        return "keypoint"
-    return "detection"
 from utils.device import get_device, set_seed
 from utils.progress import TrainingProgress
 
