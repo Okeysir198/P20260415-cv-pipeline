@@ -602,12 +602,14 @@ def _plot_per_class_pr_f1(per_class, class_names, path: Path,
         ax.text(i,     r_val + 0.02, f"{r_val:.2f}", ha="center", fontsize=7)
         ax.text(i + w, f_val + 0.02, f"{f_val:.2f}", ha="center", fontsize=7)
     ax.set_xticks(x); ax.set_xticklabels(names, rotation=30, ha="right")
-    ax.set_ylim(0, 1.15); ax.set_ylabel("score (0 = worst, 1 = perfect)")
+    ax.set_ylim(0, 1.20); ax.set_ylabel("score (0 = worst, 1 = perfect)")
     title = "Per-class Precision / Recall / F1"
     if conf_threshold is not None:
         title += f"  (conf ≥ {conf_threshold}, IoU ≥ 0.5)"
     ax.set_title(title)
-    ax.legend(loc="upper right", fontsize=9); ax.grid(axis="y", alpha=0.3)
+    # Legend OUTSIDE plot so it can never overlap bars at high scores
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9,
+              borderaxespad=0.); ax.grid(axis="y", alpha=0.3)
     fig.text(0.02, 0.02,
              "• Higher bar = better (1.0 = perfect)\n"
              "• Low precision → too many false alarms (lots of FP)\n"
@@ -674,7 +676,7 @@ def _plot_confidence_hist(tp_scores: list[float], fp_scores: list[float], path: 
     ax.set_xlabel("Prediction confidence score (sigmoid output)")
     ax.set_ylabel("# of detections")
     ax.set_title("Confidence calibration — are wrong predictions less confident than right ones?")
-    ax.grid(alpha=0.3); ax.legend(loc="upper right", fontsize=9)
+    ax.grid(alpha=0.3); ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8, borderaxespad=0.)
     fig.text(0.02, 0.02,
              "• Well-calibrated: FP histogram shifts LEFT of TP (FP mean < TP mean)\n"
              "• Overlapping histograms → no single threshold cleanly separates TPs from FPs\n"
@@ -714,7 +716,8 @@ def _plot_size_recall(size_stats: dict, path: Path) -> Path:
     ax.set_xticklabels([SIZE_TIER_LABELS[t] for t in tiers], fontsize=9)
     ax.set_ylim(0, 1.25); ax.set_ylabel("score (0 = worst, 1 = perfect)")
     ax.set_title("Size-stratified detection performance (COCO box-area tiers)")
-    ax.legend(loc="lower right"); ax.grid(axis="y", alpha=0.3)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9,
+              borderaxespad=0.); ax.grid(axis="y", alpha=0.3)
     fig.text(0.02, 0.02,
              "• Tiers are by GT-box area (pixels², on the model's input size)\n"
              "• Low recall on ‘small’ tier → model misses small objects (try Mosaic / higher input size)\n"
@@ -743,17 +746,21 @@ def _plot_data_distribution(
     medium = [gt_per_class_size.get(cid, {}).get("medium", 0) for cid in ordered_cids]
     large = [gt_per_class_size.get(cid, {}).get("large", 0) for cid in ordered_cids]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(max(11, len(names) * 1.3), 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(max(13, len(names) * 1.6), 5.5))
     x = np.arange(len(names))
 
-    # Left: bar per class (absolute counts + percentage)
+    # Reserve 25% headroom so top value labels never clip the plot border
     total = max(1, sum(totals))
+    y_max = max(totals) * 1.25 if totals else 1.0
+
+    # Left: bar per class (absolute counts + percentage)
     ax1.bar(x, totals, color="#4c72b0")
     for i, v in enumerate(totals):
         pct = 100.0 * v / total
-        ax1.text(i, v + total * 0.01, f"{v} ({pct:.1f}%)",
+        ax1.text(i, v + max(totals) * 0.02, f"{v} ({pct:.1f}%)",
                  ha="center", fontsize=9)
     ax1.set_xticks(x); ax1.set_xticklabels(names, rotation=30, ha="right")
+    ax1.set_ylim(0, y_max)
     ax1.set_ylabel("GT box count")
     ax1.set_title(f"Class distribution (total GT boxes = {total})")
     ax1.grid(axis="y", alpha=0.3)
@@ -770,9 +777,12 @@ def _plot_data_distribution(
         if l_n > 0: ax2.text(i, s_n + m_n + l_n / 2, str(int(l_n)), ha="center", va="center", fontsize=8, color="white")
         if tot > 0: ax2.text(i, tot + max(totals) * 0.02, str(int(tot)), ha="center", fontsize=9)
     ax2.set_xticks(x); ax2.set_xticklabels(names, rotation=30, ha="right")
+    ax2.set_ylim(0, y_max)
     ax2.set_ylabel("GT box count")
     ax2.set_title("Per-class × per-size-tier distribution")
-    ax2.legend(loc="upper right", fontsize=8)
+    # Legend OUTSIDE the plot area so it can never cover bars
+    ax2.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8,
+               borderaxespad=0.)
     ax2.grid(axis="y", alpha=0.3)
 
     fig.text(0.02, 0.02,
@@ -894,8 +904,9 @@ def _plot_pr_curves(detections, gt_per_class, class_names, iou_thr, path: Path) 
     ax.set_xlim(0, 1); ax.set_ylim(0, 1.02)
     ax.set_title(f"Precision–Recall curves per class @ IoU ≥ {iou_thr}   "
                   f"mean AP = mAP = {mean_ap:.3f}  (unweighted average of per-class AP)")
-    ax.grid(alpha=0.3); ax.legend(loc="lower left", fontsize=9,
-                                   title="Area under curve = AP (1.0 = perfect)")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9,
+              borderaxespad=0., title="Area under curve = AP\n(1.0 = perfect)")
     fig.text(0.02, 0.02,
              "• Each curve is built by sweeping confidence 1.0 → 0.0 — each point is (recall, precision) at that threshold\n"
              "• AP per class = area under its curve; higher = better\n"
@@ -940,8 +951,9 @@ def _plot_f1_vs_threshold(detections, gt_per_class, class_names, iou_thr, path: 
     ax.set_ylabel("F1 score (= harmonic mean of precision & recall)")
     ax.set_xlim(0.05, 0.95); ax.set_ylim(0, 1.02)
     ax.set_title(f"F1 vs confidence threshold per class @ IoU ≥ {iou_thr}")
-    ax.grid(alpha=0.3); ax.legend(loc="best", fontsize=9,
-                                   title="Deploy each class at its peak (dotted line)")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8,
+              borderaxespad=0., title="Deploy each class at its peak\n(dotted line)")
     fig.text(0.02, 0.02,
              "• Each curve: F1 of one class across conf thresholds 0.01 → 0.99 (fine grid, step 0.01)\n"
              "• Peak (dotted line + scatter) = best-F1 threshold for that class → use for deployment\n"
@@ -966,20 +978,29 @@ def _plot_map_vs_iou(detections, gt_per_class, class_names, path: Path) -> Path:
             aps.append(ap)
         map_values.append(float(np.mean(aps)) if aps else 0.0)
 
-    fig, ax = plt.subplots(figsize=(9, 5.5))
+    fig, ax = plt.subplots(figsize=(10, 5.5))
     ax.plot(iou_values, map_values, marker="o", color="#4c72b0", lw=2,
             label="mAP at this IoU threshold")
-    for x, y in zip(iou_values, map_values):
-        ax.text(x, y + 0.025, f"{y:.3f}", ha="center", fontsize=8)
     # Reference markers for AP50, AP75, AP[.5:.95]
     ap50 = map_values[0]; ap75 = map_values[5]; ap = float(np.mean(map_values))
     ax.axhline(ap, color="gray", ls="--", lw=1, alpha=0.5, label=f"COCO AP (mean) = {ap:.3f}")
     ax.set_xlabel("IoU threshold (how tight pred box must match GT box)")
     ax.set_ylabel("mAP (mean over classes with ≥1 GT)")
-    ax.set_xlim(0.48, 0.97); ax.set_ylim(0, min(1.05, max(map_values) * 1.3 + 0.1))
+    # Value-label headroom: give 18% above the highest point so annotations
+    # never clip the title band.
+    y_top = max(0.1, max(map_values) * 1.18 + 0.05)
+    ax.set_xlim(0.48, 0.97); ax.set_ylim(0, min(1.05, y_top))
+    # Annotations placed with a small offset below point when near the top
+    for xv, yv in zip(iou_values, map_values):
+        off = 0.03 if yv < y_top * 0.85 else -0.06
+        va = "bottom" if off > 0 else "top"
+        ax.text(xv, yv + off, f"{yv:.3f}", ha="center", va=va, fontsize=8)
     ax.set_title(f"mAP vs IoU   —   AP50 = {ap50:.3f}   AP75 = {ap75:.3f}   "
                   f"AP@[.5:.95] = {ap:.3f} (COCO metric)")
-    ax.grid(alpha=0.3); ax.legend(loc="upper right", fontsize=9)
+    ax.grid(alpha=0.3)
+    # Legend OUTSIDE plot so it never covers the mAP curve
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9,
+              borderaxespad=0.)
     fig.text(0.02, 0.02,
              "• IoU = area(overlap) / area(union) of pred-box vs GT-box; higher IoU = tighter match required\n"
              "• AP50 ≈ ‘found the right objects’ (loose localization)\n"
@@ -1043,7 +1064,8 @@ def _plot_bbox_aspect_ratio(gt_aspect_ratios, class_names, path: Path) -> Path:
     ax.set_xlabel("bbox aspect ratio (w / h, log scale)")
     ax.set_ylabel("count")
     ax.set_title("GT bbox aspect-ratio distribution per class")
-    ax.legend(fontsize=9); ax.grid(alpha=0.3, which="both")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8, borderaxespad=0.)
+    ax.grid(alpha=0.3, which="both")
     fig.text(0.02, 0.02,
              "• Aspect ratio = box width / height (log-scale x-axis so 0.5 and 2.0 are symmetric)\n"
              "• Dashed vertical line at 1.0 = square box\n"
