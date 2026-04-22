@@ -458,13 +458,9 @@ def _analyze_detection(
         size_stats, output_dir / "size_recall.png",
     )
     # Threshold-sweep charts (from per-pred records — no re-inference)
-    artifacts["pr_curves"] = _plot_pr_curves(
+    artifacts["threshold_analysis"] = _plot_threshold_analysis(
         detections, gt_per_class, class_names, iou_threshold,
-        output_dir / "pr_curves.png",
-    )
-    artifacts["f1_vs_threshold"] = _plot_f1_vs_threshold(
-        detections, gt_per_class, class_names, iou_threshold,
-        output_dir / "f1_vs_threshold.png",
+        output_dir / "threshold_analysis.png",
     )
     artifacts["map_vs_iou"] = _plot_map_vs_iou(
         detections, gt_per_class, class_names,
@@ -887,82 +883,126 @@ def _best_f1_and_threshold(detections, gt_per_class, class_names, iou_thr) -> di
     return out
 
 
-def _plot_pr_curves(detections, gt_per_class, class_names, iou_thr, path: Path) -> Path:
-    """One PR curve per class at the base IoU threshold. AP in legend."""
-    fig, ax = plt.subplots(figsize=(9, 6.5))
-    colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
-    aps = []
-    for i, cid in enumerate(sorted(class_names)):
-        gt_count = int(gt_per_class.get(cid, 0))
-        recall, precision, ap = _per_class_ap_curve(detections, gt_count, cid, iou_thr)
-        aps.append(ap)
-        ax.plot(recall, precision, color=colors[i % 10], lw=1.8,
-                label=f"{class_names.get(cid, str(cid))}  AP@{iou_thr}={ap:.3f}")
-    mean_ap = float(np.mean(aps)) if aps else 0.0
-    ax.set_xlabel("Recall (= TP / total GT = how many real objects found)")
-    ax.set_ylabel("Precision (= TP / TP+FP = how often detections are correct)")
-    ax.set_xlim(0, 1); ax.set_ylim(0, 1.02)
-    ax.set_title(f"Precision–Recall curves per class @ IoU ≥ {iou_thr}   "
-                  f"mean AP = mAP = {mean_ap:.3f}  (unweighted average of per-class AP)")
-    ax.grid(alpha=0.3)
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9,
-              borderaxespad=0., title="Area under curve = AP\n(1.0 = perfect)")
-    fig.text(0.02, 0.02,
-             "• Each curve is built by sweeping confidence 1.0 → 0.0 — each point is (recall, precision) at that threshold\n"
-             "• AP per class = area under its curve; higher = better\n"
-             "• mean AP (mAP) shown in title = (Σ per-class AP) / num classes\n"
-             "• Curve hugging top-right = strong model; steep drop = confidence poorly separates TPs from FPs",
-             fontsize=8, family="monospace")
-    fig.tight_layout(rect=[0, 0.12, 1, 1])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
-    return path
+def _plot_threshold_analysis(detections, gt_per_class, class_names, iou_thr, path: Path) -> Path:
+    """Four-panel threshold-analysis chart combining:
 
+    * top-left   : precision–recall curves per class (sweep conf 1 → 0)
+    * top-right  : F1 vs conf threshold per class (with best-F1 marker)
+    * bottom-left: Precision vs conf threshold per class
+    * bottom-right: Recall vs conf threshold per class
 
-def _plot_f1_vs_threshold(detections, gt_per_class, class_names, iou_thr, path: Path) -> Path:
-    """F1 vs conf_threshold per class — answers "what threshold to deploy at?".
-
-    Uses a fine step (0.01) across [0.01, 0.99] so the per-class optimum is
-    located precisely; the summary JSON mirrors the chart's best threshold.
+    All four panels share the same per-class color so the trade-off between
+    precision, recall, F1, and the IoU≥iou_thr matching is readable at a glance.
     """
     thresholds = np.round(np.arange(0.01, 1.00, 0.01), 3)
-    fig, ax = plt.subplots(figsize=(10, 6))
     colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
-    for i, cid in enumerate(sorted(class_names)):
-        class_dets = [d for d in detections if d["pred_cls"] == cid]
+
+    # Pre-compute per-class (prec, rec, f1) curves across the threshold grid.
+    per_class_curves: dict[int, dict] = {}
+    aps: list[float] = []
+    for cid in sorted(class_names):
         gt_count = int(gt_per_class.get(cid, 0))
+        recall_ap, precision_ap, ap = _per_class_ap_curve(detections, gt_count, cid, iou_thr)
+        aps.append(ap)
+        class_dets = [d for d in detections if d["pred_cls"] == cid]
         if not class_dets or gt_count == 0:
+            per_class_curves[cid] = {"ap": ap, "pr_curve": (recall_ap, precision_ap),
+                                      "precisions": None, "recalls": None, "f1s": None}
             continue
-        f1s = []
+        precisions, recalls, f1s = [], [], []
         for thr in thresholds:
             kept = [d for d in class_dets if d["score"] >= thr]
             tp = sum(1 for d in kept if d["best_iou_same_class"] >= iou_thr)
             fp = len(kept) - tp
             fn = gt_count - tp
-            prec = tp / (tp + fp) if (tp + fp) else 0.0
-            rec = tp / (tp + fn) if (tp + fn) else 0.0
-            f1s.append(2 * prec * rec / (prec + rec) if (prec + rec) else 0.0)
-        best_idx = int(np.argmax(f1s))
-        ax.plot(thresholds, f1s, color=colors[i % 10], lw=1.8,
-                label=f"{class_names.get(cid, str(cid))} → best F1={f1s[best_idx]:.2f} at conf={thresholds[best_idx]:.2f}")
-        ax.axvline(thresholds[best_idx], color=colors[i % 10], ls=":", alpha=0.5)
-        ax.scatter([thresholds[best_idx]], [f1s[best_idx]], color=colors[i % 10], s=30, zorder=5)
-    ax.set_xlabel("Confidence threshold applied at inference")
-    ax.set_ylabel("F1 score (= harmonic mean of precision & recall)")
-    ax.set_xlim(0.05, 0.95); ax.set_ylim(0, 1.02)
-    ax.set_title(f"F1 vs confidence threshold per class @ IoU ≥ {iou_thr}")
-    ax.grid(alpha=0.3)
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8,
-              borderaxespad=0., title="Deploy each class at its peak\n(dotted line)")
+            p = tp / (tp + fp) if (tp + fp) else 0.0
+            r = tp / (tp + fn) if (tp + fn) else 0.0
+            precisions.append(p); recalls.append(r)
+            f1s.append(2 * p * r / (p + r) if (p + r) else 0.0)
+        per_class_curves[cid] = {
+            "ap": ap, "pr_curve": (recall_ap, precision_ap),
+            "precisions": precisions, "recalls": recalls, "f1s": f1s,
+        }
+
+    mean_ap = float(np.mean(aps)) if aps else 0.0
+
+    # Layout: 2×2 axes, with a common legend column on the right.
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+    (ax_pr, ax_f1), (ax_p, ax_r) = axes
+
+    # --- Panel 1: PR curves -------------------------------------------------
+    for i, cid in enumerate(sorted(class_names)):
+        c = per_class_curves[cid]
+        recall_ap, precision_ap = c["pr_curve"]
+        ax_pr.plot(recall_ap, precision_ap, color=colors[i % 10], lw=1.8,
+                    label=f"{class_names.get(cid, str(cid))} AP@{iou_thr}={c['ap']:.3f}")
+    ax_pr.set_xlabel("Recall (= TP / total GT)")
+    ax_pr.set_ylabel("Precision (= TP / TP+FP)")
+    ax_pr.set_xlim(0, 1); ax_pr.set_ylim(0, 1.02)
+    ax_pr.set_title(f"(a) Precision–Recall curves @ IoU ≥ {iou_thr}   "
+                     f"mean AP = mAP = {mean_ap:.3f}")
+    ax_pr.grid(alpha=0.3)
+
+    # --- Panel 2: F1 vs threshold (with best-F1 marker) --------------------
+    best_markers: list[tuple[str, float, float]] = []
+    for i, cid in enumerate(sorted(class_names)):
+        c = per_class_curves[cid]
+        if c["f1s"] is None: continue
+        best_idx = int(np.argmax(c["f1s"]))
+        ax_f1.plot(thresholds, c["f1s"], color=colors[i % 10], lw=1.8,
+                    label=f"{class_names.get(cid, str(cid))} best F1={c['f1s'][best_idx]:.2f} @ conf={thresholds[best_idx]:.2f}")
+        ax_f1.axvline(thresholds[best_idx], color=colors[i % 10], ls=":", alpha=0.5)
+        ax_f1.scatter([thresholds[best_idx]], [c["f1s"][best_idx]], color=colors[i % 10], s=30, zorder=5)
+        best_markers.append((class_names.get(cid, str(cid)), thresholds[best_idx], c["f1s"][best_idx]))
+    ax_f1.set_xlabel("Confidence threshold applied at inference")
+    ax_f1.set_ylabel("F1 = harmonic mean of P & R")
+    ax_f1.set_xlim(0.01, 0.99); ax_f1.set_ylim(0, 1.02)
+    ax_f1.set_title(f"(b) F1 vs conf threshold   (peak = best deploy threshold per class)")
+    ax_f1.grid(alpha=0.3)
+
+    # --- Panel 3: Precision vs threshold -----------------------------------
+    for i, cid in enumerate(sorted(class_names)):
+        c = per_class_curves[cid]
+        if c["precisions"] is None: continue
+        ax_p.plot(thresholds, c["precisions"], color=colors[i % 10], lw=1.8,
+                   label=class_names.get(cid, str(cid)))
+    ax_p.set_xlabel("Confidence threshold applied at inference")
+    ax_p.set_ylabel("Precision = TP / (TP+FP)")
+    ax_p.set_xlim(0.01, 0.99); ax_p.set_ylim(0, 1.02)
+    ax_p.set_title("(c) Precision vs conf threshold   (monotonically rising → fewer FPs as thr↑)")
+    ax_p.grid(alpha=0.3)
+
+    # --- Panel 4: Recall vs threshold --------------------------------------
+    for i, cid in enumerate(sorted(class_names)):
+        c = per_class_curves[cid]
+        if c["recalls"] is None: continue
+        ax_r.plot(thresholds, c["recalls"], color=colors[i % 10], lw=1.8,
+                   label=class_names.get(cid, str(cid)))
+    ax_r.set_xlabel("Confidence threshold applied at inference")
+    ax_r.set_ylabel("Recall = TP / (TP+FN)")
+    ax_r.set_xlim(0.01, 0.99); ax_r.set_ylim(0, 1.02)
+    ax_r.set_title("(d) Recall vs conf threshold   (monotonically falling → more misses as thr↑)")
+    ax_r.grid(alpha=0.3)
+
+    # One consolidated legend to the right of the figure (panels share classes).
+    handles, labels = ax_pr.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="center right", fontsize=9,
+               bbox_to_anchor=(1.0, 0.5), borderaxespad=0.,
+               title="Per-class  AP = area of PR curve")
+
+    fig.suptitle("Threshold Analysis — how confidence threshold trades precision for recall per class",
+                 fontsize=13, y=0.995)
     fig.text(0.02, 0.02,
-             "• Each curve: F1 of one class across conf thresholds 0.01 → 0.99 (fine grid, step 0.01)\n"
-             "• Peak (dotted line + scatter) = best-F1 threshold for that class → use for deployment\n"
-             "• F1 drops at HIGH threshold → too few detections (recall↓)\n"
-             "• F1 drops at LOW threshold → too many false alarms (precision↓)",
-             fontsize=8, family="monospace")
-    fig.tight_layout(rect=[0, 0.12, 1, 1])
+             "• Panel (a) PR curves = precision vs recall as threshold sweeps 1.0 → 0.0; AP = area under curve\n"
+             "• Panel (b) F1 vs threshold — peak of each line (dotted vertical) is the deploy threshold for that class\n"
+             "• Panel (c) Precision vs threshold — rises with stricter threshold (fewer false alarms survive)\n"
+             "• Panel (d) Recall vs threshold — falls with stricter threshold (real objects get filtered out)\n"
+             "• All 4 panels share per-class colors; same threshold grid (step 0.01) across (b)–(d)",
+             fontsize=9, family="monospace")
+    fig.tight_layout(rect=[0, 0.08, 0.86, 0.97])
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(str(path), dpi=130, bbox_inches="tight"); plt.close(fig)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight")
+    plt.close(fig)
     return path
 
 
