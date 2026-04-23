@@ -112,6 +112,7 @@ class HFDatasetStatsCallback(TrainerCallback):
         training_config_path: str | None = None,
         data_config_path: str | None = None,
         feature_name: str | None = None,
+        full_sizes: dict[str, int] | None = None,
     ) -> None:
         self.save_dir = Path(save_dir)
         self.data_config = data_config
@@ -123,6 +124,7 @@ class HFDatasetStatsCallback(TrainerCallback):
         self.training_config_path = training_config_path
         self.data_config_path = data_config_path
         self.feature_name = feature_name
+        self.full_sizes = full_sizes or {}
 
     def on_train_begin(self, args, state, control, **kwargs):
         from core.p05_data.run_viz import (
@@ -135,7 +137,10 @@ class HFDatasetStatsCallback(TrainerCallback):
         class_names = _build_class_names(self.data_config)
 
         try:
-            split_sizes = {s: (len(idxs) if idxs is not None else 0) for s, idxs in self.subsets.items()}
+            split_sizes = {
+                s: (len(idxs) if idxs is not None else int(self.full_sizes.get(s, 0)))
+                for s, idxs in self.subsets.items()
+            }
             write_dataset_info(
                 out_dir,
                 feature_name=self.feature_name,

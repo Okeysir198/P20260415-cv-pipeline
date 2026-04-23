@@ -764,8 +764,12 @@ class DatasetStatsLogger(Callback):
 
             # 00_dataset_info.{md,json} — always written (cheap, self-describing).
             try:
+                def _full_len(split: str) -> int:
+                    loader = getattr(trainer, f"{split}_loader", None)
+                    ds = getattr(loader, "dataset", None) if loader is not None else None
+                    return len(ds) if ds is not None else 0
                 split_sizes = {
-                    s: (len(idxs) if idxs is not None else 0)
+                    s: (len(idxs) if idxs is not None else _full_len(s))
                     for s, idxs in subset_map.items()
                 }
                 write_dataset_info(

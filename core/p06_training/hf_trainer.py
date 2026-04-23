@@ -547,6 +547,19 @@ def train_with_hf(
         "val":   _subset_indices(eval_dataset),
         "test":  None,
     }
+    # Full (pre-subset) split sizes for 00_dataset_info provenance. When a
+    # dataset is wrapped in Subset, reach for the underlying dataset's len so
+    # the info reflects the dataset size, not the subset size.
+    def _full_len(ds):
+        if ds is None:
+            return 0
+        inner = getattr(ds, "dataset", ds)
+        return len(inner)
+    full_sizes = {
+        "train": _full_len(train_dataset),
+        "val":   _full_len(eval_dataset),
+        "test":  _full_len(test_dataset),
+    }
 
     # Build callbacks (incl. viz-bridge for detection)
     callbacks = _build_callbacks(
@@ -560,6 +573,7 @@ def train_with_hf(
         test_dataset=test_dataset,
         config_path=config_path,
         dataset_config_path=dataset_config_path,
+        full_sizes=full_sizes,
     )
 
     # Create HF Trainer. Detection uses a subclass that avoids safetensors'
@@ -973,6 +987,7 @@ def _build_callbacks(
     test_dataset=None,
     config_path: Path | None = None,
     dataset_config_path: str | None = None,
+    full_sizes: dict[str, int] | None = None,
 ) -> list:
     """Build HF Trainer callbacks from our config.
 
@@ -1034,6 +1049,7 @@ def _build_callbacks(
         training_config_path=str(config_path) if config_path else None,
         data_config_path=dataset_config_path,
         feature_name=_feature_name(str(config_path)) if config_path else None,
+        full_sizes=full_sizes,
     ))
 
     if data_viz.get("enabled", True):
