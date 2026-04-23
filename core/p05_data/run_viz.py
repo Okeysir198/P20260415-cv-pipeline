@@ -6,8 +6,7 @@ Generates (numbered by pipeline step):
   - 01_dataset_stats.{png,json}  — split sizes + class balance + bbox tiers
   - 02_data_labels_<split>.png   — raw images with GT bounding boxes
   - 03_aug_labels_<split>.png    — augmented images with transformed GT boxes
-  - 04_normalized_input_preview.png — final model input (denormalized)
-  - 05_transform_pipeline.png    — step-by-step transform walk (normalize↔denormalize inverse check)
+  - 04_normalize_check.png       — normalize check: raw | normalized (false-color) | denormalized
 
 Usage::
 

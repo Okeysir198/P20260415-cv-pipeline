@@ -519,40 +519,20 @@ class DetectionTrainer:
                 )
             )
 
-        # Step-by-step transform pipeline viz (verifies normalize↔denormalize).
+        # Normalize verification viz (raw | normalized | denormalized).
         transform_viz_cfg = self._train_cfg.get("transform_viz", {})
         if transform_viz_cfg.get("enabled", True):
-            from core.p06_training.callbacks_viz import TransformPipelineCallback
-            class_names_tp = {int(k): str(v)
+            from core.p06_training.callbacks_viz import NormalizeCheckCallback
+            class_names_nc = {int(k): str(v)
                               for k, v in (loaded_data_cfg.get("names", {}) or {}).items()}
             callbacks.append(
-                TransformPipelineCallback(
+                NormalizeCheckCallback(
                     save_dir=save_dir,
                     data_config=loaded_data_cfg,
                     training_config=self.config,
                     base_dir=str(self.config_path.parent),
-                    class_names=class_names_tp,
-                    gallery_samples=transform_viz_cfg.get("gallery_samples", 4),
-                )
-            )
-
-        # Normalization sanity-check (stage-3 from the reference notebook).
-        norm_viz_cfg = self.config.get("training", {}).get("norm_viz", {})
-        if norm_viz_cfg.get("enabled", True):
-            from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
-            from core.p06_training.callbacks_viz import NormalizedInputPreviewCallback
-            class_names = {int(k): str(v)
-                           for k, v in (loaded_data_cfg.get("names", {}) or {}).items()}
-            task = _task_from_output(getattr(self.model, "output_format", None))
-            callbacks.append(
-                NormalizedInputPreviewCallback(
-                    save_dir=save_dir,
-                    class_names=class_names,
-                    mean=loaded_data_cfg.get("mean", IMAGENET_MEAN),
-                    std=loaded_data_cfg.get("std", IMAGENET_STD),
-                    num_samples=norm_viz_cfg.get("num_samples", 8),
-                    grid_cols=norm_viz_cfg.get("grid_cols", 4),
-                    task=task,
+                    class_names=class_names_nc,
+                    num_samples=transform_viz_cfg.get("num_samples", 4),
                 )
             )
 

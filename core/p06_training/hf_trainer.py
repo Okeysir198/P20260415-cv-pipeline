@@ -1065,35 +1065,19 @@ def _build_callbacks(
             enable_train_end=want_best_viz,
         ))
 
-    # Step-by-step transform pipeline viz (verifies normalize↔denormalize).
+    # Normalize verification viz — fires once on train-begin. Catches
+    # double/missing-normalize footguns, box-format drift, and broken
+    # inverse-normalize algebra before the first GPU forward pass.
     transform_viz = train_cfg.get("transform_viz", {})
     if transform_viz.get("enabled", True):
-        from core.p06_training.callbacks_viz import TransformPipelineCallback
-        callbacks.append(TransformPipelineCallback(
+        from core.p06_training.callbacks_viz import NormalizeCheckCallback
+        callbacks.append(NormalizeCheckCallback(
             save_dir=save_dir,
             data_config=data_config,
             training_config=config,
             base_dir=base_dir or "",
             class_names=class_names,
-            gallery_samples=transform_viz.get("gallery_samples", 4),
-        ))
-
-    # Normalization sanity-check preview — fires ONCE on_train_start, saves
-    # data_preview/normalized_input_preview.png and never touches training
-    # again. Catches double/missing-normalize footguns + box-format drift
-    # before the first GPU forward pass of epoch 1.
-    norm_viz = train_cfg.get("norm_viz", {})
-    if norm_viz.get("enabled", True):
-        from core.p06_training.callbacks_viz import NormalizedInputPreviewCallback
-        task = "detection" if output_format == "detr" else output_format
-        callbacks.append(NormalizedInputPreviewCallback(
-            save_dir=save_dir,
-            class_names=class_names,
-            mean=(data_config.get("mean") or IMAGENET_MEAN),
-            std=(data_config.get("std") or IMAGENET_STD),
-            num_samples=norm_viz.get("num_samples", 8),
-            grid_cols=norm_viz.get("grid_cols", 4),
-            task=task,
+            num_samples=transform_viz.get("num_samples", 4),
         ))
 
     # train_viz would run the same viz on the train_dataloader — not wired
