@@ -25,7 +25,6 @@ import random
 from pathlib import Path
 from typing import Any
 
-import cv2
 import numpy as np
 import torch
 
@@ -34,6 +33,7 @@ from core.p05_data.base_dataset import (
     IMAGENET_STD,
     denormalize_tensor,
 )
+from utils.viz import VizStyle, classification_banner
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +57,10 @@ def render_normalized_input_preview(
     detection or ``{"pixel_values": (B, 3, H, W), "labels": LongTensor}``
     for classification.
     """
+    import supervision as sv
+
     from core.p06_training.post_train import _save_grid  # reuse shared grid renderer
     from core.p10_inference.supervision_bridge import VizStyle, annotate_gt_pred
-    import supervision as sv
 
     pixel_values = sample_batch.get("pixel_values")
     if pixel_values is None:
@@ -105,7 +106,6 @@ def render_normalized_input_preview(
             ))
         elif task == "classification":
             label = sample_batch.get("labels")
-            bar = np.full((28, image.shape[1], 3), 30, dtype=np.uint8)
             if label is not None and hasattr(label, "__getitem__"):
                 try:
                     cid = int(label[i])
@@ -115,9 +115,14 @@ def render_normalized_input_preview(
                 text = f"GT: {cname}"
             else:
                 text = "GT: -"
-            cv2.putText(bar, text, (6, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                        (255, 255, 255), 1, cv2.LINE_AA)
-            rows.append(np.vstack([bar, image]))
+            # Preserve the original look: 28-px dark bar, white text.
+            banner_style = VizStyle(
+                banner_height=28,
+                banner_bg_rgb=(30, 30, 30),
+                banner_text_rgb=(255, 255, 255),
+                banner_text_scale=0.5,
+            )
+            rows.append(classification_banner(image, text, style=banner_style, position="top"))
         else:
             # Segmentation / keypoint: just show the image (target encoding varies)
             rows.append(image)

@@ -255,26 +255,32 @@ class QAReporter:
                 red_colors = {int(c): (0, 0, 220) for c in np.unique(sam3_cls)}
                 img = draw_bboxes(img, sam3_pixel, sam3_cls, colors=red_colors)
 
-            # -- Issue text overlay --
+            # -- Issue text overlay (RGB banners stacked above image) --
+            from utils.viz import classification_banner
+
             issues = result.get("validation_issues", [])
             quality = result.get("quality_score", 0.0)
             grade = result.get("grade", "?")
             header = f"score={quality:.3f}  grade={grade}  issues={len(issues)}"
-            cv2.putText(
-                img, header, (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA,
-            )
-            for idx, issue in enumerate(issues[:5]):
-                text = f"- {issue.get('type', '?')}: {issue.get('detail', '')}"
-                y_pos = 50 + idx * 20
-                cv2.putText(
-                    img, text[:90], (10, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 200), 1, cv2.LINE_AA,
+
+            # draw_bboxes returned BGR; convert to RGB for helper composition.
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            # Header (bright red) + up to 5 issue lines, each as a top-stacked banner.
+            # Prepend in reverse so the header ends up on the very top.
+            for issue in reversed(issues[:5]):
+                line = f"- {issue.get('type', '?')}: {issue.get('detail', '')}"[:90]
+                img_rgb = classification_banner(
+                    img_rgb, line, position="top",
+                    bg_color_rgb=(0, 0, 0), text_color_rgb=(200, 0, 0),
                 )
+            img_rgb = classification_banner(
+                img_rgb, header, position="top",
+                bg_color_rgb=(0, 0, 0), text_color_rgb=(255, 0, 0),
+            )
 
             stem = Path(img_path).stem
             out_path = vis_dir / f"{rank:03d}_{stem}.png"
-            cv2.imwrite(str(out_path), img)
+            cv2.imwrite(str(out_path), cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
 
         logger.info("Saved %d worst-image visualizations", min(count, len(sorted_results)))
 

@@ -4,14 +4,92 @@ Creates 5 short videos (5-8 seconds each, 640x480, 30fps) with simple
 animated shapes that visually represent each detection scenario.
 """
 
+import math
+import sys
+from pathlib import Path
+
 import cv2
 import numpy as np
-import math
-from pathlib import Path
+import supervision as sv
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from utils.viz import (  # noqa: E402
+    VizStyle,
+    annotate_detections,
+    annotate_polygons,
+    classification_banner,
+)
 
 OUTPUT_DIR = Path(__file__).parent
 FPS = 30
 W, H = 640, 480
+
+
+def _det_overlay_bgr(
+    frame_bgr: np.ndarray,
+    xyxy: np.ndarray,
+    labels: list[str],
+    color_rgb: tuple[int, int, int],
+) -> np.ndarray:
+    """Draw detection boxes+labels on a BGR frame using utils.viz helpers.
+
+    Converts BGR→RGB at the boundary, runs ``annotate_detections``, then back
+    to BGR. Colors are specified in RGB to match ``utils.viz`` convention.
+    """
+    if len(xyxy) == 0:
+        return frame_bgr
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    dets = sv.Detections(
+        xyxy=np.asarray(xyxy, dtype=np.float32).reshape(-1, 4),
+        class_id=np.zeros(len(xyxy), dtype=int),
+    )
+    r, g, b = color_rgb
+    rgb = annotate_detections(
+        rgb,
+        detections=dets,
+        labels=labels,
+        color=sv.Color(r=r, g=g, b=b),
+    )
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def _banner_bgr(
+    frame_bgr: np.ndarray,
+    text: str,
+    bg_rgb: tuple[int, int, int] = (34, 34, 34),
+    text_rgb: tuple[int, int, int] = (255, 255, 255),
+) -> np.ndarray:
+    """Overlay a top banner on a BGR frame via utils.viz.classification_banner."""
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    style = VizStyle(banner_height=28, banner_text_scale=0.7)
+    rgb = classification_banner(
+        rgb,
+        text=text,
+        style=style,
+        position="overlay_top",
+        bg_color_rgb=bg_rgb,
+        text_color_rgb=text_rgb,
+    )
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def _polygon_zone_bgr(
+    frame_bgr: np.ndarray,
+    zone_pts: np.ndarray,
+    label: str,
+    color_rgb: tuple[int, int, int] = (255, 0, 0),
+) -> np.ndarray:
+    """Draw a translucent restricted-zone polygon with an outline + label."""
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    r, g, b = color_rgb
+    rgb = annotate_polygons(
+        rgb,
+        polygons=[zone_pts],
+        labels=[label],
+        color=sv.Color(r=r, g=g, b=b),
+    )
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
 def draw_person(frame, cx, cy, scale=1.0, color=(0, 200, 0)):
@@ -102,9 +180,9 @@ def create_fire_smoke_video():
                 r = int(p['r'] * (1 + age * 0.02))
                 cv2.circle(frame, (px, py), r, (gray, gray, gray + 10), -1)
 
-        # Labels
-        cv2.putText(frame, "FIRE/SMOKE DETECTION DEMO", (100, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        # Title banner (annotation overlay) — via utils.viz
+        frame = _banner_bgr(frame, "FIRE/SMOKE DETECTION DEMO")
+        # Frame counter — pure UI chrome, not a detection annotation (KEEP cv2)
         cv2.putText(frame, f"Frame {i}/{n_frames}", (10, H - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
 
@@ -143,17 +221,33 @@ def create_construction_ppe_video():
         for sx in range(0, W, 40):
             cv2.rectangle(frame, (sx, H - 30), (sx + 20, H), (0, 200, 200), -1)
 
+        # Draw scene stick-figures first, then stack detection annotations.
         for w in workers:
             wx = int(w['x_start'] + w['speed'] * i)
             if -50 < wx < W + 50:
                 draw_helmet(frame, wx, w['y'], w['helmet'])
-                label = "HELMET" if w['helmet'] else "NO HELMET"
-                color = (0, 180, 0) if w['helmet'] else (0, 0, 220)
-                cv2.putText(frame, label, (int(wx - 35), int(w['y'] - 85)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
 
-        cv2.putText(frame, "CONSTRUCTION PPE DETECTION DEMO", (80, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (40, 40, 40), 2)
+        # Detection overlays (bbox + label around each worker) — via utils.viz
+        ok_boxes, ok_labels = [], []
+        bad_boxes, bad_labels = [], []
+        for w in workers:
+            wx = int(w['x_start'] + w['speed'] * i)
+            if not (-50 < wx < W + 50):
+                continue
+            box = [wx - 30, w['y'] - 80, wx + 30, w['y'] + 65]
+            if w['helmet']:
+                ok_boxes.append(box)
+                ok_labels.append("HELMET")
+            else:
+                bad_boxes.append(box)
+                bad_labels.append("NO HELMET")
+        if ok_boxes:
+            frame = _det_overlay_bgr(frame, np.array(ok_boxes), ok_labels, (0, 180, 0))
+        if bad_boxes:
+            frame = _det_overlay_bgr(frame, np.array(bad_boxes), bad_labels, (220, 0, 0))
+
+        frame = _banner_bgr(frame, "CONSTRUCTION PPE DETECTION DEMO",
+                            bg_rgb=(230, 230, 230), text_rgb=(40, 40, 40))
         cv2.putText(frame, f"Frame {i}/{n_frames}", (10, H - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (80, 80, 80), 1)
         out.write(frame)
@@ -185,16 +279,19 @@ def create_fall_detection_video():
             # Walking normally with slight bob
             bob = 5 * math.sin(i * 0.5)
             draw_person(frame, cx, cy_base + bob, scale=1.2, color=(50, 150, 50))
-            cv2.putText(frame, "NORMAL", (int(cx - 30), int(cy_base - 110)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 150, 50), 2)
+            # Detection-style label around the walking person
+            frame = _det_overlay_bgr(
+                frame,
+                np.array([[cx - 30, cy_base + bob - 105, cx + 30, cy_base + bob + 65]]),
+                ["NORMAL"],
+                (50, 150, 50),
+            )
         elif i < fall_start + fall_duration:
-            # Falling animation
+            # Falling animation — tilting body is SCENE figure, KEEP cv2 primitives
             progress = (i - fall_start) / fall_duration
             angle = progress * 80  # degrees
-            # Rotate the person (simplified: shift body parts)
             fall_cx = cx + progress * 30
             fall_cy = cy_base + progress * 50
-            # Draw tilting body
             rad = math.radians(angle)
             body_len = 65 * 1.2
             head_x = int(fall_cx - math.sin(rad) * body_len * 0.6)
@@ -203,23 +300,30 @@ def create_fall_detection_video():
             foot_y = int(fall_cy + math.cos(rad) * body_len * 0.4)
             cv2.circle(frame, (head_x, head_y - 15), 18, (0, 0, 220), -1)
             cv2.line(frame, (head_x, head_y), (foot_x, foot_y), (0, 0, 220), 4)
-            cv2.putText(frame, "FALLING!", (int(fall_cx - 35), int(fall_cy - 100)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            # Detection-style label overlay
+            frame = _det_overlay_bgr(
+                frame,
+                np.array([[fall_cx - 45, fall_cy - 95, fall_cx + 45, fall_cy + 30]]),
+                ["FALLING!"],
+                (255, 0, 0),
+            )
         else:
-            # Fallen on ground
+            # Fallen on ground — body shape is scene, KEEP cv2 primitives
             gx = cx + 30
             gy = 370
             cv2.ellipse(frame, (int(gx), int(gy)), (50, 15), 0, 0, 360, (0, 0, 200), -1)
             cv2.circle(frame, (int(gx - 40), int(gy - 5)), 15, (0, 0, 200), -1)
-            # Blinking alert
+            # Blinking detection alert (box + label) — MIGRATED to utils.viz
             if (i // 8) % 2 == 0:
-                cv2.putText(frame, "!! FALL DETECTED !!", (int(gx - 80), int(gy - 40)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                cv2.rectangle(frame, (int(gx - 70), int(gy - 30)), (int(gx + 70), int(gy + 20)),
-                              (0, 0, 255), 2)
+                frame = _det_overlay_bgr(
+                    frame,
+                    np.array([[gx - 70, gy - 30, gx + 70, gy + 20]]),
+                    ["!! FALL DETECTED !!"],
+                    (255, 0, 0),
+                )
 
-        cv2.putText(frame, "FALL DETECTION DEMO", (150, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (40, 40, 40), 2)
+        frame = _banner_bgr(frame, "FALL DETECTION DEMO",
+                            bg_rgb=(230, 230, 230), text_rgb=(40, 40, 40))
         cv2.putText(frame, f"Frame {i}/{n_frames}", (10, H - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (80, 80, 80), 1)
         out.write(frame)
@@ -242,32 +346,37 @@ def create_phone_usage_video():
         cv2.rectangle(frame, (50, 280), (250, 300), (100, 80, 60), -1)
         cv2.rectangle(frame, (400, 280), (600, 300), (100, 80, 60), -1)
 
-        # Person 1: not using phone (working at desk)
+        # Person 1: not using phone (working at desk) — scene figure
         draw_person(frame, 150, 280, color=(50, 150, 50))
-        cv2.putText(frame, "WORKING", (110, 190),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (50, 150, 50), 1)
+        # Detection label for "WORKING" (green, classification-style)
+        frame = _det_overlay_bgr(
+            frame, np.array([[110, 180, 200, 290]]), ["WORKING"], (50, 150, 50)
+        )
 
-        # Person 2: using phone (looking down with phone rectangle)
+        # Person 2: using phone (looking down with phone rectangle) — scene figure
         px2 = 500
         py2 = 260
         draw_person(frame, px2, py2, color=(0, 0, 220))
-        # Phone in hand (small glowing rectangle)
+        # Phone in hand (glowing rectangle) — pure scene prop, KEEP cv2
         phone_x = int(px2 + 15 + 3 * math.sin(i * 0.15))
         phone_y = int(py2 - 15 + 2 * math.sin(i * 0.1))
         cv2.rectangle(frame, (phone_x, phone_y), (phone_x + 12, phone_y + 20), (255, 255, 200), -1)
         cv2.rectangle(frame, (phone_x, phone_y), (phone_x + 12, phone_y + 20), (200, 200, 150), 1)
-        # Phone glow
+        # Blinking detection alert (box + label) — MIGRATED
         if (i // 15) % 2 == 0:
-            cv2.putText(frame, "PHONE DETECTED!", (px2 - 65, py2 - 95),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-            cv2.rectangle(frame, (px2 - 50, py2 - 80), (px2 + 50, py2 + 70), (0, 0, 255), 2)
+            frame = _det_overlay_bgr(
+                frame,
+                np.array([[px2 - 50, py2 - 80, px2 + 50, py2 + 70]]),
+                ["PHONE DETECTED!"],
+                (255, 0, 0),
+            )
 
-        # Person 3: walking by
+        # Person 3: walking by — scene figure
         p3x = int(320 + 50 * math.sin(i * 0.04))
         draw_person(frame, p3x, 320, scale=0.8, color=(50, 150, 50))
 
-        cv2.putText(frame, "PHONE USAGE DETECTION DEMO", (100, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (40, 40, 40), 2)
+        frame = _banner_bgr(frame, "PHONE USAGE DETECTION DEMO",
+                            bg_rgb=(230, 230, 230), text_rgb=(40, 40, 40))
         cv2.putText(frame, f"Frame {i}/{n_frames}", (10, H - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (80, 80, 80), 1)
         out.write(frame)
@@ -297,30 +406,29 @@ def create_zone_intrusion_video():
         frame[:] = (200, 200, 200)  # Outdoor area
         cv2.rectangle(frame, (0, 390), (W, H), (140, 150, 140), -1)  # Ground
 
-        # Draw restricted zone (translucent red)
-        overlay = frame.copy()
-        cv2.fillPoly(overlay, [zone_pts], (80, 80, 220))
-        cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
-        cv2.polylines(frame, [zone_pts], True, (0, 0, 255), 2)
-        cv2.putText(frame, "RESTRICTED ZONE", (280, 290),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 2)
+        # Restricted zone (translucent polygon + outline + label) — MIGRATED
+        frame = _polygon_zone_bgr(frame, zone_pts, "RESTRICTED ZONE", color_rgb=(255, 0, 0))
 
-        for pidx, p in enumerate(people):
+        intrusion_boxes: list[list[int]] = []
+        intrusion_labels: list[str] = []
+        blink_on = (i // 10) % 2 == 0
+        for p in people:
             px = int(p['x_start'] + p['speed'] * i)
             py = p['y']
             if -50 < px < W + 50:
-                # Check if inside zone
                 inside = cv2.pointPolygonTest(zone_pts, (float(px), float(py)), False) >= 0
                 color = (0, 0, 220) if inside else (50, 180, 50)
                 draw_person(frame, px, py, scale=1.0, color=color)
                 if inside:
-                    cv2.rectangle(frame, (px - 30, py - 85), (px + 30, py + 65), (0, 0, 255), 2)
-                    if (i // 10) % 2 == 0:
-                        cv2.putText(frame, "INTRUSION!", (px - 40, py - 90),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 2)
+                    intrusion_boxes.append([px - 30, py - 85, px + 30, py + 65])
+                    intrusion_labels.append("INTRUSION!" if blink_on else "")
+        if intrusion_boxes:
+            frame = _det_overlay_bgr(
+                frame, np.array(intrusion_boxes), intrusion_labels, (255, 0, 0)
+            )
 
-        cv2.putText(frame, "ZONE INTRUSION DETECTION DEMO", (80, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (40, 40, 40), 2)
+        frame = _banner_bgr(frame, "ZONE INTRUSION DETECTION DEMO",
+                            bg_rgb=(230, 230, 230), text_rgb=(40, 40, 40))
         cv2.putText(frame, f"Frame {i}/{n_frames}", (10, H - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (80, 80, 80), 1)
         out.write(frame)
@@ -360,8 +468,8 @@ def create_general_demo_video():
                 bob = 4 * math.sin(i * 0.4 + p['x_start'])
                 draw_person(frame, px, int(p['y'] + bob), scale=p['scale'], color=(60, 160, 60))
 
-        cv2.putText(frame, "GENERAL DEMO (MULTI-PURPOSE)", (100, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (40, 40, 40), 2)
+        frame = _banner_bgr(frame, "GENERAL DEMO (MULTI-PURPOSE)",
+                            bg_rgb=(230, 230, 230), text_rgb=(40, 40, 40))
         cv2.putText(frame, f"Frame {i}/{n_frames}", (10, H - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (80, 80, 80), 1)
         out.write(frame)

@@ -11,11 +11,13 @@ from typing import Any
 
 import cv2
 import numpy as np
+import supervision as sv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from core.p06_models.pose_base import PoseModel
 from core.p10_inference.predictor import DetectionPredictor
+from utils.viz import VizStyle, annotate_detections, annotate_keypoints
 
 logger = logging.getLogger(__name__)
 
@@ -137,39 +139,48 @@ class PosePredictor:
         Returns:
             Annotated BGR image.
         """
-        vis = image.copy()
         boxes = predictions["boxes"]
         keypoints = predictions["keypoints"]
         skeleton = predictions["skeleton"]
 
-        # Color palette for skeleton bones
-        bone_color = (0, 255, 0)
-        kpt_color = (0, 0, 255)
-        box_color = (255, 0, 0)
+        # Preserve original BGR palette: box=blue, bones=green, vertices=red.
+        # Helpers operate in RGB; convert at the boundary.
+        box_color_rgb = sv.Color(r=0, g=0, b=255)       # was BGR (255,0,0) = blue
+        kpt_color_rgb = sv.Color(r=255, g=0, b=0)       # was BGR (0,0,255) = red
+        skeleton_color_rgb = (0, 255, 0)                # was BGR (0,255,0) = green
 
-        for i in range(len(boxes)):
-            # Draw person box
-            x1, y1, x2, y2 = boxes[i].astype(int)
-            cv2.rectangle(vis, (x1, y1), (x2, y2), box_color, 2)
+        style = VizStyle(
+            kpt_visibility_threshold=keypoint_threshold,
+            skeleton_color_rgb=skeleton_color_rgb,
+        )
 
-            kpts = keypoints[i]  # (K, 3)
+        vis_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-            # Draw skeleton bones
-            for idx_a, idx_b in skeleton:
-                if idx_a >= len(kpts) or idx_b >= len(kpts):
-                    continue
-                if kpts[idx_a, 2] < keypoint_threshold or kpts[idx_b, 2] < keypoint_threshold:
-                    continue
-                pt_a = (int(kpts[idx_a, 0]), int(kpts[idx_a, 1]))
-                pt_b = (int(kpts[idx_b, 0]), int(kpts[idx_b, 1]))
-                cv2.line(vis, pt_a, pt_b, bone_color, 2)
+        if len(boxes) > 0:
+            dets = sv.Detections(
+                xyxy=np.asarray(boxes, dtype=np.float32),
+                class_id=np.zeros(len(boxes), dtype=int),
+            )
+            vis_rgb = annotate_detections(
+                vis_rgb, dets, labels=[""] * len(boxes), style=style, color=box_color_rgb,
+            )
 
-            # Draw keypoints
-            for k in range(len(kpts)):
-                if kpts[k, 2] < keypoint_threshold:
-                    continue
-                pt = (int(kpts[k, 0]), int(kpts[k, 1]))
-                cv2.circle(vis, pt, 4, kpt_color, -1)
+            # Keypoints: (N, K, 3) → xy (N,K,2) + conf (N,K).
+            kpts_arr = np.asarray(keypoints, dtype=np.float32)
+            if kpts_arr.size > 0:
+                xy = kpts_arr[..., :2]
+                conf = kpts_arr[..., 2] if kpts_arr.shape[-1] >= 3 else None
+                # Edges drawn in skeleton_color via style; vertices overridden to red.
+                vis_rgb = annotate_keypoints(
+                    vis_rgb, xy, skeleton_edges=list(skeleton), confidence=conf, style=style,
+                )
+                # Re-draw vertices in red to preserve original kpt color.
+                vis_rgb = annotate_keypoints(
+                    vis_rgb, xy, skeleton_edges=None, confidence=conf,
+                    style=style, color=kpt_color_rgb,
+                )
+
+        vis = cv2.cvtColor(vis_rgb, cv2.COLOR_RGB2BGR)
 
         if save_path is not None:
             save_path = Path(save_path)

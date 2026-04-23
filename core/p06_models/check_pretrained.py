@@ -166,23 +166,40 @@ def infer_hf(model, processor, image_bgr: np.ndarray, device: torch.device, conf
 # ---------------------------------------------------------------------------
 
 def _draw_panel(image_bgr: np.ndarray, result: dict, class_names: list[str], title: str) -> np.ndarray:
-    img = image_bgr.copy()
-    for box, score, label in zip(result["boxes"], result["scores"], result["labels"], strict=True):
-        x1, y1, x2, y2 = map(int, box)
-        color = _PALETTE[int(label) % len(_PALETTE)]
-        name = class_names[int(label)] if int(label) < len(class_names) else str(label)
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-        text = f"{name} {score:.2f}"
-        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-        cv2.rectangle(img, (x1, y1 - th - 5), (x1 + tw + 3, y1), color, -1)
-        cv2.putText(img, text, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    import supervision as sv
 
-    # Title banner
-    n = len(result["boxes"])
+    from utils.viz import annotate_detections, classification_banner
+
+    img_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+    boxes = np.asarray(result["boxes"], dtype=np.float32).reshape(-1, 4)
+    scores = np.asarray(result["scores"], dtype=np.float32).reshape(-1)
+    labels_arr = np.asarray(result["labels"], dtype=np.int64).reshape(-1)
+
+    if len(boxes) > 0:
+        detections = sv.Detections(
+            xyxy=boxes,
+            confidence=scores,
+            class_id=labels_arr,
+        )
+        label_strs = [
+            f"{class_names[int(lbl)] if int(lbl) < len(class_names) else lbl} {scr:.2f}"
+            for lbl, scr in zip(labels_arr, scores, strict=True)
+        ]
+        annotated_rgb = annotate_detections(img_rgb, detections, labels=label_strs)
+    else:
+        annotated_rgb = img_rgb.copy()
+
+    n = len(boxes)
     banner_text = f"{title}  |  {n} detection{'s' if n != 1 else ''}"
-    banner = np.full((38, img.shape[1], 3), 40, dtype=np.uint8)
-    cv2.putText(banner, banner_text, (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (220, 220, 220), 1)
-    return np.vstack([banner, img])
+    annotated_rgb = classification_banner(
+        annotated_rgb,
+        banner_text,
+        position="top",
+        bg_color_rgb=(40, 40, 40),
+        text_color_rgb=(220, 220, 220),
+    )
+    return cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
 
 
 def _hstack_panels(panels: list[np.ndarray]) -> np.ndarray:

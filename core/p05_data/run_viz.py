@@ -29,21 +29,24 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import supervision as sv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from core.p05_data.detection_dataset import YOLOXDataset
 from core.p05_data.transforms import build_transforms
 from utils.config import feature_name_from_config_path, generate_run_dir, load_config
+from utils.viz import VizStyle, annotate_detections, apply_plot_style, save_image_grid
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+# Unified matplotlib rcParams for all statistical panels in this module.
+apply_plot_style()
 
-# ---------------------------------------------------------------------------
-# Drawing helpers (same palette as callbacks.py)
-# ---------------------------------------------------------------------------
 
+# Palette used only by the matplotlib class-balance panels below (BGR tuples —
+# the `[::-1]` at the call sites flips to RGB for matplotlib).
 _LABEL_PALETTE = [
     (0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255),
     (255, 0, 255), (255, 255, 0), (0, 128, 255), (128, 0, 255),
@@ -53,41 +56,29 @@ _LABEL_PALETTE = [
 ]
 
 
-def _draw_gt_boxes(image, targets, class_names, thickness=2, text_scale=0.5):
-    vis = image.copy()
-    h, w = vis.shape[:2]
-    for row in targets:
-        cls_id = int(row[0])
-        cx, cy, bw, bh = row[1], row[2], row[3], row[4]
-        x1, y1 = int((cx - bw/2)*w), int((cy - bh/2)*h)
-        x2, y2 = int((cx + bw/2)*w), int((cy + bh/2)*h)
-        color = _LABEL_PALETTE[cls_id % len(_LABEL_PALETTE)]
-        cv2.rectangle(vis, (x1, y1), (x2, y2), color, thickness)
-        label = class_names.get(cls_id, str(cls_id))
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 1)
-        cv2.rectangle(vis, (x1, y1-th-6), (x1+tw+4, y1), color, -1)
-        cv2.putText(vis, label, (x1+2, y1-4), cv2.FONT_HERSHEY_SIMPLEX, text_scale, (255,255,255), 1)
-    return vis
+def _yolo_targets_to_sv(targets: np.ndarray, h: int, w: int) -> sv.Detections:
+    """Convert YOLO-normalized (cls, cx, cy, w, h) rows to ``sv.Detections`` in pixel xyxy."""
+    if targets is None or len(targets) == 0:
+        return sv.Detections.empty()
+    t = np.asarray(targets, dtype=np.float32).reshape(-1, 5)
+    cls = t[:, 0].astype(int)
+    cx, cy, bw, bh = t[:, 1], t[:, 2], t[:, 3], t[:, 4]
+    x1 = (cx - bw / 2) * w
+    y1 = (cy - bh / 2) * h
+    x2 = (cx + bw / 2) * w
+    y2 = (cy + bh / 2) * h
+    xyxy = np.stack([x1, y1, x2, y2], axis=1).astype(np.float32)
+    return sv.Detections(xyxy=xyxy, class_id=cls)
 
 
-def _save_image_grid(annotated, grid_cols, title, out_path, dpi):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    ncols = min(grid_cols, len(annotated))
-    nrows = -(-len(annotated) // ncols)  # ceil division
-    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols*4, nrows*3.5))
-    axes = np.asarray(axes).ravel()
-    for i in range(nrows * ncols):
-        axes[i].axis("off")
-        if i < len(annotated):
-            axes[i].imshow(cv2.cvtColor(annotated[i], cv2.COLOR_BGR2RGB))
-    fig.suptitle(title, fontsize=12)
-    fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    logger.info("Saved: %s", out_path)
+def _annotate_gt(image_rgb: np.ndarray, targets: np.ndarray, class_names: dict,
+                 thickness: int, text_scale: float) -> np.ndarray:
+    """Draw GT boxes + labels. ``thickness`` is ignored — VizStyle auto-scales."""
+    del thickness  # auto_box_thickness handles this in VizStyle
+    h, w = image_rgb.shape[:2]
+    dets = _yolo_targets_to_sv(targets, h, w)
+    style = VizStyle(label_text_scale=text_scale)
+    return annotate_detections(image_rgb, dets, class_names=class_names, style=style)
 
 
 # ---------------------------------------------------------------------------
@@ -109,13 +100,17 @@ def viz_data_labels(data_cfg, base_dir, class_names, split, num_samples, grid_co
     annotated = []
     for idx in indices:
         item = ds.get_raw_item(idx)
-        img = item["image"]
+        img_rgb = cv2.cvtColor(item["image"], cv2.COLOR_BGR2RGB)
         targets = ds._load_label(ds.img_paths[idx])
         if targets is None or len(targets) == 0:
             targets = np.zeros((0, 5), dtype=np.float32)
-        annotated.append(_draw_gt_boxes(img, targets, class_names, thickness, text_scale))
+        annotated.append(_annotate_gt(img_rgb, targets, class_names, thickness, text_scale))
     out_path = out_dir / f"data_labels_{split}.png"
-    _save_image_grid(annotated, grid_cols, f"Data + Labels [{split}] — {k}/{n} samples", out_path, dpi)
+    save_image_grid(
+        annotated, out_path, cols=grid_cols,
+        header=f"Data + Labels [{split}] — {k}/{n} samples",
+    )
+    logger.info("Saved: %s", out_path)
 
 
 def _render_aug_samples(ds, indices, mean, std, class_names, thickness, text_scale):
@@ -130,9 +125,9 @@ def _render_aug_samples(ds, indices, mean, std, class_names, thickness, text_sca
             continue
         aug_np = aug_tensor.numpy().transpose(1, 2, 0)
         aug_np = np.clip(aug_np * std + mean, 0, 1)
-        aug_bgr = (aug_np[:, :, ::-1] * 255).astype(np.uint8)
+        aug_rgb = (aug_np * 255).astype(np.uint8)
         targets_np = targets_tensor.numpy() if len(targets_tensor) > 0 else np.zeros((0, 5), dtype=np.float32)
-        annotated.append(_draw_gt_boxes(aug_bgr, targets_np, class_names, thickness, text_scale))
+        annotated.append(_annotate_gt(aug_rgb, targets_np, class_names, thickness, text_scale))
     return annotated
 
 
@@ -168,7 +163,8 @@ def viz_aug_labels(data_cfg, train_cfg, base_dir, class_names, split, num_sample
         suffix = "" if label == "simple" else "_mosaic"
         out_path = out_dir / f"aug_labels_{split}{suffix}.png"
         title = f"Augmented + Labels [{split}] ({'no mosaic/mixup' if label == 'simple' else 'with mosaic/mixup'}) — {k}/{n} samples"
-        _save_image_grid(annotated, grid_cols, title, out_path, dpi)
+        save_image_grid(annotated, out_path, cols=grid_cols, header=title)
+        logger.info("Saved: %s", out_path)
 
 
 # ---------------------------------------------------------------------------

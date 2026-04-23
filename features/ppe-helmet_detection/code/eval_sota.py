@@ -15,6 +15,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import supervision as sv
 import torch
 from PIL import Image
 
@@ -24,31 +25,42 @@ PRETRAINED = REPO / "pretrained" / "ppe-helmet_detection"
 SAMPLES = FEATURE / "samples"
 OUT = FEATURE / "predict"
 
-# --- colors (BGR)
-COLORS = {
-    "hardhat": (0, 200, 0),
-    "no-hardhat": (0, 0, 220),
-    "person": (200, 150, 0),
-    "_default": (180, 180, 0),
+sys.path.insert(0, str(REPO))
+from utils.viz import annotate_detections  # noqa: E402
+
+# --- colors (RGB) — preserved hues from the original BGR palette
+COLORS_RGB = {
+    "hardhat": sv.Color(r=0, g=200, b=0),       # green
+    "no-hardhat": sv.Color(r=220, g=0, b=0),    # red
+    "person": sv.Color(r=0, g=150, b=200),      # blue-cyan
+    "_default": sv.Color(r=0, g=180, b=180),    # teal
 }
 
 
-def draw(image: np.ndarray, boxes, labels, scores) -> np.ndarray:
-    vis = image.copy()
-    for (x1, y1, x2, y2), lab, sc in zip(boxes, labels, scores):
-        color = COLORS.get(lab, COLORS["_default"])
-        cv2.rectangle(vis, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-        text = f"{lab} {sc:.2f}"
-        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(vis, (int(x1), int(y1) - th - 4), (int(x1) + tw + 4, int(y1)), color, -1)
-        cv2.putText(vis, text, (int(x1) + 2, int(y1) - 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+def draw(image_rgb: np.ndarray, boxes, labels, scores) -> np.ndarray:
+    vis = image_rgb.copy()
+    # Group by label so each class gets its own color via annotate_detections(color=...).
+    by_label: dict[str, list[int]] = {}
+    for i, lab in enumerate(labels):
+        by_label.setdefault(lab, []).append(i)
+    for lab, idxs in by_label.items():
+        color = COLORS_RGB.get(lab, COLORS_RGB["_default"])
+        xyxy = np.asarray([boxes[i] for i in idxs], dtype=np.float32).reshape(-1, 4)
+        scs = np.asarray([scores[i] for i in idxs], dtype=np.float32)
+        dets = sv.Detections(
+            xyxy=xyxy,
+            confidence=scs,
+            class_id=np.zeros(len(idxs), dtype=int),
+        )
+        text_labels = [f"{lab} {scores[i]:.2f}" for i in idxs]
+        vis = annotate_detections(vis, dets, labels=text_labels, color=color)
     return vis
 
 
 def save_predictions(img: Image.Image, boxes, labels, scores, out_path: Path) -> None:
-    bgr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-    cv2.imwrite(str(out_path), draw(bgr, boxes, labels, scores))
+    rgb = np.array(img)
+    annotated_rgb = draw(rgb, boxes, labels, scores)
+    cv2.imwrite(str(out_path), cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR))
 
 
 def run_yolos(sample_paths: list[Path]) -> dict:

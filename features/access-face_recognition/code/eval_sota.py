@@ -14,13 +14,19 @@ Outputs (per pipeline) under
 from __future__ import annotations
 
 import csv
+import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 import onnxruntime as ort
+import supervision as sv
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+
+from utils.viz import VizStyle, annotate_detections, annotate_keypoints  # noqa: E402
+
 WEIGHTS = ROOT / "pretrained" / "access-face_recognition"
 SAMPLES = ROOT / "features" / "access-face_recognition" / "samples"
 PREDICT = ROOT / "features" / "access-face_recognition" / "predict"
@@ -218,13 +224,21 @@ class SFaceEmbedder:
 
 
 def overlay(img: np.ndarray, bbox: np.ndarray, lm: np.ndarray, label: str) -> np.ndarray:
-    out = img.copy()
-    x1, y1, x2, y2 = bbox.astype(int)
-    cv2.rectangle(out, (x1, y1), (x2, y2), (0, 200, 0), 2)
-    for px, py in lm.astype(int):
-        cv2.circle(out, (px, py), 2, (0, 0, 255), -1)
-    cv2.putText(out, label, (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 1)
-    return out
+    scene_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    x1, y1, x2, y2 = bbox.astype(float)
+    box_color = sv.Color(r=0, g=200, b=0)
+    detections = sv.Detections(
+        xyxy=np.array([[x1, y1, x2, y2]], dtype=np.float32),
+        class_id=np.array([0], dtype=int),
+    )
+    scene_rgb = annotate_detections(scene_rgb, detections, labels=[label], color=box_color)
+    scene_rgb = annotate_keypoints(
+        scene_rgb,
+        lm.astype(np.float32),
+        skeleton_edges=None,
+        style=VizStyle(keypoint_radius=2, skeleton_color_rgb=(255, 0, 0)),
+    )
+    return cv2.cvtColor(scene_rgb, cv2.COLOR_RGB2BGR)
 
 
 def run_pipeline(detector, embedder, pipe_name: str) -> dict:

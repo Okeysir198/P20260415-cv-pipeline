@@ -32,6 +32,12 @@ SAMPLES = FEATURE / "samples"
 PRED = FEATURE / "predict"
 PRED.mkdir(parents=True, exist_ok=True)
 
+import sys as _sys  # noqa: E402
+
+_REPO = FEATURE.parents[1]  # features/<f>/ → features/ → ai/
+_sys.path.insert(0, str(_REPO))
+from utils.viz import VizStyle, classification_banner  # noqa: E402
+
 # rtmlib auto-downloads ONNX SDK packages to ~/.cache/rtmlib
 DET_URL = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_tiny_8xb8-300e_humanart-6f3252f9.zip"
 POSE_URL = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.zip"
@@ -107,15 +113,25 @@ def fall_verdict(kpts: np.ndarray, scores: np.ndarray) -> tuple[str, dict]:
 
 
 def annotate(img: np.ndarray, kpts, scores, verdict: str, dbg: dict) -> np.ndarray:
+    """Draw rtmlib skeleton + a 32px header banner. Input/output BGR."""
     out = img.copy()
     if kpts is not None and len(kpts) > 0:
         out = draw_skeleton(out, kpts, scores, openpose_skeleton=False, kpt_thr=KPT_THR)
-    color = {"fall": (0, 0, 255), "upright": (0, 200, 0)}.get(verdict, (0, 165, 255))
-    cv2.rectangle(out, (0, 0), (out.shape[1], 32), (0, 0, 0), -1)
+    # Original BGR text colors:
+    #   fall     (0, 0, 255)   → RGB (255, 0, 0)
+    #   upright  (0, 200, 0)   → RGB (0, 200, 0)
+    #   other    (0, 165, 255) → RGB (255, 165, 0)
+    text_rgb = {
+        "fall": (255, 0, 0),
+        "upright": (0, 200, 0),
+    }.get(verdict, (255, 165, 0))
     keys = ("aspect", "torso_deg", "visible_kpts")
     txt = f"{verdict.upper()}  " + " ".join(f"{k}={dbg[k]}" for k in keys if k in dbg)
-    cv2.putText(out, txt, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-    return out
+    style = VizStyle(banner_height=32, banner_text_scale=0.6)
+    rgb = cv2.cvtColor(out, cv2.COLOR_BGR2RGB)
+    rgb = classification_banner(rgb, txt, style=style, position="overlay_top",
+                                bg_color_rgb=(0, 0, 0), text_color_rgb=text_rgb)
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
 def run_model(name: str, infer_fn, samples: list[Path]) -> dict:

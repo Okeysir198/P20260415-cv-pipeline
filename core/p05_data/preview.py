@@ -19,30 +19,18 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import supervision as sv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from core.p05_data.detection_dataset import YOLOXDataset
 from core.p05_data.transforms import build_transforms
 from utils.config import load_config
+from utils.viz import VizStyle, annotate_detections
 
 # ---------------------------------------------------------------------------
 # Drawing helpers
 # ---------------------------------------------------------------------------
-
-# Distinct colours for up to 20 classes (BGR)
-_PALETTE = [
-    (0, 0, 255),    # red
-    (0, 255, 0),    # green
-    (255, 0, 0),    # blue
-    (0, 255, 255),  # yellow
-    (255, 0, 255),  # magenta
-    (255, 255, 0),  # cyan
-    (0, 128, 255),  # orange
-    (128, 0, 255),  # purple
-    (0, 255, 128),  # spring green
-    (255, 128, 0),  # sky blue
-]
 
 
 def draw_bboxes(
@@ -54,38 +42,29 @@ def draw_bboxes(
     """Draw bounding boxes and class labels on an image.
 
     Args:
-        image: HWC uint8 BGR image (will be copied).
+        image: HWC uint8 RGB image (will be copied).
         targets: (N, 5) array [class_id, cx, cy, w, h] normalised.
         class_names: Mapping ``{int: str}`` of class ids to names.
-        thickness: Line thickness.
+        thickness: Unused — :class:`VizStyle` auto-scales box thickness.
 
     Returns:
-        Annotated image copy.
+        Annotated RGB image copy.
     """
-    vis = image.copy()
-    h, w = vis.shape[:2]
-
-    for row in targets:
-        cls_id = int(row[0])
-        cx, cy, bw, bh = row[1], row[2], row[3], row[4]
-        x1 = int((cx - bw / 2) * w)
-        y1 = int((cy - bh / 2) * h)
-        x2 = int((cx + bw / 2) * w)
-        y2 = int((cy + bh / 2) * h)
-
-        colour = _PALETTE[cls_id % len(_PALETTE)]
-        cv2.rectangle(vis, (x1, y1), (x2, y2), colour, thickness)
-
-        label = class_names.get(cls_id, str(cls_id))
-        font_scale = 0.5
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 1)
-        cv2.rectangle(vis, (x1, y1 - th - 6), (x1 + tw + 4, y1), colour, -1)
-        cv2.putText(
-            vis, label, (x1 + 2, y1 - 4),
-            cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 1,
-        )
-
-    return vis
+    del thickness  # VizStyle.auto_box_thickness handles this
+    h, w = image.shape[:2]
+    if targets is None or len(targets) == 0:
+        dets = sv.Detections.empty()
+    else:
+        t = np.asarray(targets, dtype=np.float32).reshape(-1, 5)
+        cls = t[:, 0].astype(int)
+        cx, cy, bw, bh = t[:, 1], t[:, 2], t[:, 3], t[:, 4]
+        xyxy = np.stack([
+            (cx - bw / 2) * w, (cy - bh / 2) * h,
+            (cx + bw / 2) * w, (cy + bh / 2) * h,
+        ], axis=1).astype(np.float32)
+        dets = sv.Detections(xyxy=xyxy, class_id=cls)
+    style = VizStyle(label_text_scale=0.5)
+    return annotate_detections(image, dets, class_names=class_names, style=style)
 
 
 def make_side_by_side(
@@ -205,7 +184,8 @@ def main() -> None:
         raw_item = raw_dataset.get_raw_item(idx)
         orig_img, orig_tgt = raw_item["image"], raw_item["targets"]
         orig_resized = cv2.resize(orig_img, (input_size[1], input_size[0]))
-        orig_vis = draw_bboxes(orig_resized, orig_tgt, class_names)
+        orig_rgb = cv2.cvtColor(orig_resized, cv2.COLOR_BGR2RGB)
+        orig_vis = draw_bboxes(orig_rgb, orig_tgt, class_names)
 
         # Augmented — get the tensor output and reverse for visualisation
         aug_tensor, aug_tgt_tensor, path = aug_dataset[idx]
@@ -224,7 +204,8 @@ def main() -> None:
         combined = make_side_by_side(orig_vis, aug_vis)
 
         out_path = save_dir / f"sample_{i:03d}.png"
-        cv2.imwrite(str(out_path), combined)
+        # `combined` is RGB; convert to BGR for cv2.imwrite.
+        cv2.imwrite(str(out_path), cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
 
         n_orig = len(orig_tgt)
         n_aug = len(aug_tgt_np)

@@ -74,8 +74,12 @@ runs/<ts>/
 ├── val_predictions/
 │   ├── epochs/epoch_NNN.png    (per-epoch, ~2 s each — the only mid-run hook)
 │   ├── best.png                (on_train_end, best-checkpoint weights)
-│   └── error_analysis/         (task-dispatched; ~10 s total)
+│   └── error_analysis/         (task-dispatched; ~15 s total)
 │       ├── summary.{json,md}       3-axis: data_distribution + training_config + model_metrics
+│       │                             summary.md opens with the failure-mode ranking table (Δ mAP50 per mode)
+│       │                             summary.json::model_metrics.failure_mode has
+│       │                               {error_types, per_class, confusion_pairs_top, contribution,
+│       │                                modes_per_class, fn_attribution, miss_by_attribute, diagnosis}
 │       ├── data_distribution.png   class count + per-class × size-tier
 │       ├── boxes_per_image.png     crowdedness (mean/median/p95/max)
 │       ├── bbox_aspect_ratio.png   per-class log-scale w/h
@@ -83,14 +87,19 @@ runs/<ts>/
 │       ├── confusion_matrix.png    GT×Pred (last col/row = background)
 │       ├── confidence_calibration.png  TP vs FP score histogram
 │       ├── size_recall.png         small / medium / large with explicit COCO px² thresholds
-│       ├── pr_curves.png           per-class PR curve + AP in legend
-│       ├── f1_vs_threshold.png     per-class F1 sweep + best-F1 threshold marker
+│       ├── threshold_analysis.png  4-panel: PR curves + F1/P/R vs conf threshold (step 0.01)
 │       ├── map_vs_iou.png          mAP at IoU 0.50 → 0.95 (AP50 / AP75 / AP[.5:.95])
+│       ├── failure_mode_contribution.png   2-panel: global Δ mAP ranked bars + per-class × mode heatmap + glossary
+│       ├── failure_by_attribute.png        2×2: miss-rate by size / aspect-ratio / crowdedness + top confusion pairs
+│       ├── confidence_attribution.png      FN causality: true_miss / under_confidence / localization_fail (abs + normalized)
+│       ├── recoverable_map_vs_iou.png      per-mode Δ mAP across IoU 0.5 → 0.9 (shows where localization dominates COCO mAP)
 │       ├── hardest_images.png      top-12 overview
-│       └── hard_images/            per-error-type × per-class GT-vs-Pred galleries
-│           ├── false_positives/<class>/<stem>__fp_score_0.87.png
-│           ├── false_negatives/<class>/<stem>__fn.png
-│           └── class_confusion/<pred>__from__<gt>/<stem>__iou_0.62.png
+│       └── failure_mode_examples/  5-mode × per-class GT-vs-Pred galleries (replaces old hard_images/)
+│           ├── missed/<class>/<stem>__missed__area_<px>.png
+│           ├── localization/<class>/<stem>__loc__iou_<x>_score_<y>.png
+│           ├── class_confusion/<pred>__from__<gt>/<stem>__conf__iou_<x>_score_<y>.png
+│           ├── duplicate/<class>/<stem>__dup__iou_<x>_score_<y>.png
+│           └── background_fp/<class>/<stem>__bgfp__score_<y>.png
 ├── test_predictions/           same layout as val_predictions/
 └── test_results.json           HF Trainer metrics on the test split
 ```
@@ -193,11 +202,11 @@ Gotchas
   (wrapper-prefixed state dict `hf_model.*`) — not a bare `hf_model.save_pretrained`.
 - **Viz callbacks on HF backend are native `TrainerCallback` subclasses**
   (`core/p06_training/hf_callbacks.py`). They share rendering helpers
-  (`_draw_gt_boxes`, `_save_image_grid`, `annotate_gt_pred`) with the
-  pytorch-backend loggers but consume HF's documented kwargs (`model`,
-  `eval_dataloader`, `state.log_history`) directly — no proxy-trainer
-  attribute surface. Earlier bridge-adapter design dropped as of the
-  native-callback migration.
+  (`annotate_detections`, `save_image_grid`, `annotate_gt_pred` — all from
+  `utils.viz`) with the pytorch-backend loggers but consume HF's documented
+  kwargs (`model`, `eval_dataloader`, `state.log_history`) directly — no
+  proxy-trainer attribute surface. Earlier bridge-adapter design dropped as
+  of the native-callback migration.
 - **Detection `compute_metrics` requires `eval_do_concat_batches=False`** —
   set automatically for detection in `_config_to_training_args`. Classifier/
   segmenter paths keep the default.
@@ -227,6 +236,19 @@ Gotchas
   Trainer's own eval reported mAP50=0.82. With 0.05, TP counts land in the
   100s and PR curves / mAP-vs-IoU reflect real model behavior. Override via
   `training.post_train.error_conf_threshold` if you need different ops calibration.
+- **Failure-mode Δ mAP is a counterfactual simulation, not a ground-truth gain**
+  — `error_analysis_runner._compute_recoverable_map` iterates each of the 5
+  modes, mutates the detection list (inject synthetic TPs for `missed`, flip
+  class for `class_confusion`, bump same-class IoU to the eval threshold for
+  `localization`, drop `duplicate` / `background_fp`), then recomputes AP.
+  Numbers assume a *perfect* fix of one mode in isolation; real-world fixes
+  interact (e.g. fixing localization shifts the PR-curve knee, which changes
+  the Δ for background_fp). The ranking still correctly orders the biggest
+  levers — just don't read "+0.23 on missed" as "augmenting will buy you 0.23
+  mAP." Modes are tagged once at IoU 0.5 by the matcher; `recoverable_map_vs_iou`
+  reuses those same tags but recomputes mAP at each IoU step — so `localization`
+  Δ climbs at stricter IoUs because more of the "correct-at-0.5" bucket falls
+  back into the fix-list as the threshold tightens.
 - **HF `load_best_model_at_end` + wrapper-prefixed state dict** — our
   `_DetectionTrainer._save` writes state dicts with `hf_model.*` prefix.
   HF Trainer's `_load_best_model` loads into the **inner** `hf_model` module,

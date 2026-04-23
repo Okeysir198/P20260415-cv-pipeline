@@ -18,12 +18,19 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import supervision as sv
 from matplotlib.path import Path as _MplPath
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 
 from utils.config import load_config  # noqa: E402
+from utils.viz import (  # noqa: E402
+    VizStyle,
+    annotate_detections,
+    annotate_polygons,
+    classification_banner,
+)
 
 FEATURE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = FEATURE_DIR / "configs" / "10_inference.yaml"
@@ -130,34 +137,45 @@ class ZoneIntrusionDetector:
 
     def draw(self, image_bgr: np.ndarray, result: ZoneResult) -> np.ndarray:
         h, w = image_bgr.shape[:2]
-        vis = image_bgr.copy()
+        vis_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
+        zone_style = VizStyle(zone_fill_alpha=0.15, zone_outline_thickness=2)
+        yellow = sv.Color(r=255, g=255, b=0)  # (0,255,255) BGR = yellow RGB
         for zone in self._zones:
             poly_px = _poly_to_pixel(zone["polygon"], w, h).astype(np.int32)
-            cv2.polylines(vis, [poly_px], True, (0, 255, 255), 2)
-            overlay = vis.copy()
-            cv2.fillPoly(overlay, [poly_px], (0, 255, 255))
-            vis = cv2.addWeighted(overlay, 0.15, vis, 0.85, 0)
-
-        for det in result.detections:
-            x1, y1, x2, y2 = det.box_xyxy.astype(int)
-            color = (0, 0, 255) if det.in_zone else (0, 255, 0)
-            cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(
-                vis, f"person {det.score:.2f}",
-                (x1, max(0, y1 - 5)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
+            vis_rgb = annotate_polygons(
+                vis_rgb,
+                polygons=[poly_px],
+                labels=[zone["id"]],
+                style=zone_style,
+                color=yellow,
             )
 
+        # Split detections by in/out-of-zone so each group can use a distinct color.
+        for in_zone_flag, color_rgb in (
+            (True, sv.Color(r=255, g=0, b=0)),     # red  (was BGR (0,0,255))
+            (False, sv.Color(r=0, g=255, b=0)),    # green (was BGR (0,255,0))
+        ):
+            group = [d for d in result.detections if d.in_zone == in_zone_flag]
+            if not group:
+                continue
+            xyxy = np.stack([d.box_xyxy for d in group], axis=0).astype(np.float32)
+            scores = np.array([d.score for d in group], dtype=np.float32)
+            dets = sv.Detections(
+                xyxy=xyxy,
+                confidence=scores,
+                class_id=np.zeros(len(group), dtype=int),
+            )
+            labels = [f"person {d.score:.2f}" for d in group]
+            vis_rgb = annotate_detections(vis_rgb, dets, labels=labels, color=color_rgb)
+
         verdict = "INTRUSION" if result.intruding else "CLEAR"
-        verdict_color = (0, 0, 255) if result.intruding else (0, 200, 0)
-        cv2.putText(
-            vis, verdict,
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX, 1.0, verdict_color, 2, cv2.LINE_AA,
+        banner_bg = (231, 76, 60) if result.intruding else (39, 174, 96)  # red / green RGB
+        vis_rgb = classification_banner(
+            vis_rgb, verdict, position="top", bg_color_rgb=banner_bg
         )
 
-        return vis
+        return cv2.cvtColor(vis_rgb, cv2.COLOR_RGB2BGR)
 
     # ---------------------------------------------------------------------- #
     # Internal helpers

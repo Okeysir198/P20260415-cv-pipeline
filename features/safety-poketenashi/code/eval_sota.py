@@ -22,12 +22,18 @@ from typing import List, Tuple
 import cv2
 import numpy as np
 import onnxruntime as ort
+import supervision as sv
 
 ROOT = Path(__file__).resolve().parents[4]
 FEAT = ROOT / "ai" / "features" / "safety-poketenashi"
 PRETRAIN = ROOT / "ai" / "pretrained" / "safety-poketenashi"
 SAMPLES = FEAT / "samples"
 PRED = FEAT / "predict"
+
+import sys as _sys  # noqa: E402
+
+_sys.path.insert(0, str(ROOT / "ai"))
+from utils.viz import VizStyle, annotate_keypoints, classification_banner  # noqa: E402
 
 # COCO-17 indices used by the baseline.
 COCO17 = {
@@ -175,38 +181,48 @@ SKELETON_17 = [
 
 def draw_pose(img: np.ndarray, kpts: np.ndarray, scores: np.ndarray,
               wb: bool, conf_th: float = 0.3) -> np.ndarray:
-    out = img.copy()
+    """Draw COCO-17 skeleton + (optionally) whole-body hand/face kps.
+
+    Input ``img`` is BGR (from cv2.imread); output is BGR for cv2.imwrite.
+    Helpers operate on RGB, so convert at boundaries.
+    """
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     body = kpts[WB_BODY] if wb else kpts
     bs = scores[WB_BODY] if wb else scores
-    for a, b in SKELETON_17:
-        if a < len(body) and b < len(body) and bs[a] > conf_th and bs[b] > conf_th:
-            pa = tuple(body[a].astype(int))
-            pb = tuple(body[b].astype(int))
-            cv2.line(out, pa, pb, (0, 200, 255), 2)
-    for i, p in enumerate(body):
-        if bs[i] > conf_th:
-            cv2.circle(out, tuple(p.astype(int)), 3, (0, 0, 255), -1)
+
+    # Original BGR (0, 200, 255) → RGB (255, 200, 0).
+    body_style = VizStyle(kpt_visibility_threshold=conf_th,
+                          skeleton_color_rgb=(255, 200, 0))
+    rgb = annotate_keypoints(rgb, body, skeleton_edges=SKELETON_17,
+                             confidence=bs, style=body_style,
+                             color=sv.Color(r=0, g=0, b=255))  # vertices red
+
     if wb:
-        # Hands.
-        for sl, color in [(WB_LHAND, (0, 255, 0)), (WB_RHAND, (255, 255, 0))]:
-            for i, p in enumerate(kpts[sl]):
-                if scores[sl][i] > conf_th:
-                    cv2.circle(out, tuple(p.astype(int)), 2, color, -1)
-        # Face (light blue, faint).
-        face = kpts[23:91]
-        fs = scores[23:91]
-        for i, p in enumerate(face):
-            if fs[i] > conf_th:
-                cv2.circle(out, tuple(p.astype(int)), 1, (255, 200, 100), -1)
-    return out
+        hand_style = VizStyle(kpt_visibility_threshold=conf_th)
+        # BGR (0,255,0) = RGB (0,255,0); BGR (255,255,0) = RGB (0,255,255).
+        for sl, color_rgb in [(WB_LHAND, (0, 255, 0)), (WB_RHAND, (0, 255, 255))]:
+            rgb = annotate_keypoints(rgb, kpts[sl], skeleton_edges=None,
+                                     confidence=scores[sl], style=hand_style,
+                                     color=sv.Color(r=color_rgb[0], g=color_rgb[1], b=color_rgb[2]))
+        # Face: BGR (255, 200, 100) = RGB (100, 200, 255).
+        face_style = VizStyle(kpt_visibility_threshold=conf_th)
+        rgb = annotate_keypoints(rgb, kpts[23:91], skeleton_edges=None,
+                                 confidence=scores[23:91], style=face_style,
+                                 color=sv.Color(r=100, g=200, b=255))
+
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
 def annotate(img: np.ndarray, label: str, verdict: bool) -> np.ndarray:
-    color = (0, 0, 200) if verdict else (0, 180, 0)
+    """Overlay a 36px header banner. Input/output BGR."""
+    # Original BGR text color: (0,0,200) violation → RGB (200,0,0); (0,180,0) ok → RGB (0,180,0).
+    text_rgb = (200, 0, 0) if verdict else (0, 180, 0)
     txt = f"{label}: {'VIOLATION' if verdict else 'OK'}"
-    cv2.rectangle(img, (0, 0), (img.shape[1], 36), (40, 40, 40), -1)
-    cv2.putText(img, txt, (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-    return img
+    style = VizStyle(banner_height=36, banner_text_scale=0.7)
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    rgb = classification_banner(rgb, txt, style=style, position="overlay_top",
+                                bg_color_rgb=(40, 40, 40), text_color_rgb=text_rgb)
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
 # ---------------------------------------------------------------------------

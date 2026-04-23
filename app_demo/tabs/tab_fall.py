@@ -15,7 +15,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import cv2
 import gradio as gr
 import numpy as np
 import supervision as sv
@@ -520,11 +519,17 @@ def _pose_detect_video(
                 frame, boxes, scores_arr, kpts, skeleton, fall_idx
             )
 
-            # Draw fall alert banner
+            # Draw fall alert banner (annotated is BGR; pass red as BGR tuple
+            # — classification_banner forwards the triple opaquely).
             if fall_idx:
-                cv2.putText(
-                    annotated, "FALL DETECTED", (10, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3,
+                from utils.viz import VizStyle, classification_banner
+                annotated = classification_banner(
+                    annotated,
+                    "FALL DETECTED",
+                    position="overlay_top",
+                    bg_color_rgb=(0, 0, 0),
+                    text_color_rgb=(0, 0, 255),
+                    style=VizStyle(banner_height=50, banner_text_scale=1.2),
                 )
 
             sink.write_frame(annotated)

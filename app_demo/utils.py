@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import supervision as sv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # project root
 
@@ -18,6 +17,7 @@ from core.p10_inference.supervision_bridge import (
     build_annotators,
     to_sv_detections,
 )
+from utils.viz import COCO_SKELETON_EDGES, annotate_keypoints
 
 
 def rgb_to_bgr(image: np.ndarray) -> np.ndarray:
@@ -108,16 +108,6 @@ def annotate_image(
     )
 
 
-# COCO 17-keypoint skeleton edges for supervision EdgeAnnotator
-COCO_SKELETON_EDGES: List[Tuple[int, int]] = [
-    (0, 1), (0, 2), (1, 3), (2, 4),     # head
-    (5, 6), (5, 7), (7, 9), (6, 8),     # upper body
-    (8, 10), (5, 11), (6, 12),           # torso
-    (11, 12), (11, 13), (13, 15),        # left leg
-    (12, 14), (14, 16),                  # right leg
-]
-
-
 def draw_keypoints(
     image: np.ndarray,
     keypoints: np.ndarray,
@@ -125,41 +115,39 @@ def draw_keypoints(
     keypoint_names: Optional[List[str]] = None,
     conf_threshold: float = 0.3,
 ) -> np.ndarray:
-    """Draw pose keypoints and skeleton on image using supervision.
+    """Draw pose keypoints and skeleton on image.
 
-    Uses ``sv.EdgeAnnotator`` for skeleton connections and
-    ``sv.VertexAnnotator`` for keypoint circles.
+    Thin wrapper around :func:`utils.viz.annotate_keypoints` preserved for
+    backwards-compatible callers (e.g. ``tabs/tab_fall.py``). New code should
+    call ``utils.viz.annotate_keypoints`` directly.
 
     Args:
-        image: BGR image (H, W, 3). A copy is made internally.
+        image: Image array (H, W, 3). A copy is made internally.
         keypoints: (K, 3) array where each row is (x, y, confidence).
         skeleton: (start, end) edge pairs. Defaults to COCO 17-keypoint.
         keypoint_names: Optional keypoint names (unused, kept for API compat).
         conf_threshold: Minimum confidence to draw a keypoint.
 
     Returns:
-        Annotated BGR image.
+        Annotated image.
     """
-    annotated = image.copy()
+    del keypoint_names  # API compatibility only
     edges = skeleton if skeleton else COCO_SKELETON_EDGES
+    kpts = np.asarray(keypoints, dtype=np.float32)
+    xy = kpts[:, :2]
+    conf = kpts[:, 2] if kpts.shape[1] >= 3 else None
 
-    # Build sv.KeyPoints for a single person: shape (1, K, 2) and (1, K)
-    xy = keypoints[:, :2].astype(np.float32)[np.newaxis, ...]
-    conf = keypoints[:, 2].astype(np.float32)[np.newaxis, ...]
+    from utils.viz import VizStyle
 
-    # Zero out low-confidence keypoints so they aren't drawn
-    mask = conf[0] < conf_threshold
-    xy[0, mask] = 0.0
-
-    sv_kpts = sv.KeyPoints(xy=xy, confidence=conf)
-
-    edge_ann = sv.EdgeAnnotator(color=sv.Color(0, 255, 255), thickness=2, edges=edges)
-    vertex_ann = sv.VertexAnnotator(color=sv.Color(0, 255, 0), radius=4)
-
-    annotated = edge_ann.annotate(scene=annotated, key_points=sv_kpts)
-    annotated = vertex_ann.annotate(scene=annotated, key_points=sv_kpts)
-
-    return annotated
+    style = VizStyle()
+    style.kpt_visibility_threshold = conf_threshold
+    return annotate_keypoints(
+        image,
+        keypoints_xy=xy,
+        skeleton_edges=edges,
+        confidence=conf,
+        style=style,
+    )
 
 
 def create_status_html(status: str, message: str) -> str:

@@ -26,10 +26,18 @@ from typing import Any
 
 import cv2
 import numpy as np
+import supervision as sv
 import torch
 
 REPO_AI = Path(__file__).resolve().parents[3]  # .../ai
 sys.path.insert(0, str(REPO_AI))
+
+from utils.viz import (  # noqa: E402
+    VizStyle,
+    annotate_detections,
+    annotate_polygons,
+    classification_banner,
+)
 
 FEATURE_DIR = Path(__file__).resolve().parents[1]
 SAMPLES_DIR = FEATURE_DIR / "samples"
@@ -135,23 +143,44 @@ def visualize(
     intrusion: bool,
     save_path: Path,
 ) -> None:
-    vis = image_bgr.copy()
-    cv2.polylines(vis, [poly_px.astype(np.int32)], True, (0, 255, 255), 2)
-    overlay = vis.copy()
-    cv2.fillPoly(overlay, [poly_px.astype(np.int32)], (0, 255, 255))
-    vis = cv2.addWeighted(overlay, 0.15, vis, 0.85, 0)
-    for box, score in detections:
-        x1, y1, x2, y2 = box.astype(int)
-        in_zone = centroid_in_polygon(box, poly_px)
-        color = (0, 0, 255) if in_zone else (0, 255, 0)
-        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(vis, f"person {score:.2f}", (x1, max(0, y1 - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+    vis_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+    zone_style = VizStyle(zone_fill_alpha=0.15, zone_outline_thickness=2)
+    yellow = sv.Color(r=255, g=255, b=0)
+    vis_rgb = annotate_polygons(
+        vis_rgb,
+        polygons=[poly_px.astype(np.int32)],
+        labels=["zone"],
+        style=zone_style,
+        color=yellow,
+    )
+
+    in_flags = [centroid_in_polygon(b, poly_px) for b, _ in detections]
+    for in_zone_flag, color_rgb in (
+        (True, sv.Color(r=255, g=0, b=0)),
+        (False, sv.Color(r=0, g=255, b=0)),
+    ):
+        idxs = [i for i, f in enumerate(in_flags) if f == in_zone_flag]
+        if not idxs:
+            continue
+        xyxy = np.stack([detections[i][0] for i in idxs], axis=0).astype(np.float32)
+        scores = np.array([detections[i][1] for i in idxs], dtype=np.float32)
+        dets_sv = sv.Detections(
+            xyxy=xyxy,
+            confidence=scores,
+            class_id=np.zeros(len(idxs), dtype=int),
+        )
+        labels = [f"person {detections[i][1]:.2f}" for i in idxs]
+        vis_rgb = annotate_detections(vis_rgb, dets_sv, labels=labels, color=color_rgb)
+
     verdict = "INTRUSION" if intrusion else "CLEAR"
-    color = (0, 0, 255) if intrusion else (0, 200, 0)
-    cv2.putText(vis, verdict, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2, cv2.LINE_AA)
+    banner_bg = (231, 76, 60) if intrusion else (39, 174, 96)
+    vis_rgb = classification_banner(
+        vis_rgb, verdict, position="top", bg_color_rgb=banner_bg
+    )
+
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(save_path), vis)
+    cv2.imwrite(str(save_path), cv2.cvtColor(vis_rgb, cv2.COLOR_RGB2BGR))
 
 
 # --------------------------------------------------------------------------- #

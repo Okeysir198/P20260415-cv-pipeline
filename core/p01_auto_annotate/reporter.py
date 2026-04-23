@@ -150,9 +150,13 @@ class AutoAnnotateReporter:
             reverse=True,
         )
 
-        # Color palette for classes
+        import supervision as sv
+
+        from utils.viz import annotate_detections, annotate_polygons, classification_banner
+
+        # Color palette for classes (RGB)
         colors = [
-            (0, 200, 0), (0, 0, 220), (200, 200, 0), (200, 0, 200),
+            (0, 200, 0), (220, 0, 0), (200, 200, 0), (200, 0, 200),
             (0, 200, 200), (128, 0, 255), (255, 128, 0), (0, 128, 255),
         ]
 
@@ -161,53 +165,66 @@ class AutoAnnotateReporter:
             if not img_path or not Path(img_path).is_file():
                 continue
 
-            img = cv2.imread(str(img_path))
-            if img is None:
+            img_bgr = cv2.imread(str(img_path))
+            if img_bgr is None:
                 continue
 
-            h, w = img.shape[:2]
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            h, w = img_rgb.shape[:2]
             detections = result.get("detections", [])
 
+            # Group detections by class_id so we emit one annotate_detections
+            # call per color (helpers accept a single color per call).
+            by_cls: dict[int, list[dict]] = {}
             for det in detections:
-                cls_id = det.get("class_id", 0)
-                cx, cy, bw, bh = det["cx"], det["cy"], det["w"], det["h"]
+                by_cls.setdefault(int(det.get("class_id", 0)), []).append(det)
 
-                # Convert to pixel coords
-                x1 = int((cx - bw / 2) * w)
-                y1 = int((cy - bh / 2) * h)
-                x2 = int((cx + bw / 2) * w)
-                y2 = int((cy + bh / 2) * h)
+            for cls_id, dets in by_cls.items():
+                color_rgb = colors[cls_id % len(colors)]
+                sv_color = sv.Color(r=color_rgb[0], g=color_rgb[1], b=color_rgb[2])
 
-                color = colors[cls_id % len(colors)]
-                cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-
-                score = det.get("score", 0.0)
-                label = f"cls{cls_id} {score:.2f}"
-                cv2.putText(
-                    img, label, (x1, max(y1 - 5, 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
+                xyxy = np.array([
+                    [
+                        (d["cx"] - d["w"] / 2) * w,
+                        (d["cy"] - d["h"] / 2) * h,
+                        (d["cx"] + d["w"] / 2) * w,
+                        (d["cy"] + d["h"] / 2) * h,
+                    ]
+                    for d in dets
+                ], dtype=np.float32)
+                scores_arr = np.array(
+                    [float(d.get("score", 0.0)) for d in dets], dtype=np.float32
                 )
+                cls_arr = np.full(len(dets), cls_id, dtype=int)
+                sv_dets = sv.Detections(xyxy=xyxy, confidence=scores_arr, class_id=cls_arr)
+                labels = [f"cls{cls_id} {s:.2f}" for s in scores_arr]
+                img_rgb = annotate_detections(img_rgb, sv_dets, labels=labels, color=sv_color)
 
-                # Draw polygon if available
-                polygon = det.get("polygon")
-                if polygon and len(polygon) >= 6:
-                    pts = np.array(
-                        [[int(polygon[i] * w), int(polygon[i + 1] * h)]
-                         for i in range(0, len(polygon), 2)],
-                        dtype=np.int32,
-                    )
-                    cv2.polylines(img, [pts], True, color, 1)
+                # Draw polygons (closed outlines) per class
+                polys: list[np.ndarray] = []
+                for d in dets:
+                    polygon = d.get("polygon")
+                    if polygon and len(polygon) >= 6:
+                        pts = np.array(
+                            [[int(polygon[i] * w), int(polygon[i + 1] * h)]
+                             for i in range(0, len(polygon), 2)],
+                            dtype=np.int32,
+                        )
+                        polys.append(pts)
+                if polys:
+                    img_rgb = annotate_polygons(img_rgb, polys, color=sv_color)
 
-            # Header text
-            header = f"detections={len(detections)}"
-            cv2.putText(
-                img, header, (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA,
+            # Header banner (red text on top bar — was red BGR (0,0,255) ≡ red RGB)
+            img_rgb = classification_banner(
+                img_rgb,
+                f"detections={len(detections)}",
+                position="overlay_top",
+                text_color_rgb=(255, 0, 0),
             )
 
             stem = Path(img_path).stem
             out_path = vis_dir / f"{rank:03d}_{stem}.png"
-            cv2.imwrite(str(out_path), img)
+            cv2.imwrite(str(out_path), cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
 
         logger.info(
             "Saved %d preview visualizations",

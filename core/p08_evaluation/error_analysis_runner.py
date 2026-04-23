@@ -48,6 +48,10 @@ from core.p08_evaluation.error_analysis import (
     _SMALL_AREA,
     _size_category,
 )
+from core.p10_inference.supervision_bridge import VizStyle, annotate_gt_pred
+from utils.viz import apply_plot_style, classification_banner
+
+apply_plot_style()
 
 # Human-readable labels used by charts + JSON so every consumer sees the same
 # exact threshold definition (COCO convention, expressed in input-size pixels).
@@ -56,7 +60,6 @@ SIZE_TIER_LABELS = {
     "medium": f"medium ({int(_SMALL_AREA ** 0.5)}²–{int(_LARGE_AREA ** 0.5)}²px)",
     "large":  f"large (≥{int(_LARGE_AREA ** 0.5)}²px, i.e. ≥{_LARGE_AREA} px²)",
 }
-from core.p10_inference.supervision_bridge import VizStyle, annotate_gt_pred
 
 logger = logging.getLogger(__name__)
 
@@ -249,9 +252,58 @@ def _analyze_detection(
     # best IoU against any same-class GT (for AP at arbitrary IoU threshold),
     # best IoU against any GT (for the confusion branch).
     detections: list[dict] = []
-    fp_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
-    fn_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
-    conf_gallery: dict[tuple[int, int], list[dict]] = {}
+    # Per-failure-mode galleries — full 5-mode taxonomy + "correct" bookkeeping.
+    # Key inside each per-class dict: int class id; class_confusion is keyed
+    # on a (gt_cid, pred_cid) tuple. Galleries hold enough metadata to
+    # render example images via _annotate_from_cache later.
+    mode_galleries: dict[str, dict] = {
+        "missed":          {c: [] for c in class_names},
+        "localization":    {c: [] for c in class_names},
+        "class_confusion": {},  # keyed by (gt_cid, pred_cid)
+        "duplicate":       {c: [] for c in class_names},
+        "background_fp":   {c: [] for c in class_names},
+    }
+    fp_gallery = mode_galleries["background_fp"]   # alias (kept for downstream render calls)
+    fn_gallery = mode_galleries["missed"]
+    conf_gallery = mode_galleries["class_confusion"]
+    mode_counts: dict[str, dict[int, int]] = {
+        m: {c: 0 for c in class_names} for m in
+        ("correct", "missed", "localization", "class_confusion", "duplicate", "background_fp")
+    }
+    LOCALIZATION_IOU_LOW = 0.3
+
+    # --- Attribute accumulators for `failure_by_attribute` + `confidence_attribution` ---
+    _AR_BUCKETS = ("tall", "square", "wide")   # <0.5 / 0.5–2.0 / >2.0
+    _CROWD_BUCKETS = ("1-2", "3-5", "6-10", "11+")
+    gt_ar_bucket: dict[int, dict[str, int]] = {
+        c: {k: 0 for k in _AR_BUCKETS} for c in class_names
+    }
+    gt_crowd_bucket: dict[int, dict[str, int]] = {
+        c: {k: 0 for k in _CROWD_BUCKETS} for c in class_names
+    }
+    missed_by_size: dict[int, dict[str, int]] = {
+        c: {"small": 0, "medium": 0, "large": 0} for c in class_names
+    }
+    missed_by_ar: dict[int, dict[str, int]] = {
+        c: {k: 0 for k in _AR_BUCKETS} for c in class_names
+    }
+    missed_by_crowd: dict[int, dict[str, int]] = {
+        c: {k: 0 for k in _CROWD_BUCKETS} for c in class_names
+    }
+    # FN causality (plan §4): true_miss / under_confidence / localization_fail
+    fn_attribution: dict[int, dict[str, int]] = {
+        c: {"true_miss": 0, "under_confidence": 0, "localization_fail": 0}
+        for c in class_names
+    }
+
+    def _ar_bucket(ar: float) -> str:
+        return "tall" if ar < 0.5 else ("wide" if ar > 2.0 else "square")
+
+    def _crowd_bucket(n: int) -> str:
+        if n <= 2: return "1-2"
+        if n <= 5: return "3-5"
+        if n <= 10: return "6-10"
+        return "11+"
     # Cache raw image + predictions + GT per image so gallery renderers
     # below don't re-run inference (plan's efficiency acceptance criterion:
     # galleries must reuse analyzer predictions rather than forwarding again).
@@ -288,6 +340,7 @@ def _analyze_detection(
         if len(gt_xyxy) > 0:
             total_images_with_gt += 1
         boxes_per_image_counts.append(int(len(gt_xyxy)))
+        img_crowd = _crowd_bucket(int(len(gt_xyxy)))
         for j in range(len(gt_xyxy)):
             cid = int(gt_cls[j])
             gt_per_class[cid] = gt_per_class.get(cid, 0) + 1
@@ -297,7 +350,12 @@ def _analyze_detection(
             tier = _size_category(gt_area)
             gt_per_class_size.setdefault(cid,
                 {"small": 0, "medium": 0, "large": 0})[tier] += 1
-            gt_aspect_ratios.setdefault(cid, []).append(float(bw / bh))
+            ar = float(bw / bh)
+            gt_aspect_ratios.setdefault(cid, []).append(ar)
+            gt_ar_bucket.setdefault(cid,
+                {k: 0 for k in _AR_BUCKETS})[_ar_bucket(ar)] += 1
+            gt_crowd_bucket.setdefault(cid,
+                {k: 0 for k in _CROWD_BUCKETS})[img_crowd] += 1
 
         # Cache everything gallery renderers need — image bytes stay on disk
         # (we only keep the path) so 500-image analysis doesn't balloon RAM.
@@ -337,65 +395,136 @@ def _analyze_detection(
                 "gt_cls_at_best_iou": int(gt_cls[best_j]) if best_j >= 0 else -1,
             })
 
+            # -------- 5-mode classification for this prediction --------
+            # Priority: TP > duplicate > class_confusion > localization > background_fp
+            # Per-detection "mode" is attached below so the counterfactual
+            # mAP simulator in _compute_recoverable_map can mutate per-mode.
+            det_mode = "background_fp"
+            pcid = int(pl[bi])
+
             if best_same_class_iou >= iou_threshold:
-                matched_gt[best_same_class_j] = True
-                per_class[int(pl[bi])]["tp"] += 1
-                size_stats[size]["tp"] += 1
-                confusion[int(pl[bi]), int(pl[bi])] += 1
-                confidence_tp.append(float(ps[bi]))
-                img_tp += 1
+                if matched_gt[best_same_class_j]:
+                    # Duplicate — same GT already got a higher-score TP
+                    det_mode = "duplicate"
+                    per_class[pcid]["fp"] += 1
+                    size_stats[size]["fp"] += 1
+                    confusion[len(class_names), pcid] += 1  # accounts like a bg-FP in matrix
+                    confidence_fp.append(float(ps[bi]))
+                    img_fp += 1
+                    mode_galleries["duplicate"].setdefault(pcid, []).append({
+                        "image_idx": int(real_idx), "path": raw.get("path", ""),
+                        "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
+                        "iou": float(best_same_class_iou),
+                    })
+                else:
+                    det_mode = "correct"
+                    matched_gt[best_same_class_j] = True
+                    per_class[pcid]["tp"] += 1
+                    size_stats[size]["tp"] += 1
+                    confusion[pcid, pcid] += 1
+                    confidence_tp.append(float(ps[bi]))
+                    img_tp += 1
             elif best_iou >= iou_threshold and best_j >= 0 and gt_cls[best_j] != pl[bi]:
-                # Class confusion: localized correctly but wrong class.
-                # Count as FP for the predicted class AND FN for the GT's true
-                # class, so per_class TP+FN totals equal GT counts per class
-                # (otherwise the analyzer silently drops ~1–2% of GT from the
-                # denominator, causing precision/recall to drift vs HF eval).
+                # class_confusion — IoU ≥ 0.5 with a WRONG-class GT.
+                # Consume that GT (otherwise per-class TP+FN drifts below
+                # data_distribution); count the pred as FP for its class and
+                # FN for the GT's true class.
+                det_mode = "class_confusion"
                 matched_gt[best_j] = True
-                per_class[int(pl[bi])]["fp"] += 1
+                per_class[pcid]["fp"] += 1
                 size_stats[size]["fp"] += 1
                 gt_true_cls = int(gt_cls[best_j])
                 per_class[gt_true_cls]["fn"] += 1
                 gt_area = max(0.0, (gt_xyxy[best_j, 2] - gt_xyxy[best_j, 0])) * \
                           max(0.0, (gt_xyxy[best_j, 3] - gt_xyxy[best_j, 1]))
                 size_stats[_size_category(gt_area)]["fn"] += 1
-                confusion[gt_true_cls, int(pl[bi])] += 1
+                confusion[gt_true_cls, pcid] += 1
                 confidence_fp.append(float(ps[bi]))
                 img_fp += 1
                 img_fn += 1
-                key = (gt_true_cls, int(pl[bi]))
+                key = (gt_true_cls, pcid)
                 conf_gallery.setdefault(key, []).append({
-                    "image_idx": int(real_idx),
-                    "path": raw.get("path", ""),
-                    "pred_box": pb[bi].tolist(),
-                    "score": float(ps[bi]),
+                    "image_idx": int(real_idx), "path": raw.get("path", ""),
+                    "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
                     "iou": float(best_iou),
                 })
-            else:
-                # Background FP
-                per_class[int(pl[bi])]["fp"] += 1
+            elif LOCALIZATION_IOU_LOW <= best_same_class_iou < iou_threshold:
+                # localization — correct class, IoU 0.3–0.5 (box drift).
+                # Doesn't consume the GT (unmatched → will land as "missed").
+                det_mode = "localization"
+                per_class[pcid]["fp"] += 1
                 size_stats[size]["fp"] += 1
-                confusion[len(class_names), int(pl[bi])] += 1
+                confusion[len(class_names), pcid] += 1
                 confidence_fp.append(float(ps[bi]))
                 img_fp += 1
-                fp_gallery.setdefault(int(pl[bi]), []).append({
-                    "image_idx": int(real_idx),
-                    "path": raw.get("path", ""),
-                    "pred_box": pb[bi].tolist(),
-                    "score": float(ps[bi]),
+                mode_galleries["localization"].setdefault(pcid, []).append({
+                    "image_idx": int(real_idx), "path": raw.get("path", ""),
+                    "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
+                    "iou": float(best_same_class_iou),
                 })
+            else:
+                # background_fp — no nearby GT at all (or IoU < 0.3 on any class)
+                det_mode = "background_fp"
+                per_class[pcid]["fp"] += 1
+                size_stats[size]["fp"] += 1
+                confusion[len(class_names), pcid] += 1
+                confidence_fp.append(float(ps[bi]))
+                img_fp += 1
+                fp_gallery.setdefault(pcid, []).append({
+                    "image_idx": int(real_idx), "path": raw.get("path", ""),
+                    "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
+                })
+
+            mode_counts[det_mode][pcid] = mode_counts[det_mode].get(pcid, 0) + 1
+            # Attach the mode to the per-detection record (last item) so the
+            # counterfactual simulator below can mutate per-mode without
+            # re-running the matcher.
+            detections[-1]["mode"] = det_mode
 
         # Unmatched GT → FN (missed)
         for j in np.where(~matched_gt)[0]:
             cid = int(gt_cls[j])
             per_class[cid]["fn"] += 1
-            area = max(0.0, (gt_xyxy[j, 2] - gt_xyxy[j, 0])) * max(0.0, (gt_xyxy[j, 3] - gt_xyxy[j, 1]))
-            size_stats[_size_category(area)]["fn"] += 1
+            bw_gt = max(0.0, (gt_xyxy[j, 2] - gt_xyxy[j, 0]))
+            bh_gt = max(0.0, (gt_xyxy[j, 3] - gt_xyxy[j, 1]))
+            area = bw_gt * bh_gt
+            size_tier = _size_category(area)
+            size_stats[size_tier]["fn"] += 1
             confusion[cid, len(class_names)] += 1
             img_fn += 1
+            mode_counts["missed"][cid] = mode_counts["missed"].get(cid, 0) + 1
+            # attribute breakdowns (size already computed; recover AR + crowd)
+            ar = float(max(1.0, bw_gt) / max(1.0, bh_gt))
+            missed_by_size.setdefault(cid, {"small": 0, "medium": 0, "large": 0})[size_tier] += 1
+            missed_by_ar.setdefault(cid,
+                {k: 0 for k in _AR_BUCKETS})[_ar_bucket(ar)] += 1
+            missed_by_crowd.setdefault(cid,
+                {k: 0 for k in _CROWD_BUCKETS})[_crowd_bucket(int(len(gt_xyxy)))] += 1
+            # FN causality — was there a pred near this GT at all?
+            best_any, best_same = 0.0, 0.0
+            for bi in range(len(pb)):
+                iou_ = _iou(pb[bi], gt_xyxy[j])
+                if iou_ > best_any: best_any = iou_
+                if int(pl[bi]) == cid and iou_ > best_same: best_same = iou_
+            if best_any < LOCALIZATION_IOU_LOW:
+                fn_sub = "true_miss"
+            elif LOCALIZATION_IOU_LOW <= best_same < iou_threshold:
+                fn_sub = "localization_fail"
+            else:
+                # A pred existed near the GT but either wrong-class-at-IoU≥0.5
+                # or same-class IoU<0.3 — proxy for the "model saw something but
+                # didn't commit confidently to the correct class" bucket.
+                fn_sub = "under_confidence"
+            fn_attribution.setdefault(cid,
+                {"true_miss": 0, "under_confidence": 0, "localization_fail": 0}
+            )[fn_sub] += 1
             fn_gallery.setdefault(cid, []).append({
                 "image_idx": int(real_idx),
                 "path": raw.get("path", ""),
                 "gt_box": gt_xyxy[j].tolist(),
+                "size_tier": size_tier,
+                "area": float(area),
+                "fn_sub": fn_sub,
             })
 
         per_image.append({
@@ -478,6 +607,82 @@ def _analyze_detection(
         ),
     }
 
+    # ---- Failure-mode attribution (the headline "why" layer) ----
+    missed_per_class: dict[int, int] = {cid: int(mode_counts["missed"].get(cid, 0))
+                                          for cid in class_names}
+    contribution = _compute_recoverable_map(
+        detections, gt_per_class, missed_per_class, class_names,
+        iou_thr=iou_threshold,
+    )
+    mode_total = {m: int(sum(mode_counts[m].values()))
+                  for m in mode_counts if m != "correct"}
+    confusion_pairs_top = sorted(
+        [
+            {
+                "gt": class_names.get(g, str(g)),
+                "pred": class_names.get(p, str(p)),
+                "count": len(v),
+            }
+            for (g, p), v in conf_gallery.items()
+        ],
+        key=lambda r: -r["count"],
+    )[:10]
+    failure_mode = {
+        "baseline_map50": contribution["baseline_map50"],
+        "ceiling_map50": round(
+            min(1.0, contribution["baseline_map50"]
+                + sum(max(0.0, c["delta_map50"])
+                      for c in contribution["modes"].values())),
+            4,
+        ),
+        "error_types": mode_total,
+        "per_class": {
+            class_names.get(cid, str(cid)): {
+                m: int(mode_counts[m].get(cid, 0)) for m in mode_counts
+            }
+            for cid in class_names
+        },
+        "confusion_pairs_top": confusion_pairs_top,
+        "contribution": contribution["modes"],
+    }
+    failure_mode["fn_attribution"] = {
+        class_names.get(cid, str(cid)): dict(v) for cid, v in fn_attribution.items()
+    }
+    failure_mode["miss_by_attribute"] = {
+        "by_size":  {class_names.get(cid, str(cid)): dict(v) for cid, v in missed_by_size.items()},
+        "by_aspect_ratio": {class_names.get(cid, str(cid)): dict(v) for cid, v in missed_by_ar.items()},
+        "by_crowdedness": {class_names.get(cid, str(cid)): dict(v) for cid, v in missed_by_crowd.items()},
+    }
+    failure_mode["diagnosis"] = _auto_diagnose(
+        failure_mode, gt_per_class, gt_per_class_size, class_names, iou_threshold,
+    )
+    summary["model_metrics"]["failure_mode"] = failure_mode
+
+    artifacts["failure_mode_contribution"] = _plot_failure_mode_contribution(
+        mode_total, contribution, output_dir / "failure_mode_contribution.png",
+    )
+    artifacts["recoverable_map_vs_iou"] = _plot_recoverable_map_vs_iou(
+        detections, gt_per_class, missed_per_class, class_names,
+        output_dir / "recoverable_map_vs_iou.png",
+    )
+    artifacts["failure_by_attribute"] = _plot_failure_by_attribute(
+        missed_by_size, gt_per_class_size,
+        missed_by_ar, gt_ar_bucket,
+        missed_by_crowd, gt_crowd_bucket,
+        confusion_pairs_top, class_names,
+        output_dir / "failure_by_attribute.png",
+    )
+    artifacts["confidence_attribution"] = _plot_confidence_attribution(
+        fn_attribution, class_names,
+        output_dir / "confidence_attribution.png",
+    )
+
+    # summary.md header gets the ranking table up top — direct answer to
+    # "list of failure mode and contribution of that failure mode to total accuracy".
+    ranking_lines = _render_failure_mode_table(
+        mode_total, contribution, baseline=contribution["baseline_map50"],
+    )
+
     # Persist the full report now that every section is populated.
     _write_json_md(
         output_dir / "summary.json", output_dir / "summary.md",
@@ -493,6 +698,8 @@ def _analyze_detection(
             f"    * {SIZE_TIER_LABELS['small']}",
             f"    * {SIZE_TIER_LABELS['medium']}",
             f"    * {SIZE_TIER_LABELS['large']}",
+            "",
+            *ranking_lines,
         ],
     )
     artifacts["summary_json"] = output_dir / "summary.json"
@@ -505,34 +712,55 @@ def _analyze_detection(
         output_dir / "hardest_images.png",
     )
 
-    # ---- per-class galleries — all three share the same rendering path,
-    # differing only in which dict they iterate and the filename suffix. ----
+    # ---- per-mode × per-class example galleries ----
+    # Five-mode taxonomy (missed / localization / class_confusion / duplicate /
+    # background_fp) — every example renders full GT+Pred via annotate_gt_pred
+    # so the reader can see the failing box in context (sibling TP box for a
+    # duplicate, empty neighborhood for a background_fp, etc.).
     if hard_images_per_class > 0:
-        gallery_root = output_dir / "hard_images"
-        artifacts["hard_images_root"] = gallery_root
+        examples_root = output_dir / "failure_mode_examples"
+        artifacts["failure_mode_examples_root"] = examples_root
 
-        def _fp_name(rec): return f"fp_score_{rec['score']:.2f}"
-        def _fn_name(rec): return "fn"
-        def _conf_name(rec): return f"iou_{rec['iou']:.2f}"
+        def _cls_label(cid): return class_names.get(cid, str(cid))
+        def _confpair_label(pair):
+            return (f"{_safe_name(_cls_label(pair[1]))}"
+                    f"__from__{_safe_name(_cls_label(pair[0]))}")
 
         _render_gallery(
             raw_ds, class_names, style, pred_cache, hard_images_per_class,
-            grouped=fp_gallery, class_labeler=lambda cid: class_names.get(cid, str(cid)),
-            root=gallery_root / "false_positives", suffix_fn=_fp_name,
+            grouped=mode_galleries["missed"], class_labeler=_cls_label,
+            root=examples_root / "missed",
+            suffix_fn=lambda r: f"missed__area_{int(r.get('area', 0))}",
+            sort_key=lambda r: r.get("area", 0),  # smallest misses first (most damning)
+        )
+        _render_gallery(
+            raw_ds, class_names, style, pred_cache, hard_images_per_class,
+            grouped=mode_galleries["localization"], class_labeler=_cls_label,
+            root=examples_root / "localization",
+            suffix_fn=lambda r: f"loc__iou_{r['iou']:.2f}_score_{r['score']:.2f}",
             sort_key=lambda r: -r["score"],
         )
         _render_gallery(
             raw_ds, class_names, style, pred_cache, hard_images_per_class,
-            grouped=fn_gallery, class_labeler=lambda cid: class_names.get(cid, str(cid)),
-            root=gallery_root / "false_negatives", suffix_fn=_fn_name,
-            sort_key=None,
+            grouped=mode_galleries["class_confusion"],
+            class_labeler=_confpair_label,
+            root=examples_root / "class_confusion",
+            suffix_fn=lambda r: f"conf__iou_{r['iou']:.2f}_score_{r['score']:.2f}",
+            sort_key=lambda r: -r["score"],
         )
         _render_gallery(
             raw_ds, class_names, style, pred_cache, hard_images_per_class,
-            grouped=conf_gallery,
-            class_labeler=lambda pair: f"{_safe_name(class_names.get(pair[1], str(pair[1])))}__from__{_safe_name(class_names.get(pair[0], str(pair[0])))}",
-            root=gallery_root / "class_confusion", suffix_fn=_conf_name,
+            grouped=mode_galleries["duplicate"], class_labeler=_cls_label,
+            root=examples_root / "duplicate",
+            suffix_fn=lambda r: f"dup__iou_{r['iou']:.2f}_score_{r['score']:.2f}",
             sort_key=lambda r: -r["iou"],
+        )
+        _render_gallery(
+            raw_ds, class_names, style, pred_cache, hard_images_per_class,
+            grouped=mode_galleries["background_fp"], class_labeler=_cls_label,
+            root=examples_root / "background_fp",
+            suffix_fn=lambda r: f"bgfp__score_{r['score']:.2f}",
+            sort_key=lambda r: -r["score"],  # most-confident spurious detections first
         )
 
     return artifacts
@@ -881,6 +1109,618 @@ def _best_f1_and_threshold(detections, gt_per_class, class_names, iou_thr) -> di
                         "recall": round(rec, 4)}
         out[class_names.get(cid, str(cid))] = best
     return out
+
+
+# --------------------------- failure-mode attribution ---------------------------
+
+
+def _mean_map(detections, gt_per_class, class_names, iou_thr) -> float:
+    aps = []
+    for cid in class_names:
+        gt_count = int(gt_per_class.get(cid, 0))
+        if gt_count == 0:
+            continue
+        _, _, ap = _per_class_ap_curve(detections, gt_count, int(cid), iou_thr)
+        aps.append(ap)
+    return float(np.mean(aps)) if aps else 0.0
+
+
+def _mutate_for_mode(detections, mode, missed_per_class, median_tp_score, iou_thr):
+    """Return a new detection list with `mode` errors counter-factually fixed.
+
+    * missed          → inject synthetic TPs at median TP score for every missed GT
+    * class_confusion → flip pred class to the matched GT class (FP → TP)
+    * localization    → bump same-class IoU above threshold (FP → TP)
+    * duplicate       → drop (removes FP without affecting TP)
+    * background_fp   → drop (removes FP)
+    """
+    out: list[dict] = []
+    for d in detections:
+        m = d.get("mode")
+        if mode in ("duplicate", "background_fp") and m == mode:
+            continue
+        if mode == "class_confusion" and m == "class_confusion":
+            fixed = dict(d)
+            fixed["pred_cls"] = int(d.get("gt_cls_at_best_iou", d["pred_cls"]))
+            # Assume a tight fix: class flip AND box good enough for current iou_thr.
+            fixed["best_iou_same_class"] = max(float(iou_thr),
+                                                 float(d.get("best_iou_any", 0.0)))
+            fixed["mode"] = "correct"
+            out.append(fixed)
+            continue
+        if mode == "localization" and m == "localization":
+            fixed = dict(d)
+            fixed["best_iou_same_class"] = max(float(iou_thr),
+                                                 float(d["best_iou_same_class"]))
+            fixed["mode"] = "correct"
+            out.append(fixed)
+            continue
+        out.append(d)
+
+    if mode == "missed":
+        for cid, n in missed_per_class.items():
+            for _ in range(int(n)):
+                out.append({
+                    "pred_cls": int(cid),
+                    "score": float(median_tp_score),
+                    "best_iou_same_class": 1.0,
+                    "best_iou_any": 1.0,
+                    "gt_cls_at_best_iou": int(cid),
+                    "mode": "correct",
+                })
+    return out
+
+
+def _compute_recoverable_map(
+    detections: list[dict],
+    gt_per_class: dict[int, int],
+    missed_per_class: dict[int, int],
+    class_names: dict[int, str],
+    iou_thr: float = 0.5,
+) -> dict:
+    """Per-mode counterfactual: how much mAP@iou_thr would we recover if mode X were fixed?
+
+    Returns both global (`modes`) and per-class (`modes_per_class`) deltas so
+    consumers can spot which class benefits most from fixing each mode.
+    """
+    tp_scores = [d["score"] for d in detections if d.get("mode") == "correct"]
+    median_tp = float(np.median(tp_scores)) if tp_scores else 0.5
+
+    def _per_class_ap_dict(dets):
+        return {
+            cid: _per_class_ap_curve(dets, int(gt_per_class.get(cid, 0)), cid, iou_thr)[2]
+            for cid in class_names if gt_per_class.get(cid, 0) > 0
+        }
+
+    baseline_per_class = _per_class_ap_dict(detections)
+    baseline = float(np.mean(list(baseline_per_class.values()))) if baseline_per_class else 0.0
+
+    modes_out: dict[str, dict] = {}
+    per_class_out: dict[str, dict[str, float]] = {}
+    for mode in ("missed", "class_confusion", "localization", "duplicate", "background_fp"):
+        mutated = _mutate_for_mode(detections, mode, missed_per_class, median_tp, iou_thr)
+        new_per_class = _per_class_ap_dict(mutated)
+        new_map = float(np.mean(list(new_per_class.values()))) if new_per_class else 0.0
+        modes_out[mode] = {
+            "delta_map50": round(new_map - baseline, 4),
+            "new_map50": round(new_map, 4),
+        }
+        per_class_out[mode] = {
+            class_names.get(cid, str(cid)):
+                round(new_per_class.get(cid, 0.0) - baseline_per_class.get(cid, 0.0), 4)
+            for cid in baseline_per_class
+        }
+    return {
+        "baseline_map50": round(baseline, 4),
+        "baseline_ap50_per_class": {
+            class_names.get(cid, str(cid)): round(v, 4)
+            for cid, v in baseline_per_class.items()
+        },
+        "modes": modes_out,
+        "modes_per_class": per_class_out,
+    }
+
+
+def _render_failure_mode_table(mode_total, contribution, *, baseline: float) -> list[str]:
+    """Markdown ranking table — the verbatim user ask: list failure modes +
+    contribution to total accuracy, sorted by Δ mAP50 descending."""
+    modes = contribution["modes"]
+    total_errors = max(1, sum(mode_total.values()))
+    rows = []
+    for m, info in modes.items():
+        count = mode_total.get(m, 0)
+        rows.append((m, count, info["delta_map50"], 100.0 * count / total_errors))
+    rows.sort(key=lambda r: -r[2])
+
+    lines = [
+        "",
+        "## Failure-mode ranking (biggest accuracy wins first)",
+        "",
+        "| Mode              | Count | Δ mAP50 if fixed | % of error volume |",
+        "|-------------------|------:|-----------------:|------------------:|",
+    ]
+    total_delta = 0.0
+    for m, count, delta, pct in rows:
+        total_delta += max(0.0, delta)
+        lines.append(f"| {m:<17} | {count:>5} | {delta:+.4f} | {pct:>5.1f}% |")
+    ceiling = min(1.0, baseline + total_delta)
+    lines.append("")
+    lines.append(f"**Baseline mAP50 = {baseline:.4f}.  "
+                  f"If every mode were fixed → {ceiling:.4f} (ceiling).**")
+    lines.append("")
+    return lines
+
+
+def _auto_diagnose(failure_mode, gt_per_class, gt_per_class_size,
+                    class_names, iou_thr) -> list[str]:
+    """Conservative heuristic bullets. Up to 5."""
+    bullets: list[str] = []
+
+    # 1. Class imbalance
+    total = sum(gt_per_class.values())
+    if total > 0 and len(gt_per_class) > 1:
+        avg = total / len(gt_per_class)
+        for cid, cnt in gt_per_class.items():
+            if cnt > 0 and cnt < 0.5 * avg:
+                pct = 100.0 * cnt / total
+                bullets.append(
+                    f"Class imbalance: **{class_names.get(cid, str(cid))}** is "
+                    f"{pct:.1f}% of GT (vs {100.0/len(gt_per_class):.1f}% avg) — "
+                    "rare classes typically underperform."
+                )
+                break
+
+    # 2. Small-object bottleneck: missed GT dominated by small
+    per_class = failure_mode.get("per_class", {})
+    for cname, modes in per_class.items():
+        miss = modes.get("missed", 0)
+        correct = modes.get("correct", 0)
+        if miss + correct < 5:
+            continue
+        if miss / max(1, miss + correct) < 0.4:
+            continue
+        # Lookup class id
+        cid = next((c for c, n in class_names.items() if n == cname), None)
+        if cid is None:
+            continue
+        tiers = gt_per_class_size.get(cid, {})
+        small = tiers.get("small", 0)
+        all_ = sum(tiers.values()) or 1
+        if small / all_ >= 0.5:
+            bullets.append(
+                f"Small-object bottleneck: **{cname}** has miss-rate "
+                f"{100.0*miss/(miss+correct):.0f}% and {100.0*small/all_:.0f}% of its "
+                "GT boxes are small (<32²px) — try higher input resolution or Mosaic."
+            )
+            break
+
+    # 3. Dominant class confusion pair
+    top_pairs = failure_mode.get("confusion_pairs_top", [])
+    if top_pairs and top_pairs[0]["count"] >= 3:
+        p = top_pairs[0]
+        bullets.append(
+            f"Class confusion: **{p['gt']} → {p['pred']}** dominates "
+            f"({p['count']} cases) — semantically similar; consider class merging "
+            "or hard-negative mining."
+        )
+
+    # 4. Biggest recoverable mode
+    modes = failure_mode.get("contribution", {})
+    if modes:
+        top_mode = max(modes.items(), key=lambda kv: kv[1]["delta_map50"])
+        name, info = top_mode
+        if info["delta_map50"] >= 0.02:
+            bullets.append(
+                f"Biggest single win: fixing **{name}** alone would lift mAP50 by "
+                f"**{info['delta_map50']:+.3f}** "
+                f"({failure_mode.get('baseline_map50', 0):.3f} → {info['new_map50']:.3f})."
+            )
+
+    # 5. Background-FP flood
+    error_types = failure_mode.get("error_types", {})
+    total_errors = max(1, sum(error_types.values()))
+    bg = error_types.get("background_fp", 0)
+    if bg / total_errors >= 0.5:
+        bullets.append(
+            f"Background-FP flood: {100.0*bg/total_errors:.0f}% of errors are "
+            "spurious detections on empty regions — raise conf_threshold or add "
+            "hard-negative mining."
+        )
+
+    # 6. Under-confidence FN — actionable via threshold tuning
+    fna = failure_mode.get("fn_attribution", {})
+    for cname, d in fna.items():
+        total = d.get("true_miss", 0) + d.get("under_confidence", 0) + d.get("localization_fail", 0)
+        if total < 5:
+            continue
+        uc = d.get("under_confidence", 0)
+        if uc / total >= 0.4:
+            bullets.append(
+                f"Under-confidence FN: {100.0*uc/total:.0f}% of **{cname}** "
+                f"misses had a pred nearby — recalibration / lower conf_threshold "
+                "may recover these."
+            )
+            break
+
+    return bullets[:5]
+
+
+_FAILURE_MODE_GLOSSARY = (
+    "missed           — GT box had NO prediction of any class within IoU 0.3.\n"
+    "                    Fix: add data / augmentation / larger input — model didn't see it.\n"
+    "localization     — correct class predicted, but box drift (IoU 0.3–0.5).\n"
+    "                    Fix: regression head — box-refinement layer, L1+GIoU weights.\n"
+    "class_confusion  — a pred overlaps a GT at IoU ≥ 0.5 but with the WRONG class.\n"
+    "                    Fix: classifier — class balance, hard-negative mining, class merge.\n"
+    "duplicate        — second same-class pred on a GT that already has a higher-score TP.\n"
+    "                    Fix: NMS / top-k — tighten IoU threshold or lower max_detections.\n"
+    "background_fp    — pred with no GT of any class within IoU 0.3 (spurious detection).\n"
+    "                    Fix: raise conf_threshold, add hard-negatives, lengthen training."
+)
+
+
+def _plot_failure_mode_contribution(mode_total, contribution, path: Path) -> Path | None:
+    """Two-panel chart: global ranked bars + per-class heatmap.
+
+    Panel (a) — ranked horizontal bars: Δ mAP50 per mode (global).
+    Panel (b) — heatmap rows=class, cols=mode, cell = Δ AP50 for that class
+                  if that mode were fixed in isolation. Spots "class X's
+                  accuracy is bottlenecked by Y" patterns at a glance.
+    A short glossary at the bottom defines each of the five modes.
+    """
+    modes_info = contribution["modes"]
+    if not modes_info:
+        return None
+    rows = sorted(modes_info.items(), key=lambda kv: kv[1]["delta_map50"])
+    labels = [m for m, _ in rows]
+    deltas = [info["delta_map50"] for _, info in rows]
+    counts = [mode_total.get(m, 0) for m, _ in rows]
+    baseline = contribution["baseline_map50"]
+    ceiling = min(1.0, baseline + sum(max(0.0, d) for d in deltas))
+
+    modes_pc = contribution.get("modes_per_class", {})
+    # Stable class ordering = alphabetical by name (matches chart axes elsewhere).
+    class_names_list = sorted({c for row in modes_pc.values() for c in row})
+    heatmap_modes = ["missed", "localization", "class_confusion", "duplicate", "background_fp"]
+
+    fig = plt.figure(figsize=(16, 9))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.1], hspace=0.35, wspace=0.22)
+    ax_a = fig.add_subplot(gs[0, 0])
+    ax_b = fig.add_subplot(gs[0, 1])
+    ax_text = fig.add_subplot(gs[1, :])
+
+    # --- Panel (a) global ranked bars ---
+    colors_a = ["#c44e52" if d >= 0 else "#999999" for d in deltas]
+    bars = ax_a.barh(labels, deltas, color=colors_a)
+    for bar, d, n in zip(bars, deltas, counts):
+        x = bar.get_width()
+        ax_a.text(x + 0.002, bar.get_y() + bar.get_height() / 2,
+                   f"n={n}  Δ={d:+.4f}", va="center", fontsize=9)
+    ax_a.axvline(0, color="black", lw=0.8)
+    ax_a.set_xlabel("Δ mAP50 if this failure mode were counter-factually fixed")
+    ax_a.set_title(
+        f"(a) Global — baseline mAP50 = {baseline:.3f} → ceiling = {ceiling:.3f}"
+    )
+    ax_a.grid(axis="x", alpha=0.3)
+    xmax_a = max(deltas) if deltas else 0.1
+    ax_a.set_xlim(min(0, min(deltas)) - 0.01, xmax_a * 1.35 + 0.02)
+
+    # --- Panel (b) per-class × per-mode heatmap ---
+    if class_names_list and modes_pc:
+        mat = np.zeros((len(class_names_list), len(heatmap_modes)), dtype=np.float32)
+        for i, cname in enumerate(class_names_list):
+            for j, m in enumerate(heatmap_modes):
+                mat[i, j] = float(modes_pc.get(m, {}).get(cname, 0.0))
+        vmax = max(0.01, float(np.abs(mat).max()))
+        im = ax_b.imshow(mat, cmap="Reds", vmin=0, vmax=vmax, aspect="auto")
+        ax_b.set_xticks(range(len(heatmap_modes)))
+        ax_b.set_xticklabels(heatmap_modes, rotation=25, ha="right")
+        ax_b.set_yticks(range(len(class_names_list)))
+        ax_b.set_yticklabels(class_names_list)
+        for i in range(mat.shape[0]):
+            for j in range(mat.shape[1]):
+                v = mat[i, j]
+                if v > 0.001:
+                    color = "white" if v > vmax * 0.55 else "black"
+                    ax_b.text(j, i, f"{v:+.3f}", ha="center", va="center",
+                              fontsize=8, color=color)
+        fig.colorbar(im, ax=ax_b, label="Δ AP50 for this class if mode fixed",
+                     fraction=0.046, pad=0.04)
+        ax_b.set_title("(b) Per-class — which mode hurts each class most")
+    else:
+        ax_b.set_axis_off()
+        ax_b.text(0.5, 0.5, "no per-class data", ha="center", va="center",
+                   fontsize=11, color="#999999")
+
+    # --- Glossary panel ---
+    ax_text.set_axis_off()
+    ax_text.text(
+        0.01, 0.98,
+        "Failure-mode definitions (and what to tune):\n\n" + _FAILURE_MODE_GLOSSARY
+        + "\n\nReading tips:\n"
+        "• Panel (a): top bar = biggest single lever on global mAP50. 'n' is raw count; 'Δ' is mAP recovery.\n"
+        "• Panel (b): darkest cell in each row shows which mode to fix FIRST for that class.\n"
+        "• Counts and Δ often disagree: many low-score background FPs can contribute less mAP than a few missed GTs\n"
+        "  because mAP ranks by score (low-score FPs sit below the PR-curve knee).",
+        fontsize=9, family="monospace", va="top",
+    )
+
+    fig.suptitle("Failure-mode contribution to mAP50   "
+                  f"(baseline {baseline:.3f} → ceiling {ceiling:.3f})",
+                  fontsize=13, y=0.995)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _plot_recoverable_map_vs_iou(
+    detections, gt_per_class, missed_per_class, class_names,
+    path: Path,
+) -> Path | None:
+    """How much mAP each failure mode would recover across IoU thresholds.
+
+    Two panels: (a) absolute baseline + per-mode ceiling curves, (b) stacked
+    Δ bars per IoU showing which mode dominates recovery at each strictness.
+
+    Modes are tagged once at IoU 0.5 (by `_analyze_detection`); this chart
+    asks "if those same mistakes were fixed, how would the headline mAP
+    change across 0.5 → 0.9 strictness?" — useful for deciding whether
+    localization fixes actually move your target metric (COCO mAP = average
+    over IoUs) vs just mAP50.
+    """
+    iou_values = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]
+    modes = ["missed", "localization", "class_confusion", "duplicate", "background_fp"]
+    colors = {
+        "missed":          "#c44e52",
+        "localization":    "#8172b2",
+        "class_confusion": "#dd8452",
+        "duplicate":       "#4c72b0",
+        "background_fp":   "#55a868",
+    }
+
+    baselines: list[float] = []
+    delta_by_mode: dict[str, list[float]] = {m: [] for m in modes}
+    ceilings: list[float] = []
+    for iou in iou_values:
+        contrib = _compute_recoverable_map(
+            detections, gt_per_class, missed_per_class, class_names, iou_thr=float(iou),
+        )
+        baselines.append(contrib["baseline_map50"])
+        total = 0.0
+        for m in modes:
+            d = contrib["modes"][m]["delta_map50"]
+            delta_by_mode[m].append(d)
+            total += max(0.0, d)
+        ceilings.append(min(1.0, contrib["baseline_map50"] + total))
+
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(16, 5.5))
+
+    # --- Panel (a): baseline + per-mode recoverable ceilings ---
+    ax_a.plot(iou_values, baselines, lw=2.5, color="black", marker="o",
+               label="baseline mAP (observed)")
+    ax_a.plot(iou_values, ceilings, lw=2.0, color="#999999", linestyle="--", marker="s",
+               label="ceiling if ALL modes fixed")
+    for m in modes:
+        curve = [baselines[i] + delta_by_mode[m][i] for i in range(len(iou_values))]
+        ax_a.plot(iou_values, curve, lw=1.3, marker=".", color=colors[m],
+                   label=f"+ fix {m}", alpha=0.85)
+    ax_a.set_xlabel("IoU threshold used to compute mAP")
+    ax_a.set_ylabel("mAP  (0 = worst, 1 = perfect)")
+    ax_a.set_ylim(0, 1.05)
+    ax_a.set_xticks(iou_values)
+    ax_a.set_xticklabels([f"{v:.2f}" for v in iou_values])
+    ax_a.set_title("(a) Baseline vs counter-factual ceiling across IoU strictness")
+    ax_a.grid(alpha=0.3)
+    ax_a.legend(loc="upper right", fontsize=8, bbox_to_anchor=(1.0, 1.0))
+
+    # --- Panel (b): stacked Δ bars per IoU threshold ---
+    x = np.arange(len(iou_values))
+    w = 0.6
+    bottom = np.zeros(len(iou_values))
+    for m in modes:
+        ys = np.array([max(0.0, d) for d in delta_by_mode[m]])
+        ax_b.bar(x, ys, w, bottom=bottom, color=colors[m], label=m)
+        bottom += ys
+    for i, total in enumerate(bottom):
+        if total > 0.01:
+            ax_b.text(i, total + 0.01, f"Δ={total:.2f}", ha="center", fontsize=8)
+    ax_b.set_xticks(x)
+    ax_b.set_xticklabels([f"{v:.2f}" for v in iou_values])
+    ax_b.set_xlabel("IoU threshold used to compute mAP")
+    ax_b.set_ylabel("Δ mAP stacked across modes  (= ceiling − baseline)")
+    ax_b.set_ylim(0, max(0.5, float(bottom.max()) * 1.2))
+    ax_b.set_title("(b) Stacked Δ mAP — which mode dominates recovery at each IoU")
+    ax_b.legend(loc="upper left", fontsize=8)
+    ax_b.grid(axis="y", alpha=0.3)
+
+    fig.text(0.02, 0.01,
+             "• Panel (a): black = observed, grey-dashed = if all 5 modes were fixed. Colored curves = baseline + one mode fixed.\n"
+             "• Panel (b): at stricter IoU (right side), 'localization' usually balloons — boxes that were 'correct' at 0.5 no longer qualify at 0.75.\n"
+             "• Reading: if your deployment target is COCO mAP (avg over IoUs), localization fixes matter far more than at mAP50 alone.",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.08, 1, 1])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _plot_failure_by_attribute(
+    missed_by_size, gt_size_totals,
+    missed_by_ar, gt_ar_totals,
+    missed_by_crowd, gt_crowd_totals,
+    confusion_pairs_top: list[dict],
+    class_names: dict[int, str],
+    path: Path,
+) -> Path | None:
+    """2×2 attribute chart: miss-rate by size / AR / crowd + top confusion pairs."""
+
+    def _rates(miss, total, buckets):
+        """Return dict class -> [rate_per_bucket] with safe division."""
+        out = {}
+        for cid in class_names:
+            m = miss.get(cid, {})
+            t = total.get(cid, {})
+            row = []
+            for b in buckets:
+                tot = t.get(b, 0)
+                row.append((m.get(b, 0) / tot) if tot > 0 else 0.0)
+            out[cid] = row
+        return out
+
+    size_buckets = ("small", "medium", "large")
+    ar_buckets = ("tall", "square", "wide")
+    crowd_buckets = ("1-2", "3-5", "6-10", "11+")
+
+    size_rates = _rates(missed_by_size, gt_size_totals, size_buckets)
+    ar_rates = _rates(missed_by_ar, gt_ar_totals, ar_buckets)
+    crowd_rates = _rates(missed_by_crowd, gt_crowd_totals, crowd_buckets)
+
+    names = [class_names.get(cid, str(cid)) for cid in class_names]
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(names), 10)))
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+    (ax_size, ax_ar), (ax_crowd, ax_conf) = axes
+
+    def _grouped_bars(ax, buckets, rates_per_class, title, xlabel):
+        n_cls = max(1, len(class_names))
+        x = np.arange(len(buckets))
+        w = 0.8 / n_cls
+        for i, cid in enumerate(class_names):
+            row = rates_per_class[cid]
+            ax.bar(x + (i - n_cls / 2) * w + w / 2, row, w,
+                   label=class_names.get(cid, str(cid)), color=colors[i % 10])
+            for bi, val in enumerate(row):
+                if val > 0:
+                    ax.text(x[bi] + (i - n_cls / 2) * w + w / 2, val + 0.01,
+                            f"{val:.2f}", ha="center", fontsize=6)
+        ax.set_xticks(x)
+        ax.set_xticklabels(buckets)
+        ax.set_ylim(0, 1.1)
+        ax.set_ylabel("miss-rate  (missed / total GT)")
+        ax.set_xlabel(xlabel)
+        ax.set_title(title)
+        ax.grid(axis="y", alpha=0.3)
+
+    _grouped_bars(ax_size, size_buckets, size_rates,
+                   "(a) Miss-rate by object size (COCO tiers)", "size tier")
+    _grouped_bars(ax_ar, ar_buckets, ar_rates,
+                   "(b) Miss-rate by aspect ratio", "w/h bucket (tall<0.5, square 0.5–2, wide>2)")
+    _grouped_bars(ax_crowd, crowd_buckets, crowd_rates,
+                   "(c) Miss-rate by image crowdedness", "boxes per image")
+
+    # Shared legend outside the top-right panel to keep bars uncluttered.
+    handles, labels = ax_size.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center",
+                bbox_to_anchor=(0.5, 1.02), ncol=min(6, len(labels)), fontsize=9)
+
+    # Panel d — top confusion pairs (horizontal bars, ranked by count).
+    if confusion_pairs_top:
+        pairs = confusion_pairs_top[:10]
+        pair_labels = [f"{p['gt']} → {p['pred']}" for p in pairs]
+        pair_counts = [p["count"] for p in pairs]
+        ax_conf.barh(pair_labels, pair_counts, color="#c44e52")
+        for i, cnt in enumerate(pair_counts):
+            ax_conf.text(cnt + 0.05, i, f"n={cnt}", va="center", fontsize=9)
+        ax_conf.invert_yaxis()
+        ax_conf.set_xlabel("count")
+        ax_conf.set_title("(d) Top class-confusion pairs  (GT → Pred)")
+        ax_conf.grid(axis="x", alpha=0.3)
+        ax_conf.set_xlim(0, max(pair_counts) * 1.2 + 1)
+    else:
+        ax_conf.set_axis_off()
+        ax_conf.text(0.5, 0.5, "no class-confusion errors", ha="center", va="center",
+                      fontsize=11, color="#999999")
+        ax_conf.set_title("(d) Top class-confusion pairs")
+
+    fig.text(0.02, 0.01,
+             "• High bar in (a) small-size = model can't resolve small objects — raise input resolution or add Mosaic.\n"
+             "• High bar in (b) tall/wide = aspect-ratio bias — check anchor priors / query slots.\n"
+             "• High bar in (c) right side = struggles in crowded scenes — check NMS + max_detections.\n"
+             "• Panel (d) pairs with count ≥ 3 = systematic label confusion — consider class merge or hard-negative mining.",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.08, 1, 0.96])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _plot_confidence_attribution(
+    fn_attribution: dict[int, dict[str, int]],
+    class_names: dict[int, str],
+    path: Path,
+) -> Path | None:
+    """Stacked bar per class: true_miss / under_confidence / localization_fail.
+
+    The `under_confidence` slice is the actionable insight — it's the fraction
+    of FNs where the model actually *saw* something at the right spot, so
+    recalibration or lowering conf_threshold can recover them.
+    """
+    names = [class_names.get(cid, str(cid)) for cid in class_names]
+    tm = np.array([fn_attribution.get(cid, {}).get("true_miss", 0) for cid in class_names], dtype=np.float32)
+    uc = np.array([fn_attribution.get(cid, {}).get("under_confidence", 0) for cid in class_names], dtype=np.float32)
+    lf = np.array([fn_attribution.get(cid, {}).get("localization_fail", 0) for cid in class_names], dtype=np.float32)
+    total = tm + uc + lf
+    if total.sum() == 0:
+        # No FNs — render an empty annotated figure rather than skipping the
+        # artifact (keeps the chart set complete across runs).
+        fig, ax = plt.subplots(figsize=(9, 4.5))
+        ax.text(0.5, 0.5, "no FN — nothing to attribute", ha="center", va="center",
+                fontsize=12, color="#555555")
+        ax.set_axis_off()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(path), dpi=130, bbox_inches="tight")
+        plt.close(fig)
+        return path
+
+    fig, (ax_abs, ax_pct) = plt.subplots(1, 2, figsize=(14, 5.5))
+    x = np.arange(len(names))
+
+    # Absolute counts
+    ax_abs.bar(x, tm, label="true_miss  (no pred near GT)", color="#c44e52")
+    ax_abs.bar(x, uc, bottom=tm, label="under_confidence  (wrong-class or IoU<0.3 pred existed)",
+                color="#dd8452")
+    ax_abs.bar(x, lf, bottom=tm + uc, label="localization_fail  (same-class, IoU 0.3–0.5)",
+                color="#8172b2")
+    for i, t in enumerate(total):
+        if t > 0:
+            ax_abs.text(i, t + 0.5, f"n={int(t)}", ha="center", fontsize=8)
+    ax_abs.set_xticks(x); ax_abs.set_xticklabels(names, rotation=30, ha="right")
+    ax_abs.set_ylabel("FN count")
+    ax_abs.set_title("(a) FN causality — absolute counts per class")
+    ax_abs.legend(loc="upper left", fontsize=8)
+    ax_abs.grid(axis="y", alpha=0.3)
+
+    # Normalized
+    tm_p = np.where(total > 0, tm / np.maximum(total, 1), 0)
+    uc_p = np.where(total > 0, uc / np.maximum(total, 1), 0)
+    lf_p = np.where(total > 0, lf / np.maximum(total, 1), 0)
+    ax_pct.bar(x, tm_p, color="#c44e52")
+    ax_pct.bar(x, uc_p, bottom=tm_p, color="#dd8452")
+    ax_pct.bar(x, lf_p, bottom=tm_p + uc_p, color="#8172b2")
+    for i in range(len(names)):
+        if uc_p[i] > 0.05:
+            ax_pct.text(i, tm_p[i] + uc_p[i] / 2, f"{uc_p[i]*100:.0f}%",
+                         ha="center", va="center", fontsize=7, color="white")
+    ax_pct.set_xticks(x); ax_pct.set_xticklabels(names, rotation=30, ha="right")
+    ax_pct.set_ylim(0, 1.05)
+    ax_pct.set_ylabel("share of FN")
+    ax_pct.set_title("(b) FN causality — normalized  (orange % shown = under-confidence share)")
+    ax_pct.grid(axis="y", alpha=0.3)
+
+    fig.text(0.02, 0.02,
+             "• true_miss        — no prediction within IoU 0.3 of the GT (model didn't see it).\n"
+             "• under_confidence — a pred was nearby but wrong class or IoU<0.3 → recalibration / lower conf_threshold may help.\n"
+             "• localization_fail — correct class at IoU 0.3–0.5 → regression head, not classifier, is the bottleneck.\n"
+             "• Big orange slice = recoverable via threshold-tuning; big red slice = need augmentation or more data.",
+             fontsize=8, family="monospace")
+    fig.tight_layout(rect=[0, 0.10, 1, 1])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(path), dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    return path
 
 
 def _plot_threshold_analysis(detections, gt_per_class, class_names, iou_thr, path: Path) -> Path:
@@ -1327,16 +2167,15 @@ def _analyze_classification(
                 image = raw["image"]
                 if image is None:
                     continue
-                # Classification annotate: overlay GT + Pred strip via annotate_gt_pred
-                # with task-agnostic fallback — we render a caption bar ourselves since
-                # classification has no boxes.
-                bar = np.full((28, image.shape[1], 3), 30, dtype=np.uint8)
+                # Classification annotate: prepend a caption banner (no boxes for
+                # classification). Goes through utils.viz.classification_banner so
+                # style/cv2 primitives stay centralized.
                 text = (f"GT: {class_names.get(rec['gt_cid'])}    "
                         f"Pred: {class_names.get(rec['pred_cid'])} ({rec['score']:.2f})")
-                pred_bgr = (style.gt_color_rgb[2], style.gt_color_rgb[1], style.gt_color_rgb[0])
-                cv2.putText(bar, text, (6, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                            pred_bgr, 1, cv2.LINE_AA)
-                annotated = np.vstack([bar, image])
+                annotated = classification_banner(
+                    image, text, style=style, position="top",
+                    text_color_rgb=style.gt_color_rgb,
+                )
                 stem = Path(rec["path"]).stem or f"img_{rec['image_idx']}"
                 out = class_dir / f"{_safe_name(stem)}__pred_{_safe_name(class_names.get(rec['pred_cid']))}_conf_{rec['score']:.2f}.png"
                 cv2.imwrite(str(out), annotated)

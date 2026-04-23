@@ -26,15 +26,65 @@ import random
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
+import supervision as sv
 from transformers import TrainerCallback
 
 from core.p05_data.detection_dataset import YOLOXDataset
 from core.p05_data.transforms import build_transforms
-from core.p06_training.callbacks import (
-    _draw_gt_boxes,
-    _save_image_grid,
+from utils.viz import (
+    VizStyle,
+    annotate_detections,
+    save_image_grid,
 )
+
+
+def _draw_gt_boxes(
+    image: np.ndarray,
+    targets: np.ndarray,
+    class_names: dict,
+    thickness: int = 2,
+    text_scale: float = 0.5,
+) -> np.ndarray:
+    """BGR-in / BGR-out wrapper around ``utils.viz.annotate_detections``.
+
+    Targets are YOLO normalized cxcywh in rows ``[cls, cx, cy, w, h]``.
+    Mirrors the helper in ``callbacks.py`` so HF-backend viz output is
+    byte-identical to pytorch-backend output.
+    """
+    if len(targets) == 0:
+        return image.copy()
+    h, w = image.shape[:2]
+    cx, cy, bw, bh = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
+    xyxy = np.stack([
+        (cx - bw / 2) * w, (cy - bh / 2) * h,
+        (cx + bw / 2) * w, (cy + bh / 2) * h,
+    ], axis=1).astype(np.float64)
+    class_ids = targets[:, 0].astype(np.int64)
+    dets = sv.Detections(xyxy=xyxy, class_id=class_ids)
+    style = VizStyle(box_thickness=thickness, label_text_scale=text_scale)
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    annotated_rgb = annotate_detections(image_rgb, dets, class_names=class_names, style=style)
+    return cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
+
+
+def _save_image_grid(
+    annotated: list[np.ndarray],
+    grid_cols: int,
+    title: str,
+    out_path,
+    dpi: int,
+) -> None:
+    """BGR-in wrapper around ``utils.viz.save_image_grid``."""
+    if not annotated:
+        return
+    rgb_imgs = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in annotated]
+    save_image_grid(
+        rgb_imgs, out_path,
+        cols=min(grid_cols, len(rgb_imgs)),
+        header=title,
+    )
 
 logger = logging.getLogger(__name__)
 

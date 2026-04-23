@@ -23,6 +23,11 @@ import torch.nn as nn
 
 import wandb
 from core.p10_inference.supervision_bridge import annotate_gt_pred
+from utils.viz import (
+    VizStyle,
+    annotate_detections,
+    save_image_grid,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -60,42 +65,64 @@ def _run_splits_and_subsets(trainer: Any) -> dict[str, list[int] | None]:
     return out
 
 
-def _draw_gt_boxes(image: np.ndarray, targets: np.ndarray, class_names: dict, thickness: int = 2, text_scale: float = 0.5) -> np.ndarray:
-    """Draw normalized CXCYWH GT boxes on image. Returns annotated copy."""
-    vis = image.copy()
-    h, w = vis.shape[:2]
-    for row in targets:
-        cls_id = int(row[0])
-        cx, cy, bw, bh = row[1], row[2], row[3], row[4]
-        x1, y1 = int((cx - bw/2)*w), int((cy - bh/2)*h)
-        x2, y2 = int((cx + bw/2)*w), int((cy + bh/2)*h)
-        color = _LABEL_PALETTE[cls_id % len(_LABEL_PALETTE)]
-        cv2.rectangle(vis, (x1, y1), (x2, y2), color, thickness)
-        label = class_names.get(cls_id, str(cls_id))
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 1)
-        cv2.rectangle(vis, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(vis, label, (x1+2, y1-4), cv2.FONT_HERSHEY_SIMPLEX, text_scale, (255,255,255), 1)
-    return vis
+def _draw_gt_boxes(
+    image: np.ndarray,
+    targets: np.ndarray,
+    class_names: dict,
+    thickness: int = 2,
+    text_scale: float = 0.5,
+) -> np.ndarray:
+    """Draw normalized CXCYWH GT boxes on a BGR image.
+
+    Thin adapter over :func:`utils.viz.annotate_detections`. Input and output
+    are BGR (callers originate from ``cv2.imread`` / ``YOLOXDataset.get_raw_item``
+    which is BGR). We convert to RGB at the boundary, annotate, and convert
+    back — supervision annotators work in whatever channel order they receive
+    but ``class_palette()`` colors are defined as RGB.
+    """
+    if len(targets) == 0:
+        return image.copy()
+    h, w = image.shape[:2]
+    cx, cy, bw, bh = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
+    xyxy = np.stack([
+        (cx - bw / 2) * w, (cy - bh / 2) * h,
+        (cx + bw / 2) * w, (cy + bh / 2) * h,
+    ], axis=1).astype(np.float64)
+    class_ids = targets[:, 0].astype(np.int64)
+    dets = sv.Detections(xyxy=xyxy, class_id=class_ids)
+
+    style = VizStyle(
+        box_thickness=thickness,
+        label_text_scale=text_scale,
+    )
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    annotated_rgb = annotate_detections(image_rgb, dets, class_names=class_names, style=style)
+    return cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
 
 
-def _save_image_grid(annotated: list[np.ndarray], grid_cols: int, title: str, out_path: Path, dpi: int) -> None:
-    """Tile a list of BGR images into a grid and save as PNG."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    ncols = min(grid_cols, len(annotated))
-    nrows = math.ceil(len(annotated) / ncols)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 4, nrows * 3.5))
-    axes = np.asarray(axes).ravel()
-    for i in range(nrows * ncols):
-        axes[i].axis("off")
-        if i < len(annotated):
-            axes[i].imshow(cv2.cvtColor(annotated[i], cv2.COLOR_BGR2RGB))
-    fig.suptitle(title, fontsize=12)
-    fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
+def _save_image_grid(
+    annotated: list[np.ndarray],
+    grid_cols: int,
+    title: str,
+    out_path: Path,
+    dpi: int,
+) -> None:
+    """Tile a list of BGR images into a grid and save as PNG.
+
+    Thin adapter over :func:`utils.viz.save_image_grid`. The helper expects
+    RGB, so we convert each cell at the boundary (preserves the previous
+    visual output byte-for-byte modulo the matplotlib layout, which is
+    also preserved because save_image_grid mirrors the original grid math).
+    """
+    if not annotated:
+        return
+    rgb_imgs = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in annotated]
+    save_image_grid(
+        rgb_imgs,
+        out_path,
+        cols=min(grid_cols, len(rgb_imgs)),
+        header=title,
+    )
 
 
 class Callback:

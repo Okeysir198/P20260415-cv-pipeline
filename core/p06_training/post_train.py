@@ -30,17 +30,23 @@ from typing import Any
 
 import cv2
 import numpy as np
+import supervision as sv
 import torch
 
 from core.p06_training._common import (
     task_from_output_format as _task_from_output_format,
+)
+from core.p06_training._common import (
     unwrap_subset as _unwrap_subset,
+)
+from core.p06_training._common import (
     yolo_targets_to_xyxy as _gt_xyxy_from_yolo,
 )
 from core.p10_inference.supervision_bridge import (
     VizStyle,
     annotate_gt_pred,
 )
+from utils.viz import annotate_keypoints, classification_banner
 
 logger = logging.getLogger(__name__)
 
@@ -200,17 +206,25 @@ def render_prediction_grid(
             gt_name = class_names.get(int(gt_cls) if gt_cls is not None else -1, "-")
             pred_name = class_names.get(int(preds[i]), str(int(preds[i])))
             ok = (gt_cls is not None and int(gt_cls) == int(preds[i]))
-            # Draw a title bar over a copy of the image: GT | Pred (score)
-            annotated = orig_image.copy()
-            bar = np.full((28, annotated.shape[1], 3), 30, dtype=np.uint8)
             text_color = style.pred_color_rgb if ok else style.gt_color_rgb
-            cv2.putText(
-                bar,
-                f"GT: {gt_name}    Pred: {pred_name} ({scores[i]:.2f})",
-                (6, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                (int(text_color[2]), int(text_color[1]), int(text_color[0])), 1, cv2.LINE_AA,
+            # Preserve previous look: 28-px bar, RGB(30,30,30) bg, text at 0.5 scale.
+            # Image is BGR here; classification_banner is channel-opaque, so
+            # convert to RGB at boundary to keep the color semantics consistent
+            # with the RGB-defined text_color, then convert the stacked result back.
+            rgb_img = cv2.cvtColor(orig_image, cv2.COLOR_BGR2RGB)
+            banner_style = VizStyle(
+                banner_height=28,
+                banner_bg_rgb=(30, 30, 30),
+                banner_text_rgb=tuple(int(c) for c in text_color),
+                banner_text_scale=0.5,
             )
-            rows.append(np.vstack([bar, annotated]))
+            stacked_rgb = classification_banner(
+                rgb_img,
+                f"GT: {gt_name}    Pred: {pred_name} ({scores[i]:.2f})",
+                style=banner_style,
+                position="top",
+            )
+            rows.append(cv2.cvtColor(stacked_rgb, cv2.COLOR_RGB2BGR))
 
     elif task == "segmentation":
         device = next(model.parameters()).device
@@ -280,16 +294,26 @@ def _blend_seg_masks(image, gt_mask, pred_mask, class_names, style: VizStyle) ->
 
 
 def _draw_keypoints(image, kp, color_rgb, thickness) -> np.ndarray:
-    """Dot-draw keypoints; visibility gate at kp[:, 2] > 0."""
+    """Dot-draw keypoints (no skeleton edges); visibility gate at kp[:, 2] > 0.
+
+    Thin adapter over :func:`utils.viz.annotate_keypoints`. Image is BGR here
+    (from the dataset), so we convert to RGB at the boundary — the helper
+    works in RGB because ``sv.Color`` values from VizStyle/arg are RGB.
+    """
     if kp is None or kp.size == 0:
         return image
-    img = image.copy()
-    color_bgr = (int(color_rgb[2]), int(color_rgb[1]), int(color_rgb[0]))
-    for x, y, v in kp:
-        if v <= 0:
-            continue
-        cv2.circle(img, (int(x), int(y)), max(2, thickness + 1), color_bgr, -1, cv2.LINE_AA)
-    return img
+    kp_arr = np.asarray(kp, dtype=np.float32)
+    xy = kp_arr[:, :2]
+    vis = kp_arr[:, 2]
+    # Hide invisible keypoints by zeroing their coords (same effect as the
+    # v<=0 continue in the previous impl).
+    xy = xy.copy()
+    xy[vis <= 0] = 0.0
+    style = VizStyle(keypoint_radius=max(2, thickness + 1))
+    color = sv.Color(r=int(color_rgb[0]), g=int(color_rgb[1]), b=int(color_rgb[2]))
+    img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    annotated_rgb = annotate_keypoints(img_rgb, xy, skeleton_edges=None, style=style, color=color)
+    return cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
 
 
 def _save_grid(rows: list[np.ndarray], out_path: Path, title: str, ncols: int, dpi: int):

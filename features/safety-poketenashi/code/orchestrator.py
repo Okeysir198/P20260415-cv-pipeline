@@ -22,6 +22,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+import supervision as sv
 import torch
 
 REPO = Path(__file__).resolve().parents[3]
@@ -33,6 +34,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(_CODE_DIR))
 
 from utils.config import load_config
+from utils.viz import VizStyle, annotate_keypoints  # noqa: E402
 from _base import RuleResult  # noqa: E402
 from hands_in_pockets_detector import HandsInPocketsDetector  # noqa: E402
 from stair_safety_detector import StairSafetyDetector  # noqa: E402
@@ -310,44 +312,78 @@ class PoketanashiOrchestrator:
     # ------------------------------------------------------------------
 
     def draw(self, image_bgr: np.ndarray, result: OrchestratorResult) -> np.ndarray:
-        out = image_bgr.copy()
-        conf_th = 0.3
+        """Render orchestrator output using utils.viz helpers.
 
+        Input/output are BGR (for cv2.imwrite / imshow compatibility); the
+        supervision-based helpers work in RGB, so we convert at boundaries.
+        """
+        from utils.viz import classification_banner
+
+        conf_th = 0.3
+        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+        # Original BGR skeleton color (0, 200, 255) → RGB (255, 200, 0).
+        # Original BGR vertex color (0, 0, 255) → RGB (0, 0, 255).
+        body_style = VizStyle(kpt_visibility_threshold=conf_th,
+                              skeleton_color_rgb=(255, 200, 0))
+
+        head_label_rows: list[tuple[np.ndarray, list[str]]] = []
         for person in result.persons:
             kpts = person.keypoints
             scores = person.kp_scores
+            rgb = annotate_keypoints(rgb, kpts, skeleton_edges=_SKELETON_17,
+                                     confidence=scores, style=body_style,
+                                     color=sv.Color(r=0, g=0, b=255))
 
-            # Skeleton.
-            for a, b in _SKELETON_17:
-                if a < len(kpts) and b < len(kpts) and scores[a] > conf_th and scores[b] > conf_th:
-                    pa = tuple(kpts[a].astype(int))
-                    pb = tuple(kpts[b].astype(int))
-                    cv2.line(out, pa, pb, (0, 200, 255), 2)
-            for i, pt in enumerate(kpts):
-                if scores[i] > conf_th:
-                    cv2.circle(out, tuple(pt.astype(int)), 3, (0, 0, 255), -1)
-
-            # Triggered behaviors near the person's head (kp 0 = nose).
             triggered = [b for b, r in person.behaviors.items() if r.triggered]
             if triggered and scores[0] > conf_th:
-                head = kpts[0].astype(int)
+                head_label_rows.append((kpts[0], triggered))
+
+        # Draw per-head triggered-behavior labels via sv.LabelAnnotator
+        # (one detection per label, tiny zero-size box at the head xy).
+        if head_label_rows:
+            xyxys: list[list[float]] = []
+            labels: list[str] = []
+            for head, triggered in head_label_rows:
+                x, y = float(head[0]), float(head[1])
                 for j, label in enumerate(triggered):
-                    y = head[1] - 15 - j * 18
-                    cv2.putText(out, label, (head[0], max(y, 10)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 220), 1)
+                    yy = max(y - 15 - j * 18, 10)
+                    xyxys.append([x, yy, x + 1, yy + 1])
+                    labels.append(label)
+            dets = sv.Detections(
+                xyxy=np.asarray(xyxys, dtype=np.float32),
+                class_id=np.zeros(len(labels), dtype=int),
+            )
+            # BGR (0, 0, 220) → RGB (220, 0, 0).
+            lbl_ann = sv.LabelAnnotator(
+                color=sv.Color(r=220, g=0, b=0),
+                text_scale=0.45, text_padding=2,
+                text_position=sv.Position.TOP_LEFT,
+            )
+            rgb = lbl_ann.annotate(scene=rgb, detections=dets, labels=labels)
 
-        # Alert summary overlay.
+        # Alert banner (top). Original BGR (0, 50, 255) → RGB (255, 50, 0).
         if result.alerts:
-            overlay_h = 16 + len(result.alerts) * 20
-            cv2.rectangle(out, (0, 0), (320, overlay_h), (30, 30, 30), -1)
-            for j, alert in enumerate(result.alerts):
-                cv2.putText(out, f"ALERT: {alert}", (8, 14 + j * 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 50, 255), 1)
+            alert_text = "  |  ".join(f"ALERT: {a}" for a in result.alerts)
+            rgb = classification_banner(
+                rgb, alert_text,
+                style=VizStyle(banner_height=max(24, 16 + len(result.alerts) * 4),
+                               banner_text_scale=0.5),
+                position="overlay_top",
+                bg_color_rgb=(30, 30, 30),
+                text_color_rgb=(255, 50, 0),
+            )
 
-        # Latency.
-        cv2.putText(out, f"{result.latency_ms:.1f}ms", (out.shape[1] - 80, out.shape[0] - 8),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (160, 160, 160), 1)
-        return out
+        # Latency banner (bottom). Original BGR (160, 160, 160) → RGB (160, 160, 160).
+        rgb = classification_banner(
+            rgb, f"{result.latency_ms:.1f}ms",
+            style=VizStyle(banner_height=18, banner_text_scale=0.4),
+            position="bottom",
+            bg_color_rgb=(20, 20, 20),
+            text_color_rgb=(160, 160, 160),
+        )
+
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
 # ---------------------------------------------------------------------------

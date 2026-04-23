@@ -5,6 +5,7 @@ builds annotator instances from config, and provides a single-call annotate func
 """
 
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -216,7 +217,24 @@ _DEFAULT_PRED_COLOR = sv.Color(r=0, g=200, b=0)      # green
 # ---------------------------------------------------------------------------
 
 
-from dataclasses import dataclass, field
+_DEFAULT_ERROR_COLORS: dict[str, tuple[int, int, int]] = {
+    "tp":        (46, 204, 113),    # #2ECC71 green
+    "fp":        (231, 76, 60),     # #E74C3C red
+    "fn":        (243, 156, 18),    # #F39C12 orange
+    "duplicate": (155, 89, 182),    # #9B59B6 purple
+    "bg_fp":     (52, 73, 94),      # #34495E dark
+}
+
+
+_POSITION_MAP: dict[str, Any] = {
+    "top_left": sv.Position.TOP_LEFT,
+    "top_right": sv.Position.TOP_RIGHT,
+    "bottom_left": sv.Position.BOTTOM_LEFT,
+    "bottom_right": sv.Position.BOTTOM_RIGHT,
+    "top_center": sv.Position.TOP_CENTER,
+    "bottom_center": sv.Position.BOTTOM_CENTER,
+    "center": sv.Position.CENTER,
+}
 
 
 @dataclass
@@ -239,6 +257,35 @@ class VizStyle:
     skeleton_color_rgb: tuple[int, int, int] = (0, 140, 255)  # keypoint
     draw_legend: bool = True
 
+    # --- Image annotation -------------------------------------------------
+    palette: str = "default"
+    box_thickness: int | None = None
+    label_text_scale: float = 0.5
+    label_text_padding: int = 4
+    label_position: str = "top_left"
+    keypoint_radius: int | None = None
+    kpt_visibility_threshold: float = 0.3
+    skeleton_edge_thickness: int | None = None
+    zone_fill_alpha: float = 0.20
+    zone_outline_thickness: int = 2
+
+    # --- Error palette ----------------------------------------------------
+    error_colors_rgb: dict[str, tuple[int, int, int]] = field(
+        default_factory=lambda: dict(_DEFAULT_ERROR_COLORS)
+    )
+
+    # --- Grid layout ------------------------------------------------------
+    grid_cell_size: int = 512
+    grid_cols: int = 4
+    grid_gutter_px: int = 4
+    grid_title_template: str = "{feature} · epoch {epoch}/{total} · mAP50={map50:.3f}"
+
+    # --- Banner -----------------------------------------------------------
+    banner_height: int = 24
+    banner_bg_rgb: tuple[int, int, int] = (34, 34, 34)
+    banner_text_rgb: tuple[int, int, int] = (255, 255, 255)
+    banner_text_scale: float = 0.45
+
     @property
     def gt_color(self) -> sv.Color:
         r, g, b = self.gt_color_rgb
@@ -249,29 +296,83 @@ class VizStyle:
         r, g, b = self.pred_color_rgb
         return sv.Color(r=r, g=g, b=b)
 
+    def auto_box_thickness(self, h: int, w: int) -> int:
+        if self.box_thickness is not None:
+            return int(self.box_thickness)
+        return max(2, round(min(h, w) / 400))
+
+    def auto_keypoint_radius(self, h: int, w: int) -> int:
+        if self.keypoint_radius is not None:
+            return int(self.keypoint_radius)
+        return max(3, round(min(h, w) / 250))
+
+    def auto_skeleton_thickness(self, h: int, w: int) -> int:
+        if self.skeleton_edge_thickness is not None:
+            return int(self.skeleton_edge_thickness)
+        return max(2, round(min(h, w) / 500))
+
+    def sv_label_position(self) -> Any:
+        return _POSITION_MAP.get(self.label_position, sv.Position.TOP_LEFT)
+
+    def error_color(self, kind: str) -> sv.Color:
+        r, g, b = self.error_colors_rgb.get(kind, (128, 128, 128))
+        return sv.Color(r=int(r), g=int(g), b=int(b))
+
+    def class_palette(self) -> sv.ColorPalette:
+        return sv.ColorPalette.DEFAULT
+
     @classmethod
     def from_config(cls, config: dict | None) -> "VizStyle":
         """Build a VizStyle from the top-level ``visualization:`` block.
 
         Accepts None or missing block → returns defaults. Unknown keys are
         ignored so forward-compat additions don't break older configs.
+        ``viz:`` is accepted as an alias for ``visualization:``.
         """
         if not config:
             return cls()
-        viz = (config or {}).get("visualization", {}) if isinstance(config, dict) else {}
+        if isinstance(config, dict):
+            viz = config.get("visualization") or config.get("viz") or {}
+        else:
+            viz = {}
         kwargs: dict = {}
-        for key in ("gt_color_rgb", "pred_color_rgb", "skeleton_color_rgb"):
+        # RGB color tuples
+        for key in (
+            "gt_color_rgb", "pred_color_rgb", "skeleton_color_rgb",
+            "banner_bg_rgb", "banner_text_rgb",
+        ):
             if key in viz:
-                v = viz[key]
-                kwargs[key] = tuple(int(x) for x in v)
-        for key in ("gt_thickness", "pred_thickness"):
+                kwargs[key] = tuple(int(x) for x in viz[key])
+        # Integer fields
+        for key in (
+            "gt_thickness", "pred_thickness", "label_text_padding",
+            "zone_outline_thickness", "grid_cell_size", "grid_cols",
+            "grid_gutter_px", "banner_height",
+        ):
             if key in viz:
                 kwargs[key] = int(viz[key])
-        for key in ("text_scale", "mask_alpha"):
+        # Optional integer fields (allow None)
+        for key in ("box_thickness", "keypoint_radius", "skeleton_edge_thickness"):
+            if key in viz:
+                kwargs[key] = None if viz[key] is None else int(viz[key])
+        # Float fields
+        for key in (
+            "text_scale", "mask_alpha", "label_text_scale",
+            "kpt_visibility_threshold", "zone_fill_alpha", "banner_text_scale",
+        ):
             if key in viz:
                 kwargs[key] = float(viz[key])
+        # String fields
+        for key in ("palette", "label_position", "grid_title_template"):
+            if key in viz:
+                kwargs[key] = str(viz[key])
         if "draw_legend" in viz:
             kwargs["draw_legend"] = bool(viz["draw_legend"])
+        if "error_colors_rgb" in viz and isinstance(viz["error_colors_rgb"], dict):
+            kwargs["error_colors_rgb"] = {
+                str(k): tuple(int(x) for x in v)
+                for k, v in viz["error_colors_rgb"].items()
+            }
         return cls(**kwargs)
 
 

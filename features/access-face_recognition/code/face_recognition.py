@@ -28,11 +28,13 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import supervision as sv
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 
 from utils.config import load_config, resolve_path  # noqa: E402
+from utils.viz import VizStyle, annotate_detections, annotate_keypoints  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # ArcFace canonical landmark positions (112×112 aligned crop)
@@ -445,22 +447,30 @@ class FaceRecognitionPipeline:
 
         Green box = known identity; red box = unknown.
         """
-        out = image_bgr.copy()
+        scene_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        landmark_style = VizStyle(keypoint_radius=2, skeleton_color_rgb=(255, 0, 0))
         for r in results:
-            b = r.detection.box_xyxy.astype(int)
-            x1, y1, x2, y2 = b
+            x1, y1, x2, y2 = r.detection.box_xyxy.astype(float)
             known = r.identity != self._unknown_label
-            color = (0, 200, 0) if known else (0, 0, 220)
-
-            cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+            # Preserve original BGR colors (0,200,0) known / (0,0,220) unknown → RGB.
+            box_color = sv.Color(r=0, g=200, b=0) if known else sv.Color(r=220, g=0, b=0)
 
             label = f"{r.identity} {r.similarity:.2f}" if r.similarity >= 0 else r.identity
-            cv2.putText(out, label, (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1)
+            detections = sv.Detections(
+                xyxy=np.array([[x1, y1, x2, y2]], dtype=np.float32),
+                class_id=np.array([0], dtype=int),
+            )
+            scene_rgb = annotate_detections(
+                scene_rgb, detections, labels=[label], color=box_color
+            )
+            scene_rgb = annotate_keypoints(
+                scene_rgb,
+                r.detection.landmarks.astype(np.float32),
+                skeleton_edges=None,
+                style=landmark_style,
+            )
 
-            for px, py in r.detection.landmarks.astype(int):
-                cv2.circle(out, (px, py), 2, (0, 0, 255), -1)
-
-        return out
+        return cv2.cvtColor(scene_rgb, cv2.COLOR_RGB2BGR)
 
 
 # ---------------------------------------------------------------------------
