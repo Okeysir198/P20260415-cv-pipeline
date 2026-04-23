@@ -8,9 +8,9 @@ against future HF Trainer API changes.
 
 Four callbacks, one per viz we emit:
 
-- :class:`HFDatasetStatsCallback`   — on_train_begin: `dataset_stats.{json,png}`
-- :class:`HFDataLabelGridCallback`  — on_train_begin: `data_labels_<split>.png` per split
-- :class:`HFAugLabelGridCallback`   — on_train_begin: `aug_labels_train.png`
+- :class:`HFDatasetStatsCallback`   — on_train_begin: `00_dataset_info.{md,json}` + `01_dataset_stats.{png,json}`
+- :class:`HFDataLabelGridCallback`  — on_train_begin: `02_data_labels_<split>.png` per split
+- :class:`HFAugLabelGridCallback`   — on_train_begin: `03_aug_labels_train.png`
 - :class:`HFValPredictionCallback`  — on_epoch_end: `val_predictions/epoch_<N>.png`
 
 Each takes all the data/config it needs at `__init__` so no trainer-proxy
@@ -94,9 +94,10 @@ def _build_class_names(data_config: dict) -> dict[int, str]:
 
 
 class HFDatasetStatsCallback(TrainerCallback):
-    """Emits `data_preview/dataset_stats.{json,png}` once at training start.
+    """Emits `data_preview/00_dataset_info.{md,json}` + `01_dataset_stats.{png,json}`.
 
-    Takes all inputs at init — doesn't need model/dataloader/trainer access.
+    Fires once at train-begin. Takes all inputs at init — doesn't need
+    model/dataloader/trainer access.
     """
 
     def __init__(
@@ -107,6 +108,10 @@ class HFDatasetStatsCallback(TrainerCallback):
         splits: list[str],
         subsets: dict[str, list[int] | None] | None = None,
         dpi: int = 120,
+        training_config: dict | None = None,
+        training_config_path: str | None = None,
+        data_config_path: str | None = None,
+        feature_name: str | None = None,
     ) -> None:
         self.save_dir = Path(save_dir)
         self.data_config = data_config
@@ -114,18 +119,43 @@ class HFDatasetStatsCallback(TrainerCallback):
         self.splits = splits
         self.subsets = subsets or {s: None for s in splits}
         self.dpi = dpi
+        self.training_config = training_config
+        self.training_config_path = training_config_path
+        self.data_config_path = data_config_path
+        self.feature_name = feature_name
 
     def on_train_begin(self, args, state, control, **kwargs):
-        from core.p05_data.run_viz import _load_cached_stats, generate_dataset_stats
+        from core.p05_data.run_viz import (
+            _load_cached_stats,
+            generate_dataset_stats,
+            write_dataset_info,
+        )
 
         out_dir = self.save_dir / "data_preview"
+        class_names = _build_class_names(self.data_config)
+
+        try:
+            split_sizes = {s: (len(idxs) if idxs is not None else 0) for s, idxs in self.subsets.items()}
+            write_dataset_info(
+                out_dir,
+                feature_name=self.feature_name,
+                data_config_path=self.data_config_path,
+                training_config_path=self.training_config_path,
+                data_cfg=self.data_config,
+                training_cfg=self.training_config,
+                class_names=class_names,
+                split_sizes=split_sizes,
+            )
+        except Exception as e:  # pragma: no cover
+            logger.warning("HFDatasetStatsCallback: write_dataset_info failed — %s", e)
+
         if _load_cached_stats(out_dir):
             logger.info("HFDatasetStatsCallback: cache hit — skipping recompute (%s)", out_dir)
             return control
 
         try:
             generate_dataset_stats(
-                self.data_config, self.base_dir, _build_class_names(self.data_config),
+                self.data_config, self.base_dir, class_names,
                 self.splits, out_dir, self.dpi,
                 subset_indices=self.subsets,
             )
@@ -135,7 +165,7 @@ class HFDatasetStatsCallback(TrainerCallback):
 
 
 class HFDataLabelGridCallback(TrainerCallback):
-    """Emits `data_preview/data_labels_<split>.png` once at training start."""
+    """Emits `data_preview/02_data_labels_<split>.png` once at training start."""
 
     def __init__(
         self,
@@ -193,7 +223,7 @@ class HFDataLabelGridCallback(TrainerCallback):
             if not annotated:
                 continue
 
-            out_path = self.save_dir / "data_preview" / f"data_labels_{split}.png"
+            out_path = self.save_dir / "data_preview" / f"02_data_labels_{split}.png"
             _save_image_grid(
                 annotated, self.grid_cols,
                 f"Data + Labels [{split}] — {n} samples",
@@ -204,7 +234,7 @@ class HFDataLabelGridCallback(TrainerCallback):
 
 
 class HFAugLabelGridCallback(TrainerCallback):
-    """Emits `data_preview/aug_labels_train.png` (augmented GT grid) at start.
+    """Emits `data_preview/03_aug_labels_train.png` (augmented GT grid) at start.
 
     Applies `is_train=True` transforms with mosaic/mixup/copypaste disabled so
     each cell shows a single identifiable image — makes the HSV/affine/flip
@@ -304,7 +334,7 @@ class HFAugLabelGridCallback(TrainerCallback):
             if not annotated:
                 continue
 
-            out_path = self.save_dir / "data_preview" / f"aug_labels_{split}.png"
+            out_path = self.save_dir / "data_preview" / f"03_aug_labels_{split}.png"
             _save_image_grid(
                 annotated, self.grid_cols,
                 f"Augmented + Labels [{split}] — {n} samples",

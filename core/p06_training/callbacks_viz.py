@@ -6,7 +6,7 @@ sanity check from the reference notebook
 
 It pulls a handful of samples from the exact pipeline that feeds the model
 (DataLoader + collate + processor), denormalizes, overlays GT targets, and
-saves one PNG under ``<save_dir>/data_preview/normalized_input_preview.png``
+saves one PNG under ``<save_dir>/data_preview/04_normalized_input_preview.png``
 before epoch 1. Catches the silent failure mode where:
 
 - Processor normalization is on **and** our transforms also add ``v2.Normalize``
@@ -191,7 +191,7 @@ class NormalizedInputPreviewCallback(_AnyHook):
             batch = next(iter(loader))
             sample = self._batch_to_sample_dict(batch)
             render_normalized_input_preview(
-                sample, self.save_dir / "data_preview" / "normalized_input_preview.png",
+                sample, self.save_dir / "data_preview" / "04_normalized_input_preview.png",
                 class_names=self.class_names,
                 mean=self.mean, std=self.std,
                 num_samples=self.num_samples, grid_cols=self.grid_cols,
@@ -210,7 +210,7 @@ class NormalizedInputPreviewCallback(_AnyHook):
             batch = next(iter(train_dl))
             sample = self._batch_to_sample_dict(batch)
             render_normalized_input_preview(
-                sample, self.save_dir / "data_preview" / "normalized_input_preview.png",
+                sample, self.save_dir / "data_preview" / "04_normalized_input_preview.png",
                 class_names=self.class_names,
                 mean=self.mean, std=self.std,
                 num_samples=self.num_samples, grid_cols=self.grid_cols,

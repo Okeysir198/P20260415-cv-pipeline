@@ -999,11 +999,16 @@ def _build_callbacks(
     # underlying dataset. Mirrors the pytorch-backend DatasetStatsLogger
     # (callbacks.py::_subset_indices).
     data_viz = train_cfg.get("data_viz", {})
+    from utils.config import feature_name_from_config_path as _feature_name
     callbacks.append(HFDatasetStatsCallback(
         save_dir=save_dir, data_config=data_config, base_dir=base_dir or "",
         splits=splits,
         subsets=subset_map,
         dpi=data_viz.get("dpi", 120),
+        training_config=config,
+        training_config_path=str(config_path),
+        data_config_path=dataset_config_path,
+        feature_name=_feature_name(str(config_path)),
     ))
 
     if data_viz.get("enabled", True):

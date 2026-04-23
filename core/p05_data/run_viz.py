@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Standalone CLI to visualize dataset samples and augmentation before training.
 
-Generates:
-  - data_labels_<split>.png  — raw images with GT bounding boxes
-  - aug_labels_<split>.png   — augmented images with transformed GT boxes
+Generates (numbered by pipeline step):
+  - 00_dataset_info.{md,json}    — dataset provenance (name, path, classes, splits)
+  - 01_dataset_stats.{png,json}  — split sizes + class balance + bbox tiers
+  - 02_data_labels_<split>.png   — raw images with GT bounding boxes
+  - 03_aug_labels_<split>.png    — augmented images with transformed GT boxes
+  - 04_normalized_input_preview.png — final model input (denormalized)
 
 Usage::
 
@@ -105,7 +108,7 @@ def viz_data_labels(data_cfg, base_dir, class_names, split, num_samples, grid_co
         if targets is None or len(targets) == 0:
             targets = np.zeros((0, 5), dtype=np.float32)
         annotated.append(_annotate_gt(img_rgb, targets, class_names, thickness, text_scale))
-    out_path = out_dir / f"data_labels_{split}.png"
+    out_path = out_dir / f"02_data_labels_{split}.png"
     save_image_grid(
         annotated, out_path, cols=grid_cols,
         header=f"Data + Labels [{split}] — {k}/{n} samples",
@@ -161,7 +164,7 @@ def viz_aug_labels(data_cfg, train_cfg, base_dir, class_names, split, num_sample
         if not annotated:
             continue
         suffix = "" if label == "simple" else "_mosaic"
-        out_path = out_dir / f"aug_labels_{split}{suffix}.png"
+        out_path = out_dir / f"03_aug_labels_{split}{suffix}.png"
         title = f"Augmented + Labels [{split}] ({'no mosaic/mixup' if label == 'simple' else 'with mosaic/mixup'}) — {k}/{n} samples"
         save_image_grid(annotated, out_path, cols=grid_cols, header=title)
         logger.info("Saved: %s", out_path)
@@ -492,20 +495,144 @@ def generate_dataset_stats(
                 for cid in all_class_ids
             },
         }
-    json_path = out_dir / "dataset_stats.json"
+    json_path = out_dir / "01_dataset_stats.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(json_out, f, indent=2, ensure_ascii=False)
     logger.info("Saved: %s", json_path)
 
-    out_path = out_dir / "dataset_stats.png"
+    out_path = out_dir / "01_dataset_stats.png"
     fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     logger.info("Saved: %s", out_path)
 
 
+_STATS_PNG = "01_dataset_stats.png"
+_STATS_JSON = "01_dataset_stats.json"
+_LEGACY_STATS_PNG = "dataset_stats.png"
+_LEGACY_STATS_JSON = "dataset_stats.json"
+
+
 def _load_cached_stats(out_dir: Path) -> bool:
-    """Return True if dataset_stats.json + .png already exist — skip recompute."""
-    return (out_dir / "dataset_stats.json").exists() and (out_dir / "dataset_stats.png").exists()
+    """Return True if cached stats (numbered or legacy) already exist."""
+    if (out_dir / _STATS_JSON).exists() and (out_dir / _STATS_PNG).exists():
+        return True
+    return (out_dir / _LEGACY_STATS_JSON).exists() and (out_dir / _LEGACY_STATS_PNG).exists()
+
+
+# ---------------------------------------------------------------------------
+# Dataset provenance (00_dataset_info.{md,json})
+# ---------------------------------------------------------------------------
+
+
+def _git_sha() -> str | None:
+    """Return short git SHA of the repo, or None if unavailable."""
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).resolve().parent.parent.parent),
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        return out.decode().strip() or None
+    except Exception:
+        return None
+
+
+def _describe_augmentation(training_cfg: dict) -> dict:
+    """Extract a human-readable summary of the augmentation pipeline."""
+    aug = (training_cfg or {}).get("augmentation", {}) or {}
+    # Only surface toggles the reader actually needs to reason about.
+    keys = (
+        "library", "mosaic", "mixup", "copypaste", "ir_simulation",
+        "hflip", "vflip", "affine", "perspective", "color_jitter",
+        "brightness", "contrast", "saturation", "hue", "normalize",
+    )
+    return {k: aug[k] for k in keys if k in aug}
+
+
+def write_dataset_info(
+    out_dir: Path,
+    *,
+    feature_name: str | None,
+    data_config_path: str | Path | None,
+    training_config_path: str | Path | None,
+    data_cfg: dict,
+    training_cfg: dict | None,
+    class_names: dict[int, str],
+    split_sizes: dict[str, int],
+) -> None:
+    """Emit ``00_dataset_info.{md,json}`` with dataset provenance.
+
+    Self-describing run folders: any reader can tell which dataset a run
+    trained on without needing the original training config in hand.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    training_cfg = training_cfg or {}
+    data_section = training_cfg.get("data", {}) or {}
+    input_size = data_cfg.get("input_size") or data_section.get("input_size")
+    mean = data_cfg.get("mean") or data_section.get("mean")
+    std = data_cfg.get("std") or data_section.get("std")
+    dataset_root = data_cfg.get("path") or data_cfg.get("root")
+    backend = (training_cfg.get("training", {}) or {}).get("backend", "pytorch")
+    gpu_augment = bool((training_cfg.get("training", {}) or {}).get("gpu_augment", False))
+
+    info = {
+        "feature_name": feature_name,
+        "data_config": str(data_config_path) if data_config_path else None,
+        "training_config": str(training_config_path) if training_config_path else None,
+        "dataset_name": data_cfg.get("dataset_name") or data_cfg.get("name"),
+        "dataset_root": str(dataset_root) if dataset_root else None,
+        "num_classes": len(class_names) if class_names else None,
+        "class_names": {int(k): str(v) for k, v in (class_names or {}).items()},
+        "split_sizes": {str(k): int(v) for k, v in (split_sizes or {}).items()},
+        "input_size": list(input_size) if input_size is not None else None,
+        "mean": list(mean) if mean is not None else None,
+        "std": list(std) if std is not None else None,
+        "backend": backend,
+        "augmentation": _describe_augmentation(training_cfg),
+        "gpu_augment": gpu_augment,
+        "run_started": datetime.datetime.now().isoformat(timespec="seconds"),
+        "git_sha": _git_sha(),
+    }
+
+    json_path = out_dir / "00_dataset_info.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(info, f, indent=2, ensure_ascii=False)
+
+    def _fmt(v):
+        if v is None:
+            return "_n/a_"
+        if isinstance(v, dict):
+            return ", ".join(f"{k}={v[k]}" for k in v)
+        if isinstance(v, list):
+            return str(v)
+        return str(v)
+
+    md_lines = [
+        f"# Dataset info — {info['feature_name'] or 'unknown'}",
+        "",
+        f"- **Feature folder**: `{info['feature_name']}`" if info["feature_name"] else "- **Feature folder**: _unknown_",
+        f"- **Data config**: `{info['data_config']}`",
+        f"- **Training config**: `{info['training_config']}`",
+        f"- **Dataset name**: `{info['dataset_name']}`",
+        f"- **Dataset root**: `{info['dataset_root']}`",
+        f"- **Num classes**: {info['num_classes']}",
+        f"- **Class names**: {_fmt(info['class_names'])}",
+        f"- **Split sizes**: {_fmt(info['split_sizes'])}",
+        f"- **Input size**: {_fmt(info['input_size'])}",
+        f"- **Normalization**: mean={_fmt(info['mean'])}, std={_fmt(info['std'])}",
+        f"- **Training backend**: `{info['backend']}`",
+        f"- **GPU augmentation**: `{info['gpu_augment']}`",
+        f"- **Augmentation**: {_fmt(info['augmentation'])}",
+        f"- **Run started**: {info['run_started']}",
+        f"- **Git SHA**: `{info['git_sha'] or 'n/a'}`",
+        "",
+    ]
+    md_path = out_dir / "00_dataset_info.md"
+    md_path.write_text("\n".join(md_lines), encoding="utf-8")
+    logger.info("Saved: %s", md_path)
+    logger.info("Saved: %s", json_path)
 
 
 # ---------------------------------------------------------------------------

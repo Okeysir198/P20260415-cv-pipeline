@@ -42,7 +42,7 @@ from core.p06_training.lr_scheduler import build_scheduler
 from core.p06_training.metrics_registry import compute_metrics
 from core.p06_training.postprocess import postprocess as _postprocess_registry
 from core.p06_training._common import task_from_output_format as _task_from_output
-from utils.config import load_config, merge_configs, validate_config
+from utils.config import feature_name_from_config_path, load_config, merge_configs, validate_config
 from utils.device import get_device, set_seed
 from utils.progress import TrainingProgress
 
@@ -338,6 +338,8 @@ class DetectionTrainer:
         else:
             data_config = self._data_cfg
 
+        self._data_config_path = dataset_config_path
+        self._feature_name = feature_name_from_config_path(self.config_path)
         base_dir = str(self.config_path.parent)
         output_format = getattr(self._base_model, "output_format", "yolox")
 

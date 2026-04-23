@@ -728,7 +728,7 @@ class ValPredictionLogger(Callback):
 
 
 class DatasetStatsLogger(Callback):
-    """Save dataset_stats.png and dataset_stats.json once before training starts.
+    """Save 00_dataset_info.{md,json} + 01_dataset_stats.{png,json} once before training.
 
     Always runs — not conditional on data_viz.enabled.
     """
@@ -751,21 +751,45 @@ class DatasetStatsLogger(Callback):
         class_names = {int(k): str(v) for k, v in self.data_config.get("names", {}).items()}
         out_dir = self.save_dir / "data_preview"
         try:
-            from core.p05_data.run_viz import _load_cached_stats, generate_dataset_stats
-            if _load_cached_stats(out_dir):
-                logger.info("DatasetStatsLogger: cache hit — skipping recompute (%s)", out_dir)
-                return
+            from core.p05_data.run_viz import (
+                _load_cached_stats,
+                generate_dataset_stats,
+                write_dataset_info,
+            )
             # Restrict stats to splits the run actually uses (train+val, with
             # data.subset.* applied) so data_preview mirrors the run's data.
             run_splits = _run_splits_and_subsets(trainer)
             active_splits = [s for s in self.splits if s in run_splits]
             subset_map = {s: run_splits[s] for s in active_splits}
+
+            # 00_dataset_info.{md,json} — always written (cheap, self-describing).
+            try:
+                split_sizes = {
+                    s: (len(idxs) if idxs is not None else 0)
+                    for s, idxs in subset_map.items()
+                }
+                write_dataset_info(
+                    out_dir,
+                    feature_name=getattr(trainer, "_feature_name", None),
+                    data_config_path=getattr(trainer, "_data_config_path", None),
+                    training_config_path=getattr(trainer, "config_path", None),
+                    data_cfg=self.data_config,
+                    training_cfg=getattr(trainer, "config", None),
+                    class_names=class_names,
+                    split_sizes=split_sizes,
+                )
+            except Exception as e:
+                logger.warning("DatasetStatsLogger: write_dataset_info failed — %s", e)
+
+            if _load_cached_stats(out_dir):
+                logger.info("DatasetStatsLogger: cache hit — skipping recompute (%s)", out_dir)
+                return
             generate_dataset_stats(
                 self.data_config, self.base_dir, class_names,
                 active_splits, out_dir, self.dpi,
                 subset_indices=subset_map,
             )
-            stats_path = out_dir / "dataset_stats.png"
+            stats_path = out_dir / "01_dataset_stats.png"
             wb_cb = next((c for c in trainer.callback_runner.callbacks if isinstance(c, WandBLogger)), None)
             if wb_cb is not None and wb_cb._enabled:
                 wb_cb._wandb.log({"viz/dataset_stats": wandb.Image(str(stats_path))})
@@ -777,7 +801,7 @@ class DataLabelGridLogger(Callback):
     """Save a grid of raw images with GT labels for each configured split.
 
     Runs once in on_train_start — never per epoch.
-    Output: <save_dir>/data_preview/data_labels_<split>.png
+    Output: <save_dir>/data_preview/02_data_labels_<split>.png
     """
 
     def __init__(
@@ -847,7 +871,7 @@ class DataLabelGridLogger(Callback):
             if not annotated:
                 continue
 
-            out_path = self.save_dir / "data_preview" / f"data_labels_{split}.png"
+            out_path = self.save_dir / "data_preview" / f"02_data_labels_{split}.png"
             _save_image_grid(
                 annotated, self.grid_cols,
                 f"Data + Labels [{split}] — {k} samples",
@@ -870,7 +894,7 @@ class AugLabelGridLogger(Callback):
     image — makes flip/HSV/affine parameters visually verifiable.
 
     Runs once in on_train_start — never per epoch.
-    Output: <save_dir>/data_preview/aug_labels_<split>.png
+    Output: <save_dir>/data_preview/03_aug_labels_<split>.png
     """
 
     def __init__(
@@ -965,7 +989,7 @@ class AugLabelGridLogger(Callback):
                     continue
 
                 suffix = "" if label == "simple" else "_mosaic"
-                out_path = self.save_dir / "data_preview" / f"aug_labels_{split}{suffix}.png"
+                out_path = self.save_dir / "data_preview" / f"03_aug_labels_{split}{suffix}.png"
                 desc = "no mosaic/mixup" if label == "simple" else "with mosaic/mixup"
                 _save_image_grid(
                     annotated, self.grid_cols,

@@ -66,11 +66,12 @@ Every training run produces a uniform per-run artifact tree — no per-config op
 
 ```
 runs/<ts>/
-├── data_preview/               (on_train_start, ~2 s total)
-│   ├── dataset_stats.{png,json}
-│   ├── data_labels_{train,val,test}.png
-│   ├── aug_labels_train[_mosaic].png
-│   └── normalized_input_preview.png  ← stage-3 sanity: denormalize(batch) + GT
+├── data_preview/               (on_train_start, ~2 s total — numbered by data-flow step)
+│   ├── 00_dataset_info.{md,json}         ← provenance: feature, dataset, classes, splits, input_size, aug
+│   ├── 01_dataset_stats.{png,json}       split sizes + class balance + bbox tiers
+│   ├── 02_data_labels_{train,val,test}.png   raw images with GT
+│   ├── 03_aug_labels_train[_mosaic].png  CPU augmentation output
+│   └── 04_normalized_input_preview.png   stage-3 sanity: denormalize(batch) + GT
 ├── val_predictions/
 │   ├── epochs/epoch_NNN.png    (per-epoch, ~2 s each — the only mid-run hook)
 │   ├── best.png                (on_train_end, best-checkpoint weights)
