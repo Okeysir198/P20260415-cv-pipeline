@@ -303,20 +303,39 @@ def render_transform_pipeline(
 
     style = style or VizStyle()
     aug_cfg = training_config.get("augmentation", {}) or {}
-    input_size = tuple(data_config.get("input_size") or (640, 640))
-    mean = list(data_config.get("mean") or IMAGENET_MEAN)
-    std = list(data_config.get("std") or IMAGENET_STD)
+    # Prefer tensor_prep when present so viz reflects the authoritative contract.
+    from utils.config import resolve_tensor_prep as _rtp
+    _backend = (training_config.get("training") or {}).get("backend", "pytorch")
+    _tp = _rtp(training_config, backend=_backend) or {}
+    input_size = tuple(_tp.get("input_size") or data_config.get("input_size") or (640, 640))
+    mean = list(_tp.get("mean") or data_config.get("mean") or IMAGENET_MEAN)
+    std = list(_tp.get("std") or data_config.get("std") or IMAGENET_STD)
+    applied_by = _tp.get("applied_by", "v2_pipeline")
+    rescale_flag = bool(_tp.get("rescale", True))
+    normalize_flag = bool(_tp.get("normalize", True))
 
     # Walker pipeline: force torchvision, strip dataset-level ops (mosaic/mixup
     # /copypaste need other items). Train-mode to exercise full aug chain.
+    # The walker always runs through the v2 Normalize step (regardless of
+    # applied_by) so the viz surfaces a post-Normalize snapshot + denormalize
+    # sanity check. When applied_by=hf_processor, we ALSO snapshot the HF
+    # processor output as an extra final cell below.
     walker_cfg = dict(aug_cfg)
     walker_cfg["library"] = "torchvision"
     walker_cfg["mosaic"] = False
     walker_cfg["mixup"] = False
     walker_cfg["copypaste"] = False
+    _walker_tp = {
+        "input_size": list(input_size),
+        "rescale": rescale_flag,
+        "normalize": normalize_flag,
+        "mean": list(mean),
+        "std": list(std),
+        "applied_by": "v2_pipeline",
+    }
     transform = build_transforms(
         config=walker_cfg, is_train=True, input_size=input_size,
-        mean=mean, std=std,
+        mean=mean, std=std, tensor_prep=_walker_tp,
     )
     if not isinstance(transform, DetectionTransform):
         logger.warning("render_transform_pipeline: expected DetectionTransform; got %s",
@@ -339,6 +358,28 @@ def render_transform_pipeline(
         logger.warning("render_transform_pipeline: no labeled samples found")
         return None
 
+    # When applied_by=hf_processor, also build the live HF processor so we can
+    # snapshot its output as an extra step. Best-effort — viz skips the step
+    # silently on any processor build failure.
+    _hf_processor = None
+    if applied_by == "hf_processor":
+        try:
+            from transformers import AutoImageProcessor
+            model_cfg = training_config.get("model", {}) or {}
+            _pretrained = model_cfg.get("pretrained") or model_cfg.get("hf_model_id")
+            if _pretrained:
+                _hf_processor = AutoImageProcessor.from_pretrained(_pretrained)
+                _hf_processor.do_rescale = rescale_flag
+                _hf_processor.do_normalize = normalize_flag
+                if normalize_flag:
+                    _hf_processor.image_mean = list(mean)
+                    _hf_processor.image_std = list(std)
+                _hf_processor.do_resize = True
+                _hf_processor.size = {"height": int(input_size[0]), "width": int(input_size[1])}
+        except Exception as _e:
+            logger.info("transform_pipeline_viz: skipping HF-processor step (%s)", _e)
+            _hf_processor = None
+
     # Per-column walk: one column per (class_id, idx).
     columns: list[tuple[int, list[dict]]] = []
     for cls_id, idx in picks:
@@ -351,6 +392,38 @@ def render_transform_pipeline(
                 raw_bgr, raw_targets, transform,
                 mean=mean, std=std, class_names=class_names, style=style,
             )
+            # Extra step: feed the pre-Normalize final RGB through the HF
+            # processor and snapshot its pixel_values. Catches silent
+            # "processor didn't actually normalize" bugs.
+            if _hf_processor is not None and cells:
+                try:
+                    # Use the last non-normalize cell's RGB as the processor input —
+                    # it matches what the model sees when applied_by=hf_processor
+                    # (our v2 pipeline skips rescale+normalize in that mode).
+                    pre_norm_rgb = None
+                    for c in reversed(cells):
+                        if not c["is_normalize"]:
+                            pre_norm_rgb = c["image"]
+                            break
+                    if pre_norm_rgb is not None:
+                        _proc_out = _hf_processor(images=pre_norm_rgb, return_tensors="pt")
+                        pv = _proc_out["pixel_values"][0]
+                        label = (
+                            f"HF Processor (do_rescale={rescale_flag} "
+                            f"do_normalize={normalize_flag} μ≈0)"
+                        )
+                        if normalize_flag:
+                            disp = false_color_normalize(pv)
+                        else:
+                            disp = tensor_to_uint8_rgb(pv)
+                        cells.append({
+                            "image": disp,
+                            "step_name": label,
+                            "meta": _cell_meta(pv),
+                            "is_normalize": normalize_flag,
+                        })
+                except Exception as _e:
+                    logger.info("transform_pipeline_viz: HF-processor step failed (%s)", _e)
             columns.append((cls_id, cells))
         except Exception as e:
             logger.warning("render_transform_pipeline: class=%d idx=%d failed — %s",
@@ -421,7 +494,9 @@ def render_transform_pipeline(
     feature = data_config.get("dataset_name") or "unknown"
     fig.suptitle(
         f"Transform pipeline — {feature} · input {input_size[0]}×{input_size[1]}  "
-        f"mean={[round(m, 3) for m in mean]} std={[round(s, 3) for s in std]}",
+        f"mean={[round(m, 3) for m in mean]} std={[round(s, 3) for s in std]}\n"
+        f"Normalize: applied by {applied_by}  (rescale={rescale_flag} "
+        f"normalize={normalize_flag})",
         y=0.998, fontsize=12, fontweight="bold",
     )
     fig.text(

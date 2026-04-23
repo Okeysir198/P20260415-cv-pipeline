@@ -611,6 +611,17 @@ class DetectionTrainer:
             if freeze_list:
                 self._freeze_layers(freeze_list)
 
+        # Validate the tensor_prep contract now that the model (and any
+        # HF processor on it) exists. Hard-errors on backend mismatch,
+        # double/missing-normalize, or missing mean/std.
+        try:
+            from utils.config import _validate_tensor_prep as _vtp
+            _processor = getattr(self._base_model, "processor", None)
+            _vtp(self.config, backend="pytorch", processor=_processor)
+        except Exception as _e:
+            logger.error("tensor_prep validation failed: %s", _e)
+            raise
+
         if self.optimizer is None:
             self.optimizer = self._build_optimizer()
         if self.scheduler is None:
@@ -926,11 +937,16 @@ class DetectionTrainer:
             if output_format in {"detr", "yolox"}:
                 from core.p05_data.detection_dataset import YOLOXDataset
                 from core.p05_data.transforms import build_transforms
-                input_size = tuple(data_cfg.get("input_size", (640, 640)))
+                from utils.config import resolve_tensor_prep
+                tp = resolve_tensor_prep(self.config, backend="pytorch") or None
+                input_size = tuple(
+                    (tp or {}).get("input_size") or data_cfg.get("input_size", (640, 640))
+                )
                 eval_transforms = build_transforms(
                     config=self.config.get("augmentation", {}),
                     is_train=False, input_size=input_size,
                     mean=data_cfg.get("mean"), std=data_cfg.get("std"),
+                    tensor_prep=tp,
                 )
                 ds = YOLOXDataset(
                     data_cfg, split="test",

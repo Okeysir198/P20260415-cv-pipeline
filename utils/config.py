@@ -1,6 +1,7 @@
 """Configuration loading, merging, and validation utilities."""
 
 import copy
+import logging
 import os
 import re
 from datetime import datetime
@@ -10,6 +11,11 @@ from typing import Any
 import yaml
 
 _VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
+
+_IMAGENET_MEAN = [0.485, 0.456, 0.406]
+_IMAGENET_STD = [0.229, 0.224, 0.225]
+
+_logger = logging.getLogger(__name__)
 
 
 def load_config(path: str | Path) -> dict:
@@ -33,6 +39,8 @@ def load_config(path: str | Path) -> dict:
         return {}
 
     config = _resolve_variables(config, config)
+    _migrate_legacy_tensor_prep(config)
+    _sync_legacy_input_size_from_tensor_prep(config)
 
     return config
 
@@ -226,6 +234,172 @@ def _parse_value(value_str: str):
     return value_str
 
 
+# --- Tensor-prep contract (applied_by = hf_processor | v2_pipeline) -------
+
+
+_VALID_APPLIED_BY = ("hf_processor", "v2_pipeline")
+
+
+def _migrate_legacy_tensor_prep(config: dict) -> None:
+    """In-place: if `tensor_prep` is absent but legacy keys exist, synthesise it.
+
+    Legacy keys read: ``model.input_size``, ``data.input_size``, ``data.mean``,
+    ``data.std``, ``augmentation.normalize``. ``applied_by`` defaults to
+    ``hf_processor`` on the HF backend, ``v2_pipeline`` otherwise.
+
+    Emits one WARNING per migration so users know to add the explicit block.
+    """
+    if not isinstance(config, dict):
+        return
+    if "tensor_prep" in config and config["tensor_prep"]:
+        # Already present. If it was auto-migrated on an earlier load pass
+        # (e.g. before overrides flipped training.backend), refresh the
+        # applied_by default to match the current backend. Explicit user
+        # blocks (no _auto_migrated marker) are left untouched.
+        tp = config["tensor_prep"]
+        if isinstance(tp, dict) and tp.pop("_auto_migrated", False):
+            backend = (config.get("training") or {}).get("backend", "pytorch")
+            tp["applied_by"] = "hf_processor" if backend == "hf" else "v2_pipeline"
+            tp["_auto_migrated"] = True
+        return
+    model_cfg = config.get("model") or {}
+    data_cfg = config.get("data") or {}
+    aug_cfg = config.get("augmentation") or {}
+    # Only migrate when we have *any* legacy tensor-prep signal (a training
+    # config). Unrelated configs (e.g. 05_data.yaml) must pass through
+    # untouched.
+    has_legacy = (
+        "input_size" in model_cfg or "input_size" in data_cfg
+        or "mean" in data_cfg or "std" in data_cfg
+        or "normalize" in aug_cfg
+    )
+    if not has_legacy:
+        return
+    input_size = model_cfg.get("input_size") or data_cfg.get("input_size")
+    if input_size is None:
+        return  # nothing to anchor on
+    mean = data_cfg.get("mean", _IMAGENET_MEAN)
+    std = data_cfg.get("std", _IMAGENET_STD)
+    normalize = bool(aug_cfg.get("normalize", True))
+    backend = (config.get("training") or {}).get("backend", "pytorch")
+    applied_by = "hf_processor" if backend == "hf" else "v2_pipeline"
+    config["tensor_prep"] = {
+        "input_size": list(input_size),
+        "rescale": True,
+        "normalize": normalize,
+        "mean": list(mean) if mean is not None else list(_IMAGENET_MEAN),
+        "std": list(std) if std is not None else list(_IMAGENET_STD),
+        "applied_by": applied_by,
+        "_auto_migrated": True,
+    }
+    _logger.warning(
+        "Legacy config: auto-migrated tensor_prep. Add an explicit tensor_prep "
+        "block to 06_training.yaml to suppress this warning."
+    )
+
+
+def _sync_legacy_input_size_from_tensor_prep(config: dict) -> None:
+    """Back-compat: if tensor_prep.input_size is set but model.input_size is
+    missing, mirror it into model.input_size (and data.input_size when the
+    data section is present). Many code paths still read model.input_size.
+
+    This is intentionally one-way (tensor_prep → legacy); the reverse
+    direction is handled by ``_migrate_legacy_tensor_prep`` on load.
+    """
+    tp = config.get("tensor_prep") or {}
+    in_size = tp.get("input_size")
+    if not in_size:
+        return
+    _m = config.get("model")
+    model_cfg = config.setdefault("model", {}) if isinstance(_m, dict) else None
+    if isinstance(model_cfg, dict) and "input_size" not in model_cfg:
+        model_cfg["input_size"] = list(in_size)
+
+
+def resolve_tensor_prep(config: dict, backend: str | None = None) -> dict:
+    """Return the authoritative ``tensor_prep`` dict for this config.
+
+    If ``tensor_prep`` is already in ``config``, it's returned as-is (a shallow
+    copy). Otherwise the legacy migration runs on-demand. ``backend`` only
+    influences the migration default for ``applied_by``.
+    """
+    if backend is not None and (config.get("training") or {}).get("backend") is None:
+        # Prime backend hint for the migration helper.
+        config.setdefault("training", {})["backend"] = backend
+    # Always call migration — the refresh-on-backend-change path updates a
+    # previously auto-migrated block when overrides flipped training.backend.
+    _migrate_legacy_tensor_prep(config)
+    tp = config.get("tensor_prep") or {}
+    # Strip the internal marker from the returned copy (it's implementation
+    # detail, not part of the contract).
+    tp = {k: v for k, v in tp.items() if k != "_auto_migrated"}
+    return tp
+
+
+def _validate_tensor_prep(config: dict, backend: str, processor: Any = None) -> None:
+    """Hard-error on illegal tensor_prep states.
+
+    See contract in the user-facing docstring / CLAUDE.md: enforces
+    applied_by vs backend, mandatory mean/std when normalize=true, and the
+    'no double-normalize / no missing-normalize' invariant.
+    """
+    tp = resolve_tensor_prep(config, backend=backend)
+    if not tp:
+        raise ValueError(
+            "tensor_prep is required in 06_training.yaml. Example:\n"
+            "  tensor_prep:\n"
+            "    input_size: [480, 480]\n"
+            "    rescale: true\n"
+            "    normalize: true\n"
+            "    mean: [0.485, 0.456, 0.406]\n"
+            "    std:  [0.229, 0.224, 0.225]\n"
+            "    applied_by: hf_processor   # or v2_pipeline"
+        )
+
+    applied_by = tp.get("applied_by")
+    if applied_by not in _VALID_APPLIED_BY:
+        raise ValueError(
+            f"tensor_prep.applied_by must be one of {_VALID_APPLIED_BY}, "
+            f"got {applied_by!r}"
+        )
+
+    if "input_size" not in tp or tp["input_size"] is None:
+        raise ValueError("tensor_prep.input_size is required")
+
+    normalize = bool(tp.get("normalize", True))
+    if normalize and (tp.get("mean") is None or tp.get("std") is None):
+        raise ValueError(
+            "tensor_prep.normalize=true requires non-null mean and std"
+        )
+
+    if applied_by == "hf_processor" and backend != "hf":
+        raise ValueError(
+            "tensor_prep.applied_by='hf_processor' is only valid on the HF "
+            f"backend, but training.backend={backend!r}. Use "
+            "applied_by='v2_pipeline' for the pytorch backend."
+        )
+
+    # Site-by-site normalize enforcement (only meaningful when processor exists).
+    if processor is not None:
+        proc_normalize = bool(getattr(processor, "do_normalize", True))
+        if applied_by == "hf_processor":
+            # Processor must be forced to normalize if the user asked for it.
+            if normalize and not proc_normalize:
+                raise ValueError(
+                    "tensor_prep.normalize=true with applied_by='hf_processor' "
+                    "but processor.do_normalize is False. Did the override "
+                    "pass run? build_hf_model should force this."
+                )
+        else:  # v2_pipeline
+            if proc_normalize and normalize:
+                raise ValueError(
+                    "Double-normalize: applied_by='v2_pipeline' requires "
+                    "processor.do_normalize=False, but processor still has "
+                    "do_normalize=True. Disable the processor's normalize "
+                    "step in build_hf_model."
+                )
+
+
 # --- Private helpers ---
 
 
@@ -308,10 +482,16 @@ def _validate_training_config(config: dict) -> bool:
 
     # depth/width only required for YOLOX-family models, not for timm/HF classifiers
     arch = config["model"].get("arch", "")
+    # tensor_prep.input_size supersedes model.input_size when present.
+    has_tp_input = bool((config.get("tensor_prep") or {}).get("input_size"))
     if arch.startswith("yolox"):
-        model_keys = ["arch", "num_classes", "input_size", "depth", "width"]
+        model_keys = ["arch", "num_classes", "depth", "width"]
+        if not has_tp_input:
+            model_keys.append("input_size")
     else:
-        model_keys = ["arch", "num_classes", "input_size"]
+        model_keys = ["arch", "num_classes"]
+        if not has_tp_input:
+            model_keys.append("input_size")
     _check_required_keys(config["model"], model_keys, "training.model")
 
     training_keys = ["epochs", "optimizer", "lr"]

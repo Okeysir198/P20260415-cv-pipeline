@@ -776,6 +776,7 @@ def build_transforms(
     mean: Sequence[float] | None = None,
     std: Sequence[float] | None = None,
     image_processor: Any = None,
+    tensor_prep: dict | None = None,
 ):
     """Build a transform pipeline from an augmentation config dict.
 
@@ -798,6 +799,14 @@ def build_transforms(
         A callable: either :class:`DetectionTransform` (torchvision v2) or
         :class:`AlbumentationsDetectionTransform`.
     """
+    # tensor_prep, when supplied, is authoritative for input_size/mean/std
+    # and the rescale/normalize gates. Legacy callers (no tensor_prep) fall
+    # back to the explicit kwargs + the `augmentation.normalize` gate.
+    if tensor_prep is not None:
+        input_size = tuple(tensor_prep["input_size"])
+        mean = tensor_prep.get("mean", IMAGENET_MEAN) or IMAGENET_MEAN
+        std = tensor_prep.get("std", IMAGENET_STD) or IMAGENET_STD
+
     if input_size is None:
         raise ValueError("input_size is required for build_transforms")
 
@@ -812,6 +821,7 @@ def build_transforms(
             config=config, is_train=is_train,
             input_size=input_size, mean=mean, std=std,
             image_processor=image_processor,
+            tensor_prep=tensor_prep,
         )
 
     transforms: list[Any] = []
@@ -978,16 +988,23 @@ def build_transforms(
         transforms.append(_resize)
         transforms.append(_to_float)
 
-    # HF detection processors (D-FINE, RT-DETRv2) expect [0, 1] rescaled
-    # inputs with do_normalize=False — ImageNet normalize degrades their
-    # pretrained-feature distribution. Also YOLOX Megvii weights expect
-    # [0, 255] raw. Respect `augmentation.normalize` to opt out.
-    if config.get("normalize", True) and image_processor is None:
-        transforms.append(v2.Normalize(mean=mean, std=std))
+    # Tensor-prep contract:
+    #   applied_by=v2_pipeline → we append rescale/normalize here.
+    #   applied_by=hf_processor → processor owns rescale+normalize; we skip.
+    # Legacy path (no tensor_prep): honour augmentation.normalize + the
+    # processor-presence gate for backward-compat.
+    if tensor_prep is not None:
+        applied_by = tensor_prep.get("applied_by", "v2_pipeline")
+        if applied_by == "v2_pipeline":
+            if tensor_prep.get("normalize", True):
+                transforms.append(v2.Normalize(mean=mean, std=std))
+        # else hf_processor: skip rescale+normalize — processor handles them.
+    else:
+        if config.get("normalize", True) and image_processor is None:
+            transforms.append(v2.Normalize(mean=mean, std=std))
 
     # When an HF image_processor is provided, wrap the v2 pipeline so
     # resize/rescale/bbox-convert go through the processor (qubvel pattern).
-    # The Normalize step is skipped — the processor handles rescaling.
     if image_processor is not None:
         return TorchvisionWithProcessorTransform(
             v2_pipeline=v2.Compose(transforms),
@@ -1005,6 +1022,7 @@ def build_albumentations_transforms(
     mean: Sequence[float] = IMAGENET_MEAN,
     std: Sequence[float] = IMAGENET_STD,
     image_processor: Any = None,
+    tensor_prep: dict | None = None,
 ):
     """Albumentations-backed pipeline matching our torchvision v2 semantics.
 
@@ -1022,7 +1040,11 @@ def build_albumentations_transforms(
     import albumentations as A
 
     H_in, W_in = int(input_size[0]), int(input_size[1])
-    normalize = bool(config.get("normalize", True))
+    if tensor_prep is not None:
+        applied_by = tensor_prep.get("applied_by", "v2_pipeline")
+        normalize = bool(tensor_prep.get("normalize", True)) and applied_by == "v2_pipeline"
+    else:
+        normalize = bool(config.get("normalize", True))
 
     tfms: list[Any] = []
     if is_train:

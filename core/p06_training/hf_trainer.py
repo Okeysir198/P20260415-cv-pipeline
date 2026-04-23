@@ -482,6 +482,12 @@ def train_with_hf(
 
     _validate_hf_backend_config(config, output_format)
 
+    # Contract validator — hard-errors on tensor_prep/backend/processor
+    # misalignment. Run AFTER build_model so the processor's forced
+    # attributes are observable.
+    from utils.config import _validate_tensor_prep as _vtp
+    _vtp(config, backend="hf", processor=getattr(model, "processor", None))
+
     # Build datasets based on task type
     _ip = model.processor if output_format == "detr" else None
     train_dataset, eval_dataset, data_collator = _build_datasets(
@@ -503,7 +509,11 @@ def train_with_hf(
         # per-class mAP entries in trainer_state.json get human-readable keys
         # (e.g. `map_Coverall` instead of `map_0`) — matches the reference's
         # MAPEvaluator output shape.
-        input_size = tuple(data_config["input_size"])
+        from utils.config import resolve_tensor_prep as _rtp
+        _tp_for_eval = _rtp(config, backend="hf")
+        input_size = tuple(
+            (_tp_for_eval or {}).get("input_size") or data_config["input_size"]
+        )
         id2label = None
         hf_inner = getattr(model, "hf_model", None)
         if hf_inner is not None and getattr(hf_inner, "config", None) is not None:
@@ -676,12 +686,17 @@ def _try_build_test_dataset(data_config, config, output_format, base_dir):
 
     from core.p05_data.detection_dataset import YOLOXDataset
     from core.p05_data.transforms import build_transforms
+    from utils.config import resolve_tensor_prep as _rtp
 
-    input_size = tuple(data_config["input_size"])
+    _tp = _rtp(config, backend="hf") or None
+    input_size = tuple(
+        (_tp or {}).get("input_size") or data_config["input_size"]
+    )
     aug_config = config.get("augmentation", {})
     eval_transforms = build_transforms(
         config=aug_config, is_train=False, input_size=input_size,
         mean=data_config.get("mean"), std=data_config.get("std"),
+        tensor_prep=_tp,
     )
     try:
         return YOLOXDataset(
@@ -768,19 +783,25 @@ def _build_datasets(
     else:
         from core.p05_data.detection_dataset import YOLOXDataset
         from core.p05_data.transforms import build_transforms
+        from utils.config import resolve_tensor_prep as _rtp
 
-        input_size = tuple(data_config["input_size"])
-        mean = data_config.get("mean", IMAGENET_MEAN)
-        std = data_config.get("std", IMAGENET_STD)
+        _tp = _rtp(training_config, backend="hf") or None
+        input_size = tuple(
+            (_tp or {}).get("input_size") or data_config["input_size"]
+        )
+        mean = (_tp or {}).get("mean") or data_config.get("mean", IMAGENET_MEAN)
+        std = (_tp or {}).get("std") or data_config.get("std", IMAGENET_STD)
         aug_config = training_config.get("augmentation", {})
 
         train_transforms = build_transforms(
             config=aug_config, is_train=True, input_size=input_size, mean=mean, std=std,
             image_processor=image_processor,
+            tensor_prep=_tp,
         )
         eval_transforms = build_transforms(
             config=aug_config, is_train=False, input_size=input_size, mean=mean, std=std,
             image_processor=image_processor,
+            tensor_prep=_tp,
         )
 
         train_dataset = YOLOXDataset(

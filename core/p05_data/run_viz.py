@@ -543,10 +543,11 @@ def _describe_augmentation(training_cfg: dict) -> dict:
     """Extract a human-readable summary of the augmentation pipeline."""
     aug = (training_cfg or {}).get("augmentation", {}) or {}
     # Only surface toggles the reader actually needs to reason about.
+    # Normalize moved to the tensor_prep section — exclude it here.
     keys = (
         "library", "mosaic", "mixup", "copypaste", "ir_simulation",
         "hflip", "vflip", "affine", "perspective", "color_jitter",
-        "brightness", "contrast", "saturation", "hue", "normalize",
+        "brightness", "contrast", "saturation", "hue",
     )
     return {k: aug[k] for k in keys if k in aug}
 
@@ -570,11 +571,16 @@ def write_dataset_info(
     out_dir.mkdir(parents=True, exist_ok=True)
     training_cfg = training_cfg or {}
     data_section = training_cfg.get("data", {}) or {}
-    input_size = data_cfg.get("input_size") or data_section.get("input_size")
-    mean = data_cfg.get("mean") or data_section.get("mean")
-    std = data_cfg.get("std") or data_section.get("std")
-    dataset_root = data_cfg.get("path") or data_cfg.get("root")
+    # tensor_prep is authoritative for input_size / mean / std / normalize.
+    from utils.config import resolve_tensor_prep
     backend = (training_cfg.get("training", {}) or {}).get("backend", "pytorch")
+    tp = resolve_tensor_prep(training_cfg, backend=backend) or {}
+    input_size = (
+        tp.get("input_size") or data_cfg.get("input_size") or data_section.get("input_size")
+    )
+    mean = tp.get("mean") or data_cfg.get("mean") or data_section.get("mean")
+    std = tp.get("std") or data_cfg.get("std") or data_section.get("std")
+    dataset_root = data_cfg.get("path") or data_cfg.get("root")
     gpu_augment = bool((training_cfg.get("training", {}) or {}).get("gpu_augment", False))
 
     info = {
@@ -590,6 +596,14 @@ def write_dataset_info(
         "mean": list(mean) if mean is not None else None,
         "std": list(std) if std is not None else None,
         "backend": backend,
+        "tensor_prep": {
+            "applied_by": tp.get("applied_by"),
+            "rescale": tp.get("rescale"),
+            "normalize": tp.get("normalize"),
+            "input_size": list(tp["input_size"]) if tp.get("input_size") is not None else None,
+            "mean": list(tp["mean"]) if tp.get("mean") is not None else None,
+            "std": list(tp["std"]) if tp.get("std") is not None else None,
+        } if tp else None,
         "augmentation": _describe_augmentation(training_cfg),
         "gpu_augment": gpu_augment,
         "run_started": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -622,6 +636,7 @@ def write_dataset_info(
         f"- **Split sizes**: {_fmt(info['split_sizes'])}",
         f"- **Input size**: {_fmt(info['input_size'])}",
         f"- **Normalization**: mean={_fmt(info['mean'])}, std={_fmt(info['std'])}",
+        f"- **tensor_prep**: {_fmt(info['tensor_prep'])}",
         f"- **Training backend**: `{info['backend']}`",
         f"- **GPU augmentation**: `{info['gpu_augment']}`",
         f"- **Augmentation**: {_fmt(info['augmentation'])}",

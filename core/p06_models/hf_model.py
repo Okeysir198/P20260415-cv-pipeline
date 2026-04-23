@@ -282,26 +282,37 @@ def build_hf_model(config: dict) -> HFDetectionModel:
             f"for dynamic AutoModelForObjectDetection loading."
         )
 
-    # Sanity-log the processor normalization contract. Our data pipeline
-    # (core/p05_data/transforms.py) skips v2.Normalize when `image_processor`
-    # is supplied, on the assumption the processor owns rescale+normalize.
-    # If a non-default checkpoint ships a processor with `do_normalize=False`,
-    # inputs would reach the model un-normalized — catch it loudly here.
-    do_rescale = getattr(processor, "do_rescale", True)
-    do_normalize = getattr(processor, "do_normalize", True)
+    # Authoritative tensor_prep contract: force processor attributes so there
+    # is exactly one normalize site (the processor when applied_by=hf_processor,
+    # the v2 pipeline otherwise). Removes the old "processor-default leakage"
+    # footgun where a checkpoint with do_normalize=False would silently disable
+    # normalize on both sites.
+    from utils.config import resolve_tensor_prep
+    tp = resolve_tensor_prep(config, backend="hf")
+    if tp.get("applied_by", "hf_processor") == "hf_processor":
+        processor.do_rescale = bool(tp.get("rescale", True))
+        processor.do_normalize = bool(tp.get("normalize", True))
+        if processor.do_normalize:
+            processor.image_mean = list(tp["mean"])
+            processor.image_std = list(tp["std"])
+        processor.do_resize = True
+        processor.size = {
+            "height": int(tp["input_size"][0]),
+            "width": int(tp["input_size"][1]),
+        }
+    else:  # v2_pipeline — our pipeline does rescale+normalize+resize
+        processor.do_rescale = False
+        processor.do_normalize = False
+        processor.do_resize = False
+
     logger.info(
-        "HF image processor: do_rescale=%s, do_normalize=%s, mean=%s, std=%s",
-        do_rescale, do_normalize,
+        "tensor_prep: applied_by=%s, processor.do_rescale=%s, do_normalize=%s, "
+        "mean=%s, std=%s",
+        tp.get("applied_by"),
+        processor.do_rescale, processor.do_normalize,
         getattr(processor, "image_mean", None),
         getattr(processor, "image_std", None),
     )
-    if not do_normalize:
-        logger.warning(
-            "HF processor has do_normalize=False — our transforms also skip "
-            "Normalize when a processor is present, so inputs will reach the "
-            "model un-normalized. Either set do_normalize=True on the "
-            "processor or add Normalize to the data pipeline."
-        )
 
     return HFDetectionModel(hf_model, processor)
 

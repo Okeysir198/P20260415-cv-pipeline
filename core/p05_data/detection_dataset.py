@@ -339,9 +339,18 @@ def build_dataloader(
         A :class:`torch.utils.data.DataLoader` ready to iterate.
     """
     is_train = split == "train"
-    input_size = tuple(data_config["input_size"])
-    mean = data_config.get("mean", IMAGENET_MEAN)
-    std = data_config.get("std", IMAGENET_STD)
+    # Resolve the authoritative tensor_prep block (migrates legacy keys on the fly).
+    from utils.config import resolve_tensor_prep
+    backend = training_config.get("training", {}).get("backend", "pytorch")
+    tensor_prep = resolve_tensor_prep(training_config, backend=backend) or None
+    if tensor_prep:
+        input_size = tuple(tensor_prep["input_size"])
+        mean = tensor_prep.get("mean") or data_config.get("mean", IMAGENET_MEAN)
+        std = tensor_prep.get("std") or data_config.get("std", IMAGENET_STD)
+    else:
+        input_size = tuple(data_config["input_size"])
+        mean = data_config.get("mean", IMAGENET_MEAN)
+        std = data_config.get("std", IMAGENET_STD)
 
     aug_config = training_config.get("augmentation", {})
     gpu_augment = training_config.get("training", {}).get("gpu_augment", False)
@@ -352,7 +361,8 @@ def build_dataloader(
         )
     else:
         transforms = build_transforms(
-            config=aug_config, is_train=is_train, input_size=input_size, mean=mean, std=std
+            config=aug_config, is_train=is_train, input_size=input_size, mean=mean, std=std,
+            tensor_prep=tensor_prep,
         )
 
     dataset = YOLOXDataset(

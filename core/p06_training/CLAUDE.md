@@ -198,6 +198,8 @@ RTX GPU:
 Gotchas
 -------
 
+- **`tensor_prep` is the single switch for rescale+normalize+input_size** (added 2026-04-23). The `tensor_prep:` block in `06_training.yaml` is authoritative: `input_size`, `rescale`, `normalize`, `mean`, `std`, `applied_by` (`hf_processor` | `v2_pipeline`). `build_hf_model` FORCES the HF processor's `do_rescale`/`do_normalize`/`image_mean`/`image_std`/`do_resize`/`size` to match — no more checkpoint-default leakage. `build_transforms(..., tensor_prep=...)` in `core/p05_data/transforms.py` appends `v2.Normalize` only when `applied_by == "v2_pipeline"`; skips it on `hf_processor`. `_validate_tensor_prep` in `utils/config.py` hard-errors on backend mismatch, double-normalize, missing-normalize, or missing mean/std; called from both `DetectionTrainer.__init__` (pytorch backend) and `train_with_hf` (HF backend) right after the model builds so the processor is observable. Legacy configs (no `tensor_prep`) auto-migrate on load via `_migrate_legacy_tensor_prep` with a one-line WARNING — add an explicit block to suppress it. CPPE-5 (`notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training.yaml`) is the smoke-test target; other feature configs continue working unchanged via the shim.
+
 - **`resume_from_checkpoint=<path>` on HF backend**: supported, but note
   the checkpoint must have been saved by our `_DetectionTrainer._save`
   (wrapper-prefixed state dict `hf_model.*`) — not a bare `hf_model.save_pretrained`.
