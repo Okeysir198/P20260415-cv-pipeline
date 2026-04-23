@@ -1065,6 +1065,19 @@ def _build_callbacks(
             enable_train_end=want_best_viz,
         ))
 
+    # Step-by-step transform pipeline viz (verifies normalize↔denormalize).
+    transform_viz = train_cfg.get("transform_viz", {})
+    if transform_viz.get("enabled", True):
+        from core.p06_training.callbacks_viz import TransformPipelineCallback
+        callbacks.append(TransformPipelineCallback(
+            save_dir=save_dir,
+            data_config=data_config,
+            training_config=config,
+            base_dir=base_dir or "",
+            class_names=class_names,
+            gallery_samples=transform_viz.get("gallery_samples", 4),
+        ))
+
     # Normalization sanity-check preview — fires ONCE on_train_start, saves
     # data_preview/normalized_input_preview.png and never touches training
     # again. Catches double/missing-normalize footguns + box-format drift

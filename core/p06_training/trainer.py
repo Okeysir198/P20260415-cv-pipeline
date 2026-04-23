@@ -519,6 +519,23 @@ class DetectionTrainer:
                 )
             )
 
+        # Step-by-step transform pipeline viz (verifies normalize↔denormalize).
+        transform_viz_cfg = self._train_cfg.get("transform_viz", {})
+        if transform_viz_cfg.get("enabled", True):
+            from core.p06_training.callbacks_viz import TransformPipelineCallback
+            class_names_tp = {int(k): str(v)
+                              for k, v in (loaded_data_cfg.get("names", {}) or {}).items()}
+            callbacks.append(
+                TransformPipelineCallback(
+                    save_dir=save_dir,
+                    data_config=loaded_data_cfg,
+                    training_config=self.config,
+                    base_dir=str(self.config_path.parent),
+                    class_names=class_names_tp,
+                    gallery_samples=transform_viz_cfg.get("gallery_samples", 4),
+                )
+            )
+
         # Normalization sanity-check (stage-3 from the reference notebook).
         norm_viz_cfg = self.config.get("training", {}).get("norm_viz", {})
         if norm_viz_cfg.get("enabled", True):

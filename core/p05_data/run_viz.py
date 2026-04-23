@@ -7,6 +7,7 @@ Generates (numbered by pipeline step):
   - 02_data_labels_<split>.png   — raw images with GT bounding boxes
   - 03_aug_labels_<split>.png    — augmented images with transformed GT boxes
   - 04_normalized_input_preview.png — final model input (denormalized)
+  - 05_transform_pipeline.png    — step-by-step transform walk (normalize↔denormalize inverse check)
 
 Usage::
 

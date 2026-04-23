@@ -71,7 +71,8 @@ runs/<ts>/
 │   ├── 01_dataset_stats.{png,json}       split sizes + class balance + bbox tiers
 │   ├── 02_data_labels_{train,val,test}.png   raw images with GT
 │   ├── 03_aug_labels_train[_mosaic].png  CPU augmentation output
-│   └── 04_normalized_input_preview.png   stage-3 sanity: denormalize(batch) + GT
+│   ├── 04_normalized_input_preview.png   stage-3 sanity: denormalize(batch) + GT
+│   └── 05_transform_pipeline.png         step-by-step: raw → aug → normalize → denormalize (verify pipeline correctness)
 ├── val_predictions/
 │   ├── epochs/epoch_NNN.png    (per-epoch, ~2 s each — the only mid-run hook)
 │   ├── best.png                (on_train_end, best-checkpoint weights)

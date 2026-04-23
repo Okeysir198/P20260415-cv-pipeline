@@ -279,3 +279,73 @@ class NormalizedInputPreviewCallback(_AnyHook):
         if isinstance(batch, torch.Tensor):
             return {"pixel_values": batch, "labels": None}
         return {"pixel_values": None, "labels": None}
+
+
+class TransformPipelineCallback(_AnyHook):
+    """Dual-backend callback that renders ``data_preview/05_transform_pipeline.png``.
+
+    Fires once on train-start (pytorch ``on_train_start`` / HF
+    ``on_train_begin``). Walks a single dataset sample through every CPU
+    transform step and composes a step-by-step grid that makes
+    normalize/denormalize round-trip bugs visually obvious.
+    """
+
+    def __init__(
+        self,
+        save_dir: str | Path,
+        *,
+        data_config: dict,
+        training_config: dict,
+        base_dir: str,
+        class_names: dict[int, str] | None = None,
+        gallery_samples: int = 4,
+        style: Any | None = None,
+    ) -> None:
+        self.save_dir = Path(save_dir)
+        self.data_config = data_config
+        self.training_config = training_config
+        self.base_dir = base_dir
+        self.class_names = class_names or {}
+        self.gallery_samples = gallery_samples
+        self.style = style
+
+    def _render(self) -> None:
+        from core.p05_data.detection_dataset import YOLOXDataset
+        from core.p05_data.transform_pipeline_viz import render_transform_pipeline
+
+        try:
+            dataset = YOLOXDataset(
+                self.data_config, split="train",
+                base_dir=self.base_dir, transforms=None,
+            )
+        except Exception as e:
+            logger.warning("TransformPipelineCallback: dataset build failed — %s", e)
+            return
+        if len(dataset) == 0:
+            logger.warning("TransformPipelineCallback: empty train dataset")
+            return
+        render_transform_pipeline(
+            out_path=self.save_dir / "data_preview" / "05_transform_pipeline.png",
+            dataset=dataset,
+            data_config=self.data_config,
+            training_config=self.training_config,
+            base_dir=self.base_dir,
+            class_names=self.class_names,
+            style=self.style,
+            gallery_samples=self.gallery_samples,
+        )
+
+    # -------- pytorch backend --------
+    def on_train_start(self, trainer):  # noqa: ARG002
+        try:
+            self._render()
+        except Exception as e:  # pragma: no cover — never block training
+            logger.warning("TransformPipelineCallback skipped (pytorch): %s", e)
+
+    # -------- HF backend --------
+    def on_train_begin(self, args, state, control, **kwargs):  # noqa: ARG002
+        try:
+            self._render()
+        except Exception as e:  # pragma: no cover
+            logger.warning("TransformPipelineCallback skipped (hf): %s", e)
+        return control
