@@ -519,20 +519,21 @@ class DetectionTrainer:
                 )
             )
 
-        # Normalize verification viz (raw | normalized | denormalized).
+        # Step-by-step transform pipeline viz (per-class row walk + final
+        # Denormalize(Normalize) inverse-check cell).
         transform_viz_cfg = self._train_cfg.get("transform_viz", {})
         if transform_viz_cfg.get("enabled", True):
-            from core.p06_training.callbacks_viz import NormalizeCheckCallback
+            from core.p06_training.callbacks_viz import TransformPipelineCallback
             class_names_nc = {int(k): str(v)
                               for k, v in (loaded_data_cfg.get("names", {}) or {}).items()}
             callbacks.append(
-                NormalizeCheckCallback(
+                TransformPipelineCallback(
                     save_dir=save_dir,
                     data_config=loaded_data_cfg,
                     training_config=self.config,
                     base_dir=str(self.config_path.parent),
                     class_names=class_names_nc,
-                    num_samples=transform_viz_cfg.get("num_samples", 4),
+                    max_samples=transform_viz_cfg.get("max_samples", 5),
                 )
             )
 

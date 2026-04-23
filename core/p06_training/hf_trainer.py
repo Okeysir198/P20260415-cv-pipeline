@@ -1065,19 +1065,19 @@ def _build_callbacks(
             enable_train_end=want_best_viz,
         ))
 
-    # Normalize verification viz — fires once on train-begin. Catches
+    # Step-by-step transform pipeline viz — fires once on train-begin. Catches
     # double/missing-normalize footguns, box-format drift, and broken
     # inverse-normalize algebra before the first GPU forward pass.
     transform_viz = train_cfg.get("transform_viz", {})
     if transform_viz.get("enabled", True):
-        from core.p06_training.callbacks_viz import NormalizeCheckCallback
-        callbacks.append(NormalizeCheckCallback(
+        from core.p06_training.callbacks_viz import TransformPipelineCallback
+        callbacks.append(TransformPipelineCallback(
             save_dir=save_dir,
             data_config=data_config,
             training_config=config,
             base_dir=base_dir or "",
             class_names=class_names,
-            num_samples=transform_viz.get("num_samples", 4),
+            max_samples=transform_viz.get("max_samples", 5),
         ))
 
     # train_viz would run the same viz on the train_dataloader — not wired

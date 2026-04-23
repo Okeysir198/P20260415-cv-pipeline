@@ -52,7 +52,7 @@ fast at the top of `train_with_hf` rather than silently degrading.
 | `hf_callbacks.py` | Native `TrainerCallback` subclasses — `HFDatasetStatsCallback`, `HFDataLabelGridCallback`, `HFAugLabelGridCallback`, `HFValPredictionCallback` — that run the same viz outputs as the pytorch backend's `callbacks.py` counterparts but consume HF's documented hook kwargs (`model`, `eval_dataloader`, `state.log_history`) rather than a proxy trainer object. |
 | `train.py` | CLI entry point — `auto_select_gpu`, determinism knobs (CUBLAS env var + `torch.use_deterministic_algorithms(True, warn_only=True)`), 3-warning filter for known-harmless PyTorch messages, dispatches to backend. |
 | `callbacks.py` | `Callback` base class (pytorch backend only), `CheckpointSaver`, `EarlyStopping`, `WandBLogger`, `ValPredictionLogger`, `DatasetStatsLogger`, `DataLabelGridLogger`, `AugLabelGridLogger`, `CallbackRunner`. Also `_run_splits_and_subsets(trainer)` — now iterates train/val/test so the HF bridge's stub test-loader shows up in data_preview. |
-| `callbacks_viz.py` | `NormalizeCheckCallback` — fires once on train-start, renders `data_preview/04_normalize_check.png` (3 cols: raw+GT \| normalized tensor jet ±3σ \| denormalized+GT). Dual-backend (permissive `_AnyHook` base satisfies both pytorch `CallbackRunner` and HF `CallbackHandler` hook surfaces). |
+| `callbacks_viz.py` | `TransformPipelineCallback` — fires once on train-start, renders `data_preview/04_transform_pipeline.png` (K rows × N cols: one representative sample per class walked step-by-step through the CPU transform pipeline; last col = Denormalize(Normalize) inverse check). Dual-backend (permissive `_AnyHook` base satisfies both pytorch `CallbackRunner` and HF `CallbackHandler` hook surfaces). |
 | `post_train.py` | Backend-agnostic post-train runner. `run_post_train_artifacts(model, save_dir, val_dataset, test_dataset, task, class_names, input_size, style, training_config, …)` renders best-checkpoint val+test grids and dispatches to `error_analysis_runner`. `render_prediction_grid` is the **single** grid renderer (per-epoch, best, hardest-overview all route here via `annotate_gt_pred`). |
 | `_common.py` | Shared helpers: `unwrap_subset`, `task_from_output_format`, `yolo_targets_to_xyxy`. Dedupes logic that previously had 3 copies across HF + pytorch backends. |
 | `losses.py` | `DetectionLoss` ABC, `YOLOXLoss` (SimOTA), `FocalLoss`, `IoULoss`, `_DETRPassthroughLoss`, registry + `build_loss()`. |
@@ -71,7 +71,7 @@ runs/<ts>/
 │   ├── 01_dataset_stats.{png,json}       split sizes + class balance + bbox tiers
 │   ├── 02_data_labels_{train,val,test}.png   raw images with GT
 │   ├── 03_aug_labels_train[_mosaic].png  CPU augmentation output
-│   └── 04_normalize_check.png            normalize verification: raw | normalized tensor (false-color) | denormalized
+│   └── 04_transform_pipeline.png    step-by-step transform walk (per class, max 5 samples); last col = Denormalize(Normalize) sanity check
 ├── val_predictions/
 │   ├── epochs/epoch_NNN.png    (per-epoch, ~2 s each — the only mid-run hook)
 │   ├── best.png                (on_train_end, best-checkpoint weights)

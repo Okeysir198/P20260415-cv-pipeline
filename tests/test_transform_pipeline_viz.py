@@ -1,4 +1,4 @@
-"""Test: 04_normalize_check.png renderer + callback.
+"""Test: 04_transform_pipeline.png renderer + callback.
 
 Primary invariant: the denormalize step is an exact inverse of
 ``v2.Normalize + ToDtype(scale=True)`` (within L∞ ≤ 2 due to uint8 rounding).
@@ -19,7 +19,7 @@ from _runner import run_all  # noqa: E402
 
 from core.p05_data.transform_pipeline_viz import (  # noqa: E402
     denormalize_chw,
-    render_normalize_check,
+    render_transform_pipeline,
 )
 
 OUTPUTS = Path(__file__).resolve().parent / "outputs" / "transform_pipeline_viz"
@@ -45,8 +45,8 @@ def _minimal_configs() -> tuple[dict, dict]:
         "augmentation": {
             "library": "torchvision",
             "mosaic": False, "mixup": False, "copypaste": False,
-            "fliplr": 0.0, "flipud": 0.0,
-            "degrees": 0.0, "scale": [1.0, 1.0], "translate": 0.0, "shear": 0.0,
+            "fliplr": 0.5, "flipud": 0.0,
+            "degrees": 10.0, "scale": [0.9, 1.1], "translate": 0.0, "shear": 0.0,
             "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.0,
             "normalize": True,
         }
@@ -56,16 +56,16 @@ def _minimal_configs() -> tuple[dict, dict]:
 
 def test_renders_png():
     data_cfg, train_cfg = _minimal_configs()
-    out = OUTPUTS / "normalize_check.png"
+    out = OUTPUTS / "transform_pipeline.png"
     if out.exists():
         out.unlink()
-    ret = render_normalize_check(
+    ret = render_transform_pipeline(
         out_path=out,
         data_config=data_cfg,
         training_config=train_cfg,
         base_dir=".",
         class_names={0: "fire", 1: "smoke"},
-        num_samples=3,
+        max_samples=5,
     )
     assert ret is not None and out.exists(), "PNG was not created"
     from PIL import Image
@@ -73,7 +73,7 @@ def test_renders_png():
         w, h = im.size
     assert h > 500, f"PNG too short: {h} px"
     assert w > 500, f"PNG too narrow: {w} px"
-    print(f"    normalize_check.png: {w}x{h} px")
+    print(f"    transform_pipeline.png: {w}x{h} px")
 
 
 def test_normalize_denormalize_roundtrip():
@@ -98,10 +98,10 @@ def test_normalize_denormalize_roundtrip():
 
 
 def test_callback_import():
-    """NormalizeCheckCallback imports and instantiates cleanly."""
-    from core.p06_training.callbacks_viz import NormalizeCheckCallback
+    """TransformPipelineCallback imports and instantiates cleanly."""
+    from core.p06_training.callbacks_viz import TransformPipelineCallback
     data_cfg, train_cfg = _minimal_configs()
-    cb = NormalizeCheckCallback(
+    cb = TransformPipelineCallback(
         save_dir=str(OUTPUTS),
         data_config=data_cfg,
         training_config=train_cfg,
@@ -109,7 +109,7 @@ def test_callback_import():
         class_names={0: "fire", 1: "smoke"},
     )
     assert cb.save_dir == OUTPUTS
-    print("    NormalizeCheckCallback instantiates ok")
+    print("    TransformPipelineCallback instantiates ok")
 
 
 if __name__ == "__main__":
@@ -119,5 +119,5 @@ if __name__ == "__main__":
             ("normalize_denormalize_roundtrip", test_normalize_denormalize_roundtrip),
             ("callback_import", test_callback_import),
         ],
-        title="normalize_check_viz",
+        title="transform_pipeline_viz",
     )
