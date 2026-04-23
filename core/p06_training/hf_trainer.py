@@ -548,6 +548,8 @@ def train_with_hf(
         save_dir=training_args.output_dir,
         subset_map=subset_map,
         test_dataset=test_dataset,
+        config_path=config_path,
+        dataset_config_path=dataset_config_path,
     )
 
     # Create HF Trainer. Detection uses a subclass that avoids safetensors'
@@ -948,6 +950,8 @@ def _build_callbacks(
     save_dir: str | None = None,
     subset_map: dict[str, list[int] | None] | None = None,
     test_dataset=None,
+    config_path: Path | None = None,
+    dataset_config_path: str | None = None,
 ) -> list:
     """Build HF Trainer callbacks from our config.
 
@@ -1006,9 +1010,9 @@ def _build_callbacks(
         subsets=subset_map,
         dpi=data_viz.get("dpi", 120),
         training_config=config,
-        training_config_path=str(config_path),
+        training_config_path=str(config_path) if config_path else None,
         data_config_path=dataset_config_path,
-        feature_name=_feature_name(str(config_path)),
+        feature_name=_feature_name(str(config_path)) if config_path else None,
     ))
 
     if data_viz.get("enabled", True):
