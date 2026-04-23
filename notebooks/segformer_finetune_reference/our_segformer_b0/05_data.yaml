@@ -1,0 +1,76 @@
+# segments/sidewalk-semantic as a "feature" for our in-repo pipeline.
+#
+# Dumped layout (produced by a separate data_loader unit, not this config):
+#   dataset_store/training_ready/sidewalk_semantic/
+#     train/{images,masks}/
+#     val/{images,masks}/
+# Masks are grayscale PNGs where pixel value == class id (0..34). The
+# upstream cookbook sets class 0 = "unlabeled" and masks it out during
+# loss/metric — we honour that via `ignore_index: 0` in 06_training.yaml.
+#
+# Class list is the authoritative 35-class id2label from
+# https://huggingface.co/datasets/segments/sidewalk-semantic/raw/main/id2label.json
+# (the same file the upstream blog/notebook fetches with hf_hub_download).
+task: semantic_segmentation
+
+dataset_name: "sidewalk_semantic"
+path: "../../../dataset_store/training_ready/sidewalk_semantic"
+train: "train/images"
+val: "val/images"
+# No official test split upstream — the cookbook uses an 80/20 train_test_split
+# from the single `train` split. We mirror `val` here so p08 eval still works.
+test: "val/images"
+
+# Segmentation data layout: `train/{images,masks}/` + `val/{images,masks}/`
+# (see configs/CLAUDE.md → "Segmentation data layout").
+# The matching `masks/` dirs are derived from `images/` by the dataset loader.
+
+names:
+  0: unlabeled
+  1: flat-road
+  2: flat-sidewalk
+  3: flat-crosswalk
+  4: flat-cyclinglane
+  5: flat-parkingdriveway
+  6: flat-railtrack
+  7: flat-curb
+  8: human-person
+  9: human-rider
+  10: vehicle-car
+  11: vehicle-truck
+  12: vehicle-bus
+  13: vehicle-tramtrain
+  14: vehicle-motorcycle
+  15: vehicle-bicycle
+  16: vehicle-caravan
+  17: vehicle-cartrailer
+  18: construction-building
+  19: construction-door
+  20: construction-wall
+  21: construction-fenceguardrail
+  22: construction-bridge
+  23: construction-tunnel
+  24: construction-stairs
+  25: object-pole
+  26: object-trafficsign
+  27: object-trafficlight
+  28: nature-vegetation
+  29: nature-terrain
+  30: sky
+  31: void-ground
+  32: void-dynamic
+  33: void-static
+  34: void-unclear
+num_classes: 35
+
+# Upstream cookbook uses SegformerFeatureExtractor defaults (512×512 square
+# resize). We match exactly — `input_size: 512` == [512, 512].
+input_size: [512, 512]
+
+# ImageNet normalization (SegFormer processor's built-in defaults).
+mean: [0.485, 0.456, 0.406]
+std:  [0.229, 0.224, 0.225]
+
+# Required by p02 annotation QA (empty — no QA on sidewalk-semantic)
+auto_label:
+  class_rules: []

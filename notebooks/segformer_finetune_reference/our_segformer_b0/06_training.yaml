@@ -1,0 +1,120 @@
+# SegFormer-B0 on segments/sidewalk-semantic, via our in-repo pipeline
+# + HF Trainer backend. Parity target: the upstream cookbook
+# (https://huggingface.co/blog/fine-tune-segformer,
+#  notebooks/huggingface/examples/semantic_segmentation.ipynb).
+#
+# Usage (from repo root):
+#   uv run core/p06_training/train.py \
+#     --config notebooks/segformer_finetune_reference/our_segformer_b0/06_training.yaml
+#
+# All artefacts land in
+#   notebooks/segformer_finetune_reference/our_segformer_b0/runs/seed42/
+
+model:
+  arch: hf-segformer
+  pretrained: nvidia/mit-b0
+  num_classes: 35
+  input_size: [512, 512]
+  # Segmentation head shape changes with num_classes → must tolerate
+  # size mismatch on reload.
+  ignore_mismatched_sizes: true
+
+# Authoritative tensor-prep contract. The HF AutoImageProcessor
+# (SegformerImageProcessor) owns rescale+normalize; our v2 aug pipeline
+# skips them. See core/p06_training/CLAUDE.md for the contract.
+tensor_prep:
+  input_size: [512, 512]
+  rescale: true
+  normalize: imagenet
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  # Upstream notebook uses batch_size=2 on a single GPU. Match exactly.
+  batch_size: 2
+  num_workers: 2
+  prefetch_factor: 2
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+# Upstream uses torchvision ColorJitter(brightness=0.25, contrast=0.25,
+# saturation=0.25, hue=0.1) on train only + the feature extractor's
+# default random resize/crop/flip to `input_size`. Mirrored here via
+# build_transforms, library=torchvision.
+augmentation:
+  library: torchvision
+  mosaic: false
+  mixup: false
+  fliplr: 0.5
+  # ColorJitter params (matched to upstream).
+  brightness: 0.25
+  contrast: 0.25
+  saturation: 0.25
+  hue: 0.1
+  # No geometric jitter beyond flip + random resize/crop (identity).
+  perspective_p: 0.0
+  hsv_p: 0.0
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
+
+training:
+  backend: hf
+  epochs: 50
+  optimizer: adamw
+  lr: 6.0e-5
+  weight_decay: 0.0
+  warmup_steps: 0
+  scheduler: linear
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  # SegFormer fine-tunes cleanly in fp32 — match upstream (no bf16/fp16).
+  # Overshoots to bf16 are uneven in practice and not worth the parity risk.
+  bf16: false
+  amp: false
+  gpu_augment: false
+  ema: false
+  # Upstream masks class 0 (unlabeled) from loss + metrics. Our pipeline
+  # forwards this as `ignore_index=0` into the HF Segformer loss and
+  # mean_iou metric.
+  ignore_index: 0
+  # Drives HF Trainer's best-checkpoint selection. torchmetrics/evaluate
+  # emit "mean_iou"; metric_for_best_model must match that key exactly
+  # or HF silently fails to checkpoint the best model.
+  metric_for_best_model: mean_iou
+  greater_is_better: true
+
+loss:
+  type: cross_entropy
+  ignore_index: 0
+
+logging:
+  # IMPORTANT: no `run_name` key — HF Trainer treats it as the feature
+  # folder name and creates ghost dirs. See docs/06_training CLAUDE.md
+  # "HF Trainer ghost-folder footgun" + DETR reference README.
+  wandb_project: smart-camera
+  save_dir: runs/seed42
+  # wandb + tensorboard callbacks hard-fail if no auth — hard-set none.
+  report_to: none
+
+checkpoint:
+  save_best: true
+  metric: mean_iou
+  mode: max
+  save_interval: 1
+
+evaluation:
+  # Canonical semantic-seg metric. `ignore_index` propagates from
+  # training; score_threshold is a no-op for seg (kept for schema parity).
+  metric: mean_iou
+  ignore_index: 0
+  score_threshold: 0.0
+  eval_strategy: epoch
+
+seed: 42
