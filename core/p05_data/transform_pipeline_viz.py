@@ -444,8 +444,8 @@ def render_transform_pipeline(
 
     fig, axes = plt.subplots(
         n_rows, n_cols,
-        figsize=(3.2 * n_cols + 1.2, 3.8 * n_rows + 0.8),
-        dpi=130,
+        figsize=(3.2 * n_cols + 1.2, 2.6 * n_rows + 0.8),
+        dpi=110,
         squeeze=False,
     )
     fig.subplots_adjust(wspace=0.04, hspace=0.35)
