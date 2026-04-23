@@ -1,0 +1,46 @@
+# EuroSAT as a "feature" for our in-repo pipeline.
+#
+# Dumped layout (produced by a separate data_loader unit, not this config):
+#   dataset_store/training_ready/eurosat/
+#     train/<class_name>/*.jpg
+#     val/<class_name>/*.jpg
+# ImageFolder convention — one subfolder per class, class id ordered by
+# the `names:` block below.
+#
+# Upstream dataset: `jonathan-roberts1/EuroSAT` (HF Hub, ImageFolder).
+task: classification
+
+dataset_name: "eurosat"
+path: "../../../dataset_store/training_ready/eurosat"
+train: "train"
+val: "val"
+# No dedicated test split upstream — the cookbook uses a 90/10 carve-out from
+# `train`. Mirror `val` here so p08 eval still works end-to-end.
+test: "val"
+
+# 10-class EuroSAT land-cover labels (alphabetical — matches
+# ImageFolder auto-indexing and upstream dataset.features["label"].names).
+names:
+  0: AnnualCrop
+  1: Forest
+  2: HerbaceousVegetation
+  3: Highway
+  4: Industrial
+  5: Pasture
+  6: PermanentCrop
+  7: Residential
+  8: River
+  9: SeaLake
+num_classes: 10
+
+# Upstream uses Swin-tiny's 224×224 crop (image_processor default).
+input_size: [224, 224]
+
+# ImageNet normalization — matches the Swin image_processor's built-in
+# `image_mean`/`image_std` defaults.
+mean: [0.485, 0.456, 0.406]
+std:  [0.229, 0.224, 0.225]
+
+# Required by p02 annotation QA (empty — no QA on EuroSAT).
+auto_label:
+  class_rules: []

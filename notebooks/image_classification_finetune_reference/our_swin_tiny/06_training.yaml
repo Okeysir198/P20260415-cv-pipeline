@@ -1,0 +1,113 @@
+# Swin-tiny on EuroSAT, via our in-repo pipeline + HF Trainer backend.
+# Parity target: HF image-classification cookbook
+#   https://github.com/huggingface/notebooks/blob/main/examples/image_classification.ipynb
+#
+# Usage (from repo root):
+#   uv run core/p06_training/train.py \
+#     --config notebooks/image_classification_finetune_reference/our_swin_tiny/06_training.yaml
+#
+# All artefacts land in
+#   notebooks/image_classification_finetune_reference/our_swin_tiny/runs/seed42/
+
+model:
+  # `hf_classification` is the registered builder (see
+  # core/p06_models/hf_model.py::build_hf_classification_model).
+  # Aliases like `hf-swin-cls` route through _VARIANT_MAP to the same builder.
+  arch: hf_classification
+  pretrained: microsoft/swin-tiny-patch4-window7-224
+  num_classes: 10
+  input_size: [224, 224]
+  # Classification head shape changes with num_classes → must tolerate
+  # size mismatch on reload (1000-class ImageNet → 10-class EuroSAT).
+  ignore_mismatched_sizes: true
+
+# Authoritative tensor-prep contract. The HF AutoImageProcessor owns
+# rescale+normalize; our v2 aug pipeline skips them. See
+# core/p06_training/CLAUDE.md for the contract.
+tensor_prep:
+  input_size: [224, 224]
+  rescale: true
+  normalize: imagenet
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 32
+  num_workers: 2
+  prefetch_factor: 2
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+# Upstream cookbook uses torchvision train transforms:
+#   RandomResizedCrop(crop_size) + RandomHorizontalFlip() + ToTensor + Normalize
+# Val: Resize + CenterCrop + ToTensor + Normalize. Mirrored via build_transforms
+# (library=torchvision). No colour jitter, no geometric distortion.
+augmentation:
+  library: torchvision
+  mosaic: false
+  mixup: false
+  fliplr: 0.5
+  random_resized_crop: true
+  brightness: 0.0
+  contrast: 0.0
+  saturation: 0.0
+  hue: 0.0
+  perspective_p: 0.0
+  hsv_p: 0.0
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
+
+training:
+  backend: hf
+  epochs: 3
+  optimizer: adamw
+  lr: 5.0e-5
+  weight_decay: 0.0
+  warmup_ratio: 0.1
+  warmup_steps: 0
+  scheduler: linear
+  per_device_train_batch_size: 32
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 4
+  # Swin-tiny fine-tunes cleanly in fp32 — match upstream (no bf16/fp16).
+  bf16: false
+  amp: false
+  gpu_augment: false
+  ema: false
+  # HF Trainer selects best checkpoint on eval_accuracy; compute_metrics
+  # returns {"accuracy": <float>} from evaluate.load("accuracy").
+  metric_for_best_model: accuracy
+  greater_is_better: true
+
+loss:
+  # Built into HF ForImageClassification heads; no loss override needed.
+  type: cross_entropy
+
+logging:
+  # IMPORTANT: no `run_name` key — HF Trainer treats it as the feature
+  # folder name and creates ghost dirs. See
+  # notebooks/detr_finetune_reference/CLAUDE.md "HF Trainer ghost-folder footgun".
+  wandb_project: smart-camera
+  save_dir: runs/seed42
+  # wandb + tensorboard callbacks hard-fail if no auth — hard-set none.
+  report_to: none
+
+checkpoint:
+  save_best: true
+  metric: accuracy
+  mode: max
+  save_interval: 1
+
+evaluation:
+  metric: accuracy
+  score_threshold: 0.0
+  eval_strategy: epoch
+
+seed: 42
