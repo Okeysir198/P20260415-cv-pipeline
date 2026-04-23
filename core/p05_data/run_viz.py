@@ -288,7 +288,10 @@ def generate_dataset_stats(
     ax1.set_ylabel("# instances")
     ax1.set_xticks(x)
     ax1.set_xticklabels([class_names.get(cid, str(cid)) for cid in all_class_ids], rotation=15)
-    ax1.legend(fontsize=8)
+    ax1.legend(fontsize=8, loc="upper right", framealpha=0.9)
+    # Headroom so the legend at upper-right does not overlap the tallest bar.
+    y_max = ax1.get_ylim()[1]
+    ax1.set_ylim(top=y_max * 1.18)
     ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{int(v):,}"))
 
     # --- [0,2] Class balance % (stacked horizontal bar per split) ---
@@ -316,7 +319,8 @@ def generate_dataset_stats(
         for cid in all_class_ids
     ]
     ax2.legend(handles, [class_names.get(cid, str(cid)) for cid in all_class_ids],
-               fontsize=8, loc="lower right")
+               fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+               framealpha=1.0)
 
     # --- [1,0] BBox area distribution (histogram + KDE, log x-axis) ---
     from scipy.stats import gaussian_kde
@@ -367,7 +371,7 @@ def generate_dataset_stats(
         ax3.set_title("BBox Area (% of image)", fontsize=11, fontweight="bold")
         ax3.set_xlabel("area %  [log scale]")
         ax3.set_ylabel("density")
-        ax3.legend(fontsize=8)
+        ax3.legend(fontsize=8, loc="upper right", framealpha=0.9)
 
     # --- [1,1] Labels per image — box plot per split ---
     lpi_data = [stats[sp]["labels_per_image"] for sp in split_list if stats[sp].get("labels_per_image")]
@@ -390,7 +394,10 @@ def generate_dataset_stats(
     ax4.set_title("Labels per Image", fontsize=11, fontweight="bold")
     ax4.set_ylabel("# annotations per image")
     ax4.set_ylim(bottom=0)
-    ax4.legend(fontsize=7.5)
+    ax4.legend(fontsize=7.5, loc="upper right", framealpha=0.9)
+    # Headroom for the legend above the boxplot whiskers.
+    _y_max_4 = ax4.get_ylim()[1]
+    ax4.set_ylim(top=_y_max_4 * 1.18)
 
     # --- [1,2] Summary text panel ---
     ax5.axis("off")

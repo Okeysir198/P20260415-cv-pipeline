@@ -466,14 +466,14 @@ def render_transform_pipeline(
                 # Row 0: leave headroom so the separate class header
                 # (placed via fig.text) does not collide with metadata.
                 if r == 0:
-                    title_pad = 30
-                ax.set_title(title, fontsize=8, pad=title_pad,
+                    title_pad = 55
+                ax.set_title(title, fontsize=11, pad=title_pad,
                              family="monospace")
         # Row label on col 0 only.
         axes[r, 0].set_ylabel(
             f"[{r + 1:02d}] {step_name}",
-            rotation=0, ha="right", va="center", labelpad=50,
-            fontsize=11, fontweight="bold",
+            rotation=0, ha="right", va="center", labelpad=60,
+            fontsize=15, fontweight="bold",
         )
 
     # Class headers above row 0 — fig.text avoids collision with per-cell
@@ -488,7 +488,7 @@ def render_transform_pipeline(
         fig.text(
             x_center, y_top,
             f"class: {cls_label}",
-            ha="center", va="bottom", fontsize=10, fontweight="bold",
+            ha="center", va="bottom", fontsize=14, fontweight="bold",
         )
 
     feature = data_config.get("dataset_name") or "unknown"
@@ -497,14 +497,14 @@ def render_transform_pipeline(
         f"mean={[round(m, 3) for m in mean]} std={[round(s, 3) for s in std]}\n"
         f"Normalize: applied by {applied_by}  (rescale={rescale_flag} "
         f"normalize={normalize_flag})",
-        y=0.998, fontsize=12, fontweight="bold",
+        y=0.998, fontsize=16, fontweight="bold",
     )
     fig.text(
         0.5, 0.003,
         f"Row [{n_rows:02d}] Denormalize(Normalize) should visually match the "
         "pre-Normalize row. Color cast = bug in mean/std or processor rescale "
         "collision.",
-        ha="center", fontsize=9, style="italic", color="#444",
+        ha="center", fontsize=13, style="italic", color="#444",
     )
 
     out_path = Path(out_path)
