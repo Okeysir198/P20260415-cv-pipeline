@@ -1,13 +1,12 @@
 """Step-by-step transform pipeline visualization.
 
-Renders ``<save_dir>/data_preview/04_transform_pipeline.png`` — a ``K × N`` grid
-where each row walks one sample through every stage of the CPU transform
-pipeline. One representative sample per class (up to 5 classes) is picked from
-the train split. The final column is a ``Denormalize(Normalize)`` cell — a
-visual sanity check on the algebraic inverse of ``v2.Normalize``.
-
-All text lives outside the image area (column titles on row 0, row labels on
-the left margin, figure title, bottom caption). No per-cell banners.
+Renders ``<save_dir>/data_preview/04_transform_pipeline.png`` — an ``N × K``
+grid where **rows are pipeline steps** (in execution order, enabled only) and
+**columns are one representative sample per class** (up to 5 classes). Each
+cell carries a 2-line metadata caption (``dtype · shape`` / ``[min, max, μ]``)
+computed on the *raw tensor* before display-resizing. Row 0 also surfaces the
+class header; the final row is ``Denormalize(Normalize)``, a visual inverse-
+algebra sanity check on ``v2.Normalize``.
 """
 
 from __future__ import annotations
@@ -84,6 +83,28 @@ def false_color_normalize(tensor: torch.Tensor) -> np.ndarray:
     return (rgba[..., :3] * 255).astype(np.uint8)
 
 
+def _cell_meta(x: Any) -> str:
+    """Return 2-line ``'<dtype> · <shape>\\n[min, max, μ=mean]'`` caption.
+
+    Computed on the raw tensor/array *before* any display resizing so the
+    caption reflects what the model actually sees.
+    """
+    if isinstance(x, torch.Tensor):
+        arr = x.detach().cpu().numpy()
+        dtype = str(x.dtype).replace("torch.", "")
+        shape = "×".join(str(s) for s in tuple(x.shape))
+    else:
+        arr = np.asarray(x)
+        dtype = str(arr.dtype)
+        shape = "×".join(str(s) for s in arr.shape)
+    if arr.size == 0:
+        return f"{dtype} · {shape}\n[empty]"
+    mn, mx, mu = float(arr.min()), float(arr.max()), float(arr.mean())
+    if arr.dtype == np.uint8:
+        return f"{dtype} · {shape}\n[{int(mn)}, {int(mx)}, μ={int(mu)}]"
+    return f"{dtype} · {shape}\n[{mn:.2f}, {mx:.2f}, μ={mu:.2f}]"
+
+
 def _boxes_to_xyxy(sample: dict) -> tuple[np.ndarray, np.ndarray]:
     """Extract (xyxy pixel boxes, class ids) from a v2 sample dict."""
     boxes = sample.get("boxes")
@@ -134,33 +155,6 @@ def _transform_name(t: Any) -> str:
     return type(t).__name__
 
 
-def _transform_params(t: Any) -> str:
-    """Compact parameter summary."""
-    if isinstance(t, v2.Resize):
-        size = list(t.size) if hasattr(t, "size") else t.size
-        return f"size={size}"
-    if isinstance(t, v2.Normalize):
-        m = [round(float(x), 2) for x in t.mean]
-        s = [round(float(x), 2) for x in t.std]
-        return f"μ={m}\nσ={s}"
-    if isinstance(t, v2.RandomAffine):
-        return f"deg={t.degrees}"
-    if isinstance(t, v2.RandomHorizontalFlip | v2.RandomVerticalFlip):
-        return f"p={t.p}"
-    if isinstance(t, v2.ColorJitter):
-        return "ColorJitter"
-    if isinstance(t, v2.ToDtype):
-        dt = str(t.dtype).replace("torch.", "") if hasattr(t, "dtype") else ""
-        scale = getattr(t, "scale", False)
-        return f"{dt} scale={scale}"
-    return ""
-
-
-def _cell_title(step_idx: int, name: str, params: str) -> str:
-    body = f"[{step_idx:02d}] {name}"
-    return f"{body}\n{params}" if params else body
-
-
 # ---------------------------------------------------------------------------
 # Pipeline walk
 # ---------------------------------------------------------------------------
@@ -177,21 +171,25 @@ def _walk_pipeline(
 ) -> list[dict]:
     """Walk the transform pipeline cumulatively, snapshot each step.
 
-    Returns a list of cell dicts; the last cell is always the denormalize
-    round-trip (if Normalize was present). Each cell is:
-    ``{"image": HWC uint8 rgb, "title": str, "is_normalize": bool}``.
+    Returns an ordered list of cells, one per pipeline step. The last cell is
+    always the ``Denormalize(Normalize)`` round-trip (if Normalize was
+    present). Each cell is:
+
+        {"image": HWC uint8 rgb, "step_name": str, "meta": str,
+         "is_normalize": bool}
     """
     orig_hw = (raw_image_bgr.shape[0], raw_image_bgr.shape[1])
     sample = _to_v2_sample(raw_image_bgr, raw_targets, orig_hw)
 
     cells: list[dict] = []
 
-    # [00] Raw
+    # [00] Raw — HWC uint8 BGR array pre-conversion.
     raw_rgb = cv2.cvtColor(raw_image_bgr, cv2.COLOR_BGR2RGB)
     xyxy0, cls0 = _boxes_to_xyxy(sample)
     cells.append({
         "image": _draw_boxes_rgb(raw_rgb, xyxy0, cls0, class_names, style),
-        "title": _cell_title(0, "Raw", f"{orig_hw[0]}x{orig_hw[1]}"),
+        "step_name": "Raw",
+        "meta": _cell_meta(raw_rgb),
         "is_normalize": False,
     })
 
@@ -208,14 +206,14 @@ def _walk_pipeline(
         img = sample["image"]
         is_norm = isinstance(t, v2.Normalize)
         name = _transform_name(t)
-        params = _transform_params(t)
+        meta = _cell_meta(img)
 
         if is_norm:
             post_norm_tensor = img.clone() if isinstance(img, torch.Tensor) else None
-            rgb = false_color_normalize(img)
             cells.append({
-                "image": rgb,
-                "title": _cell_title(i, name + " (jet ±3σ)", params),
+                "image": false_color_normalize(img),
+                "step_name": f"{name} (jet ±3σ)",
+                "meta": meta,
                 "is_normalize": True,
             })
         else:
@@ -223,7 +221,8 @@ def _walk_pipeline(
             xyxy, cls = _boxes_to_xyxy(sample)
             cells.append({
                 "image": _draw_boxes_rgb(rgb, xyxy, cls, class_names, style),
-                "title": _cell_title(i, name, params),
+                "step_name": name,
+                "meta": meta,
                 "is_normalize": False,
             })
 
@@ -234,7 +233,8 @@ def _walk_pipeline(
         cells.append({
             "image": _draw_boxes_rgb(denorm_rgb, xyxy_final, cls_final,
                                      class_names, style),
-            "title": _cell_title(len(cells), "Denorm[Normalize]", "inverse"),
+            "step_name": "Denormalize(Normalize)",
+            "meta": _cell_meta(denorm_rgb),
             "is_normalize": False,
         })
 
@@ -287,11 +287,11 @@ def render_transform_pipeline(
     max_samples: int = 5,
     style: VizStyle | None = None,
 ) -> Path | None:
-    """Render ``04_transform_pipeline.png`` — K rows × N columns.
+    """Render ``04_transform_pipeline.png`` — N steps (rows) × K classes (cols).
 
-    Each row walks one representative sample (first occurrence per class,
-    up to ``max_samples`` classes) through every CPU transform step. Final
-    column is ``Denormalize(Normalize)``, a visual inverse-algebra check.
+    Each row is a pipeline step applied cumulatively; each column is a
+    representative sample per class (first occurrence per class, up to
+    ``max_samples``). Final row is ``Denormalize(Normalize)``.
     """
     import matplotlib.pyplot as plt
 
@@ -339,7 +339,8 @@ def render_transform_pipeline(
         logger.warning("render_transform_pipeline: no labeled samples found")
         return None
 
-    rows: list[tuple[int, list[dict]]] = []
+    # Per-column walk: one column per (class_id, idx).
+    columns: list[tuple[int, list[dict]]] = []
     for cls_id, idx in picks:
         try:
             raw_bgr = raw_ds.get_raw_item(idx)["image"]
@@ -350,59 +351,84 @@ def render_transform_pipeline(
                 raw_bgr, raw_targets, transform,
                 mean=mean, std=std, class_names=class_names, style=style,
             )
-            rows.append((cls_id, cells))
+            columns.append((cls_id, cells))
         except Exception as e:
             logger.warning("render_transform_pipeline: class=%d idx=%d failed — %s",
                            cls_id, idx, e)
             continue
 
-    if not rows:
-        logger.warning("render_transform_pipeline: no rows rendered")
+    if not columns:
+        logger.warning("render_transform_pipeline: no columns rendered")
         return None
 
-    # Uniform column count — pipeline is identical per sample.
-    n_cols = max(len(cells) for _, cells in rows)
-    k_rows = len(rows)
+    # Rows = pipeline steps (uniform across columns since the pipeline is
+    # deterministic in structure; length varies only if a transform raised).
+    n_rows = max(len(cells) for _, cells in columns)
+    n_cols = len(columns)
+
+    # Use the first column's step_name sequence for row labels.
+    ref_steps = columns[0][1]
 
     fig, axes = plt.subplots(
-        k_rows, n_cols,
-        figsize=(3 * n_cols, 3.2 * k_rows + 1.5),
+        n_rows, n_cols,
+        figsize=(3.2 * n_cols + 1.2, 3.8 * n_rows + 0.8),
         dpi=130,
         squeeze=False,
     )
-    fig.subplots_adjust(wspace=0.05, hspace=0.15)
+    fig.subplots_adjust(wspace=0.04, hspace=0.35)
 
-    # Column titles on row 0 only.
-    ref_titles = rows[0][1]
-    for c in range(n_cols):
-        if c < len(ref_titles):
-            axes[0, c].set_title(ref_titles[c]["title"], fontsize=9, pad=6)
-
-    for r, (cls_id, cells) in enumerate(rows):
-        cls_label = class_names.get(int(cls_id), f"class_{cls_id}")
-        for c in range(n_cols):
+    for r in range(n_rows):
+        step_name = ref_steps[r]["step_name"] if r < len(ref_steps) else f"step_{r}"
+        for c, (cls_id, cells) in enumerate(columns):
             ax = axes[r, c]
-            if c < len(cells):
-                ax.imshow(cells[c]["image"])
             ax.set_xticks([])
             ax.set_yticks([])
             for sp in ax.spines.values():
                 sp.set_visible(False)
+            if r < len(cells):
+                ax.imshow(cells[r]["image"])
+                # 2-line metadata caption sits directly above the image.
+                title = cells[r]["meta"]
+                title_pad = 6
+                # Row 0: leave headroom so the separate class header
+                # (placed via fig.text) does not collide with metadata.
+                if r == 0:
+                    title_pad = 30
+                ax.set_title(title, fontsize=8, pad=title_pad,
+                             family="monospace")
+        # Row label on col 0 only.
         axes[r, 0].set_ylabel(
+            f"[{r + 1:02d}] {step_name}",
+            rotation=0, ha="right", va="center", labelpad=50,
+            fontsize=11, fontweight="bold",
+        )
+
+    # Class headers above row 0 — fig.text avoids collision with per-cell
+    # metadata titles inside axes[0, c].
+    # Compute approximate x-center of each column from the axis bbox.
+    fig.canvas.draw()  # ensure layout is realized for bbox queries
+    for c, (cls_id, _cells) in enumerate(columns):
+        cls_label = class_names.get(int(cls_id), f"class_{cls_id}")
+        bbox = axes[0, c].get_position()
+        x_center = (bbox.x0 + bbox.x1) / 2.0
+        y_top = bbox.y1 + 0.012
+        fig.text(
+            x_center, y_top,
             f"class: {cls_label}",
-            rotation=0, ha="right", va="center", labelpad=40, fontsize=10,
+            ha="center", va="bottom", fontsize=10, fontweight="bold",
         )
 
     feature = data_config.get("dataset_name") or "unknown"
     fig.suptitle(
         f"Transform pipeline — {feature} · input {input_size[0]}×{input_size[1]}  "
         f"mean={[round(m, 3) for m in mean]} std={[round(s, 3) for s in std]}",
-        y=0.995, fontsize=11, fontweight="bold",
+        y=0.998, fontsize=12, fontweight="bold",
     )
     fig.text(
-        0.5, 0.005,
-        "Last column = Denormalize(Normalize). "
-        "Should visually match the step before Normalize. Color cast = bug.",
+        0.5, 0.003,
+        f"Row [{n_rows:02d}] Denormalize(Normalize) should visually match the "
+        "pre-Normalize row. Color cast = bug in mean/std or processor rescale "
+        "collision.",
         ha="center", fontsize=9, style="italic", color="#444",
     )
 
@@ -411,5 +437,5 @@ def render_transform_pipeline(
     fig.savefig(str(out_path), bbox_inches="tight", facecolor="white")
     plt.close(fig)
     logger.info("render_transform_pipeline: saved %s (%d rows × %d cols)",
-                out_path, k_rows, n_cols)
+                out_path, n_rows, n_cols)
     return out_path
