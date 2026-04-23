@@ -15,11 +15,14 @@ task: semantic_segmentation
 
 dataset_name: "sidewalk_semantic"
 path: "../../../dataset_store/training_ready/sidewalk_semantic"
-train: "train/images"
-val: "val/images"
+# Segmentation split dirs contain `images/` + `masks/` subdirs —
+# SegmentationDataset appends those suffixes itself, so the keys below
+# point to the split root (not the images subdir).
+train: "train"
+val: "val"
 # No official test split upstream — the cookbook uses an 80/20 train_test_split
 # from the single `train` split. We mirror `val` here so p08 eval still works.
-test: "val/images"
+test: "val"
 
 # Segmentation data layout: `train/{images,masks}/` + `val/{images,masks}/`
 # (see configs/CLAUDE.md → "Segmentation data layout").
