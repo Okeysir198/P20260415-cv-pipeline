@@ -81,21 +81,30 @@ runs/<ts>/
 │       │                             summary.json::model_metrics.failure_mode has
 │       │                               {error_types, per_class, confusion_pairs_top, contribution,
 │       │                                modes_per_class, fn_attribution, miss_by_attribute, diagnosis}
-│       ├── data_distribution.png   class count + per-class × size-tier
-│       ├── boxes_per_image.png     crowdedness (mean/median/p95/max)
-│       ├── bbox_aspect_ratio.png   per-class log-scale w/h
-│       ├── per_class_pr_f1.png     P / R / F1 bars
-│       ├── confusion_matrix.png    GT×Pred (last col/row = background)
-│       ├── confidence_calibration.png  TP vs FP score histogram
-│       ├── size_recall.png         small / medium / large with explicit COCO px² thresholds
-│       ├── threshold_analysis.png  4-panel: PR curves + F1/P/R vs conf threshold (step 0.01)
-│       ├── map_vs_iou.png          mAP at IoU 0.50 → 0.95 (AP50 / AP75 / AP[.5:.95])
-│       ├── failure_mode_contribution.png   2-panel: global Δ mAP ranked bars + per-class × mode heatmap + glossary
-│       ├── failure_by_attribute.png        2×2: miss-rate by size / aspect-ratio / crowdedness + top confusion pairs
-│       ├── confidence_attribution.png      FN causality: true_miss / under_confidence / localization_fail (abs + normalized)
-│       ├── recoverable_map_vs_iou.png      per-mode Δ mAP across IoU 0.5 → 0.9 (shows where localization dominates COCO mAP)
-│       ├── hardest_images.png      top-12 overview
-│       └── failure_mode_examples/  5-mode × per-class GT-vs-Pred galleries (replaces old hard_images/)
+│       │   (chart PNGs carry a numeric `NN_` prefix mirroring data-flow order;
+│       │    authoritative name map is `CHART_FILENAMES` in
+│       │    `core/p08_evaluation/error_analysis_runner.py` — do not hardcode
+│       │    filenames, look up via that constant)
+│       ├── 01_overview.png                  headline: mAP + per-mode Δ mAP ranked bars
+│       ├── 02_data_distribution.png         class count + per-class × size-tier
+│       ├── 03_per_class_performance.png     P / R / F1 bars (renamed from per_class_pr_f1)
+│       ├── 04_confusion_matrix.png          GT×Pred (last col/row = background)
+│       ├── 04_top_confused_pairs.png        ranked class-pair bars
+│       ├── 05_confidence_calibration.png    TP vs FP score histogram
+│       ├── 06_failure_mode_contribution.png 2-panel: global Δ mAP + per-class × mode heatmap
+│       ├── 07_failure_by_attribute.png      miss-rate by size / aspect-ratio / crowdedness
+│       ├── 08_hardest_images.png            top-12 overview
+│       ├── 09_failure_mode_examples/        5-mode × per-class GT|Pred galleries (render_gt_pred_side_by_side)
+│       │   ├── missed/<class>/…
+│       │   ├── localization/<class>/…
+│       │   ├── class_confusion/<pred>__from__<gt>/…
+│       │   ├── duplicate/<class>/…
+│       │   └── background_fp/<class>/…
+│       ├── 10_recoverable_map_vs_iou.png    per-mode Δ mAP across IoU 0.5 → 0.9 (detection only)
+│       ├── 11_confidence_attribution.png    FN causality: true_miss / under_confidence / localization_fail
+│       ├── 12_boxes_per_image.png           crowdedness (mean/median/p95/max)
+│       ├── 13_bbox_aspect_ratio.png         per-class log-scale w/h
+│       └── 14_size_recall.png               small / medium / large with COCO px² thresholds
 │           ├── missed/<class>/<stem>__missed__area_<px>.png
 │           ├── localization/<class>/<stem>__loc__iou_<x>_score_<y>.png
 │           ├── class_confusion/<pred>__from__<gt>/<stem>__conf__iou_<x>_score_<y>.png

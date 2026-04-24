@@ -445,12 +445,14 @@ def annotate_gt_pred(
 
     # Predictions
     if len(pred_dets) > 0:
-        pred_labels = [
-            f"P:{int(pred_dets.class_id[i])} {class_names.get(int(pred_dets.class_id[i]), str(int(pred_dets.class_id[i])))} "
-            f"{pred_dets.confidence[i]:.2f}" if pred_dets.confidence is not None
-            else f"P:{int(pred_dets.class_id[i])} {class_names.get(int(pred_dets.class_id[i]), str(int(pred_dets.class_id[i])))}"
-            for i in range(len(pred_dets))
-        ]
+        pred_labels = []
+        for i in range(len(pred_dets)):
+            cid = int(pred_dets.class_id[i])
+            cname = class_names.get(cid, str(cid))
+            if pred_dets.confidence is not None:
+                pred_labels.append(f"P:{cid} {cname} {pred_dets.confidence[i]:.2f}")
+            else:
+                pred_labels.append(f"P:{cid} {cname}")
         annotated = pred_box_ann.annotate(scene=annotated, detections=pred_dets)
         annotated = pred_lbl_ann.annotate(scene=annotated, detections=pred_dets, labels=pred_labels)
 
@@ -458,6 +460,224 @@ def annotate_gt_pred(
         annotated = draw_gt_pred_legend(annotated, gt_color.as_bgr(), pred_color.as_bgr())
 
     return annotated
+
+
+# ---------------------------------------------------------------------------
+# Side-by-side GT | Pred renderer (task-agnostic)
+# ---------------------------------------------------------------------------
+
+
+_PANEL_SEPARATOR_PX = 4
+_PANEL_BANNER_PX = 28
+
+
+def _panel_tag(image: np.ndarray, text: str, fg_rgb: tuple[int, int, int]) -> np.ndarray:
+    """Stamp a small "GT"/"Pred" tag in the top-left with a semi-transparent backing."""
+    import cv2
+    out = image.copy()
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.5
+    (tw, th), _ = cv2.getTextSize(text, font, scale, 1)
+    pad = 4
+    x0, y0 = 8, 8
+    x1, y1 = x0 + tw + 2 * pad, y0 + th + 2 * pad
+    overlay = out.copy()
+    cv2.rectangle(overlay, (x0, y0), (x1, y1), (0, 0, 0), -1)
+    out = cv2.addWeighted(overlay, 0.55, out, 0.45, 0)
+    cv2.putText(
+        out, text, (x0 + pad, y1 - pad),
+        font, scale, tuple(int(c) for c in fg_rgb), 1, cv2.LINE_AA,
+    )
+    return out
+
+
+def _draw_header_banner(combined: np.ndarray, banner: dict | str, style: "VizStyle") -> np.ndarray:
+    """Prepend a ~28px header strip with centered title/subtitle text."""
+    import cv2
+    h, w = combined.shape[:2]
+    bh = _PANEL_BANNER_PX
+    if isinstance(banner, str):
+        title, subtitle = banner, ""
+    else:
+        title = str(banner.get("title", ""))
+        subtitle = str(banner.get("subtitle", ""))
+    strip = np.full((bh, w, 3), style.banner_bg_rgb, dtype=np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    fg = tuple(int(c) for c in style.banner_text_rgb)
+    text = title if not subtitle else f"{title}  |  {subtitle}"
+    scale = style.banner_text_scale
+    (tw, _), _ = cv2.getTextSize(text, font, scale, 1)
+    x = max(4, (w - tw) // 2)
+    cv2.putText(strip, text, (x, int(bh * 0.7)), font, scale, fg, 1, cv2.LINE_AA)
+    return np.vstack([strip, combined])
+
+
+def _mask_overlay(
+    image: np.ndarray, mask: np.ndarray, color_rgb: tuple[int, int, int], alpha: float,
+) -> np.ndarray:
+    """Blend an HxW binary/int mask onto the image with the given RGB color + alpha."""
+    out = image.copy()
+    if mask is None:
+        return out
+    m = np.asarray(mask)
+    if m.ndim != 2 or m.size == 0:
+        return out
+    if m.shape != image.shape[:2]:
+        import cv2
+        m = cv2.resize(m.astype(np.uint8), (image.shape[1], image.shape[0]),
+                       interpolation=cv2.INTER_NEAREST)
+    mask_bool = m.astype(bool)
+    tint = np.zeros_like(out)
+    tint[..., 0] = color_rgb[0]
+    tint[..., 1] = color_rgb[1]
+    tint[..., 2] = color_rgb[2]
+    out[mask_bool] = (
+        (1.0 - alpha) * out[mask_bool].astype(np.float32)
+        + alpha * tint[mask_bool].astype(np.float32)
+    ).astype(np.uint8)
+    return out
+
+
+def _draw_keypoints_panel(
+    image: np.ndarray, kpts: np.ndarray, color_rgb: tuple[int, int, int], style: "VizStyle",
+) -> np.ndarray:
+    """Draw (K,2) or (K,3) keypoints on a panel with the given RGB color."""
+    if kpts is None:
+        return image.copy()
+    arr = np.asarray(kpts, dtype=np.float32)
+    if arr.size == 0:
+        return image.copy()
+    if arr.ndim == 2 and arr.shape[1] == 3:
+        xy = arr[:, :2]
+        conf = arr[:, 2]
+    elif arr.ndim == 2 and arr.shape[1] == 2:
+        xy = arr
+        conf = None
+    else:
+        raise ValueError(f"keypoints must be (K,2) or (K,3), got shape {arr.shape}")
+    color = sv.Color(r=color_rgb[0], g=color_rgb[1], b=color_rgb[2])
+    # annotate_keypoints lives in utils.viz; import lazily to avoid cycle.
+    from utils.viz import annotate_keypoints
+    return annotate_keypoints(
+        image, xy, skeleton_edges=None, confidence=conf, style=style, color=color,
+    )
+
+
+def render_gt_pred_side_by_side(
+    image: np.ndarray,
+    gt: Any,
+    pred: Any,
+    *,
+    task: str,
+    class_names: dict[int, str] | None = None,
+    style: VizStyle | None = None,
+    banner: dict | str | None = None,
+) -> np.ndarray:
+    """Task-agnostic GT | Pred side-by-side renderer.
+
+    Left panel = GT only (purple), right panel = Pred only (green). Panels are
+    concatenated horizontally with a thin separator column; an optional header
+    strip is drawn across the top with failure-mode info.
+
+    Args:
+        image: RGB image (H, W, 3). Reused for both panels.
+        gt: task-specific ground truth (see below).
+        pred: task-specific prediction (see below).
+        task: one of ``"detection"``, ``"classification"``, ``"segmentation"``,
+            ``"keypoint"``.
+        class_names: ``{int: str}`` for detection/classification labels.
+        style: optional :class:`VizStyle`; defaults to ``VizStyle()``.
+        banner: optional header text — either a string or
+            ``{"title": str, "subtitle": str}``.
+
+    Task contracts:
+        - detection:      gt=(xyxy(N,4), class_id(N,));                 pred=sv.Detections
+        - classification: gt=int;                                       pred=(int, float)
+        - segmentation:   gt=HxW mask;                                  pred=HxW mask
+        - keypoint:       gt=(K,2) or (K,3);                            pred=(K,2) or (K,3)
+    """
+    style = style if style is not None else VizStyle()
+    names = class_names or {}
+    gt_color = style.gt_color
+    pred_color = style.pred_color
+
+    if task == "detection":
+        from utils.viz import annotate_detections
+        gt_xyxy, gt_cls = (None, None) if gt is None else (gt[0], gt[1])
+        left = image.copy()
+        if gt_xyxy is not None and len(gt_xyxy) > 0:
+            xyxy = np.asarray(gt_xyxy, dtype=np.float32).reshape(-1, 4)
+            cls = np.asarray(gt_cls, dtype=int).ravel()
+            gt_dets = sv.Detections(xyxy=xyxy, class_id=cls)
+            gt_labels = [f"{names.get(int(c), str(int(c)))}" for c in cls]
+            left = annotate_detections(
+                left, gt_dets, labels=gt_labels, style=style, color=gt_color,
+            )
+        right = image.copy()
+        if pred is not None and len(pred) > 0:
+            pred_labels = []
+            for i in range(len(pred)):
+                cid = int(pred.class_id[i]) if pred.class_id is not None else 0
+                conf = (
+                    f" {pred.confidence[i]:.2f}"
+                    if pred.confidence is not None else ""
+                )
+                pred_labels.append(f"{names.get(cid, str(cid))}{conf}")
+            right = annotate_detections(
+                right, pred, labels=pred_labels, style=style, color=pred_color,
+            )
+
+    elif task == "classification":
+        from utils.viz import classification_banner
+        gt_id = int(gt) if gt is not None else -1
+        gt_name = names.get(gt_id, str(gt_id))
+        if pred is None:
+            pred_name, pred_score = "?", 0.0
+        else:
+            pid, pscore = pred
+            pred_name = names.get(int(pid), str(int(pid)))
+            pred_score = float(pscore)
+        left = classification_banner(
+            image, f"GT: {gt_name}", style=style, position="top",
+            bg_color_rgb=style.gt_color_rgb, text_color_rgb=(255, 255, 255),
+        )
+        right = classification_banner(
+            image, f"Pred: {pred_name} ({pred_score:.2f})", style=style, position="top",
+            bg_color_rgb=style.pred_color_rgb, text_color_rgb=(255, 255, 255),
+        )
+
+    elif task == "segmentation":
+        left = _mask_overlay(image, gt, style.gt_color_rgb, style.mask_alpha)
+        right = _mask_overlay(image, pred, style.pred_color_rgb, style.mask_alpha)
+
+    elif task == "keypoint":
+        left = _draw_keypoints_panel(image, gt, style.gt_color_rgb, style)
+        right = _draw_keypoints_panel(image, pred, style.pred_color_rgb, style)
+
+    else:
+        raise ValueError(f"unsupported task: {task}")
+
+    # Normalise panel heights (classification banner adds height to both equally).
+    if left.shape[0] != right.shape[0]:
+        target_h = max(left.shape[0], right.shape[0])
+        def _pad(img: np.ndarray) -> np.ndarray:
+            pad_h = target_h - img.shape[0]
+            if pad_h <= 0:
+                return img
+            pad = np.zeros((pad_h, img.shape[1], 3), dtype=img.dtype)
+            return np.vstack([img, pad])
+        left, right = _pad(left), _pad(right)
+
+    left = _panel_tag(left, "GT", style.gt_color_rgb)
+    right = _panel_tag(right, "Pred", style.pred_color_rgb)
+
+    sep = np.zeros((left.shape[0], _PANEL_SEPARATOR_PX, 3), dtype=left.dtype)
+    combined = np.concatenate([left, sep, right], axis=1)
+
+    if banner:
+        combined = _draw_header_banner(combined, banner, style)
+
+    return combined
 
 
 def draw_gt_pred_legend(image: np.ndarray, gt_bgr: tuple, pred_bgr: tuple) -> np.ndarray:

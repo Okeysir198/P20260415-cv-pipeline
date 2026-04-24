@@ -1,7 +1,15 @@
 """Visualization utilities for detection results and training diagnostics.
 
-Uses matplotlib for all plotting. Images are NumPy BGR arrays (OpenCV convention).
-Supervision annotators are used for bounding box drawing.
+Uses matplotlib for all plotting (unified rcParams via
+:func:`utils.viz.apply_plot_style`). Images are NumPy BGR arrays (OpenCV
+convention). Supervision annotators are used for bounding box drawing.
+
+The plot functions here are consumed by :mod:`evaluate.py`,
+:mod:`analyze_errors.py`, and the test suite. For the modern numbered-chart
+scheme (``01_overview.png`` … ``14_size_recall.png``), callers should use
+:func:`core.p08_evaluation.error_analysis_runner.run_error_analysis` and
+look up target filenames in
+:data:`core.p08_evaluation.error_analysis_runner.CHART_FILENAMES`.
 """
 
 from pathlib import Path
@@ -15,9 +23,31 @@ import numpy as np
 import supervision as sv
 
 import core.p10_inference.supervision_bridge as _sv_bridge
+from utils.viz import apply_plot_style, new_figure, shorten_label
 
 if TYPE_CHECKING:
     from core.p08_evaluation.error_analysis import ErrorCase
+
+
+apply_plot_style()
+
+
+# Rotate tick labels when there are many categorical items — avoids overlap.
+_TICK_ROT_THRESHOLD = 5
+_TICK_ROT_DEG = 40
+
+
+def _rotate_xticks(ax, labels: list[str]) -> None:
+    if len(labels) > _TICK_ROT_THRESHOLD:
+        ax.set_xticklabels(labels, rotation=_TICK_ROT_DEG, ha="right")
+    else:
+        ax.set_xticklabels(labels)
+
+
+def _save(fig: matplotlib.figure.Figure, save_path: str | None) -> None:
+    if save_path:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
 
 
 # ---------------------------------------------------------------------------
@@ -101,20 +131,8 @@ def plot_confusion_matrix(
     normalize: bool = True,
     figsize: tuple[int, int] = (10, 8),
 ) -> matplotlib.figure.Figure:
-    """Plot confusion matrix as a heatmap.
-
-    Args:
-        cm: Confusion matrix of shape (N, N) or (N+1, N+1) if background included.
-        class_names: List of class name strings. If cm includes background,
-            "background" is appended automatically.
-        save_path: Optional file path to save the figure.
-        normalize: If True, normalize rows to show percentages.
-        figsize: Figure size (width, height) in inches.
-
-    Returns:
-        matplotlib Figure object.
-    """
-    display_names = list(class_names)
+    """Plot confusion matrix as a heatmap."""
+    display_names = [shorten_label(n) for n in class_names]
     if cm.shape[0] > len(display_names):
         display_names.append("background")
 
@@ -129,20 +147,20 @@ def plot_confusion_matrix(
         fmt = ".0f"
         title = "Confusion Matrix"
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = new_figure(figsize=figsize)
     im = ax.imshow(cm_display, interpolation="nearest", cmap=plt.cm.Blues)
     ax.figure.colorbar(im, ax=ax)
 
     ax.set(
         xticks=np.arange(cm.shape[1]),
         yticks=np.arange(cm.shape[0]),
-        xticklabels=display_names,
         yticklabels=display_names,
         ylabel="Ground Truth",
         xlabel="Predicted",
         title=title,
     )
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    _rotate_xticks(ax, display_names)
+    plt.setp(ax.get_xticklabels(), rotation_mode="anchor")
 
     # Text annotations
     thresh = cm_display.max() / 2.0
@@ -157,12 +175,7 @@ def plot_confusion_matrix(
                 fontsize=9,
             )
 
-    fig.tight_layout()
-
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
-
+    _save(fig, save_path)
     return fig
 
 
@@ -179,34 +192,19 @@ def plot_pr_curve(
     save_path: str | None = None,
     figsize: tuple[int, int] = (8, 6),
 ) -> matplotlib.figure.Figure:
-    """Plot precision-recall curve for a single class.
-
-    Args:
-        precision: Precision values array.
-        recall: Recall values array.
-        ap: Average Precision value (for legend label).
-        class_name: Name of the class.
-        save_path: Optional file path to save the figure.
-        figsize: Figure size.
-
-    Returns:
-        matplotlib Figure object.
-    """
-    fig, ax = plt.subplots(figsize=figsize)
-    ax.plot(recall, precision, linewidth=2, label=f"{class_name} (AP={ap:.3f})")
+    """Plot precision-recall curve for a single class."""
+    short = shorten_label(class_name)
+    fig, ax = new_figure(figsize=figsize)
+    ax.plot(recall, precision, linewidth=2, label=f"{short} (AP={ap:.3f})")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
-    ax.set_title(f"Precision-Recall Curve: {class_name}")
+    ax.set_title(f"Precision-Recall Curve: {short}")
     ax.set_xlim([0.0, 1.05])
     ax.set_ylim([0.0, 1.05])
     ax.legend(loc="lower left")
     ax.grid(True, alpha=0.3)
-    fig.tight_layout()
 
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
-
+    _save(fig, save_path)
     return fig
 
 
@@ -220,30 +218,19 @@ def plot_training_curves(
     save_path: str | None = None,
     figsize: tuple[int, int] = (14, 5),
 ) -> matplotlib.figure.Figure:
-    """Plot training/validation loss and mAP curves.
-
-    Args:
-        history: Dictionary with keys like "train_loss", "val_loss",
-            "val_mAP50". Each value is a list of per-epoch values.
-        save_path: Optional file path to save the figure.
-        figsize: Figure size.
-
-    Returns:
-        matplotlib Figure object.
-    """
+    """Plot training/validation loss and mAP curves."""
     has_loss = "train_loss" in history or "val_loss" in history
     has_map = "val_mAP50" in history
     n_plots = int(has_loss) + int(has_map)
     if n_plots == 0:
-        n_plots = 1  # Fallback: plot all keys
+        n_plots = 1
 
-    fig, axes = plt.subplots(1, max(n_plots, 1), figsize=figsize)
+    fig, axes = new_figure(nrows=1, ncols=max(n_plots, 1), figsize=figsize)
     if n_plots == 1:
         axes = [axes]
 
     plot_idx = 0
 
-    # Loss subplot
     if has_loss:
         ax = axes[plot_idx]
         if "train_loss" in history:
@@ -259,14 +246,14 @@ def plot_training_curves(
         ax.grid(True, alpha=0.3)
         plot_idx += 1
 
-    # mAP subplot
     if has_map:
         ax = axes[plot_idx]
         epochs = range(1, len(history["val_mAP50"]) + 1)
         ax.plot(epochs, history["val_mAP50"], color="green", linewidth=1.5, label="mAP@0.5")
         if "val_mAP50_95" in history:
             epochs2 = range(1, len(history["val_mAP50_95"]) + 1)
-            ax.plot(epochs2, history["val_mAP50_95"], color="orange", linewidth=1.5, label="mAP@0.5:0.95")
+            ax.plot(epochs2, history["val_mAP50_95"], color="orange", linewidth=1.5,
+                    label="mAP@0.5:0.95")
         ax.set_xlabel("Epoch")
         ax.set_ylabel("mAP")
         ax.set_title("Validation mAP")
@@ -274,7 +261,6 @@ def plot_training_curves(
         ax.grid(True, alpha=0.3)
         plot_idx += 1
 
-    # Fallback: plot all provided keys if nothing matched
     if plot_idx == 0:
         ax = axes[0]
         for key, values in history.items():
@@ -285,12 +271,7 @@ def plot_training_curves(
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-    fig.tight_layout()
-
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
-
+    _save(fig, save_path)
     return fig
 
 
@@ -305,45 +286,31 @@ def plot_class_distribution(
     save_path: str | None = None,
     figsize: tuple[int, int] = (10, 5),
 ) -> matplotlib.figure.Figure:
-    """Bar chart of class instance distribution.
-
-    Args:
-        class_counts: Mapping from class name to count.
-        title: Plot title.
-        save_path: Optional file path to save the figure.
-        figsize: Figure size.
-
-    Returns:
-        matplotlib Figure object.
-    """
+    """Bar chart of class instance distribution."""
     if not class_counts:
-        fig, ax = plt.subplots(figsize=figsize)
+        fig, ax = new_figure(figsize=figsize)
         ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        _save(fig, save_path)
         return fig
 
-    names = list(class_counts.keys())
+    names = [shorten_label(n) for n in class_counts.keys()]
     counts = list(class_counts.values())
 
-    fig, ax = plt.subplots(figsize=figsize)
-    bars = ax.bar(range(len(names)), counts, color=plt.cm.Set2(np.linspace(0, 1, len(names))))
+    fig, ax = new_figure(figsize=figsize)
+    bars = ax.bar(range(len(names)), counts,
+                  color=plt.cm.Set2(np.linspace(0, 1, len(names))))
     ax.set_xticks(range(len(names)))
-    ax.set_xticklabels(names, rotation=45, ha="right")
+    _rotate_xticks(ax, names)
     ax.set_ylabel("Count")
     ax.set_title(title or "Class Distribution")
 
-    # Value labels on bars
     for bar, count in zip(bars, counts, strict=True):
         ax.text(
             bar.get_x() + bar.get_width() / 2, bar.get_height(),
             f"{count:,}", ha="center", va="bottom", fontsize=9,
         )
 
-    fig.tight_layout()
-
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
-
+    _save(fig, save_path)
     return fig
 
 
@@ -361,25 +328,12 @@ def create_detection_grid(
     save_path: str | None = None,
     figsize: tuple[float, float] | None = None,
 ) -> matplotlib.figure.Figure:
-    """Create a grid of images with detection results drawn.
-
-    Args:
-        images: List of BGR image arrays.
-        predictions: List of prediction dicts with "boxes", "scores", "labels".
-        class_names: Mapping from class ID to name.
-        nrows: Number of grid rows.
-        ncols: Number of grid columns.
-        save_path: Optional file path to save the figure.
-        figsize: Optional figure size. Auto-computed if None.
-
-    Returns:
-        matplotlib Figure object.
-    """
+    """Create a grid of images with detection results drawn."""
     n = min(len(images), nrows * ncols)
     if figsize is None:
         figsize = (ncols * 4, nrows * 3.5)
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+    fig, axes = new_figure(nrows=nrows, ncols=ncols, figsize=figsize)
     axes = np.asarray(axes).ravel()
 
     for i in range(nrows * ncols):
@@ -395,15 +349,9 @@ def create_detection_grid(
         scores = scores if scores.size > 0 else None
 
         img_drawn = draw_bboxes(images[i], boxes, labels, scores, class_names)
-        # Convert BGR to RGB for matplotlib display
         ax.imshow(cv2.cvtColor(img_drawn, cv2.COLOR_BGR2RGB))
 
-    fig.tight_layout()
-
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
-
+    _save(fig, save_path)
     return fig
 
 
@@ -417,23 +365,16 @@ def plot_error_breakdown(
     save_path: str | None = None,
     figsize: tuple[int, int] = (12, 6),
 ) -> matplotlib.figure.Figure:
-    """Stacked bar chart of TP/FP/FN per class.
-
-    Args:
-        summary: Error summary dict from ErrorAnalyzer.error_summary().
-        save_path: Optional file path to save the figure.
-        figsize: Figure size.
-
-    Returns:
-        matplotlib Figure object.
-    """
+    """Stacked bar chart of TP/FP/FN per class."""
     per_class = summary.get("per_class", {})
     if not per_class:
-        fig, ax = plt.subplots(figsize=figsize)
+        fig, ax = new_figure(figsize=figsize)
         ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        _save(fig, save_path)
         return fig
 
     class_names_list = list(per_class.keys())
+    short_names = [shorten_label(c) for c in class_names_list]
     tp_vals = [per_class[c].get("tp", 0) for c in class_names_list]
     fp_vals = [per_class[c].get("fp", 0) for c in class_names_list]
     fn_vals = [per_class[c].get("fn", 0) for c in class_names_list]
@@ -441,22 +382,22 @@ def plot_error_breakdown(
     x = np.arange(len(class_names_list))
     width = 0.25
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = new_figure(figsize=figsize)
     ax.bar(x - width, tp_vals, width, label="TP", color="#2ecc71")
     ax.bar(x, fp_vals, width, label="FP", color="#e74c3c")
     ax.bar(x + width, fn_vals, width, label="FN", color="#f39c12")
 
     ax.set_xticks(x)
-    ax.set_xticklabels(class_names_list, rotation=45, ha="right")
+    _rotate_xticks(ax, short_names)
     ax.set_ylabel("Count")
     ax.set_title("Error Breakdown by Class")
     ax.legend()
     ax.grid(True, alpha=0.3, axis="y")
 
-    # Error type sub-breakdown as annotation
     error_types = summary.get("error_types", {})
     if error_types:
-        text_lines = [f"{k}: {v}" for k, v in sorted(error_types.items(), key=lambda item: -item[1])]
+        text_lines = [f"{k}: {v}" for k, v in sorted(error_types.items(),
+                                                     key=lambda item: -item[1])]
         ax.text(
             0.98, 0.98, "\n".join(text_lines),
             transform=ax.transAxes, fontsize=8, verticalalignment="top",
@@ -464,10 +405,7 @@ def plot_error_breakdown(
             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
         )
 
-    fig.tight_layout()
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    _save(fig, save_path)
     return fig
 
 
@@ -476,20 +414,11 @@ def plot_confidence_histogram(
     save_path: str | None = None,
     figsize: tuple[int, int] = (10, 5),
 ) -> matplotlib.figure.Figure:
-    """Histogram of false positive confidence scores.
-
-    Args:
-        errors: List of ErrorCase objects from ErrorAnalyzer.classify_errors().
-        save_path: Optional file path to save the figure.
-        figsize: Figure size.
-
-    Returns:
-        matplotlib Figure object.
-    """
+    """Histogram of false positive confidence scores."""
     fp_scores = [e.score for e in errors if e.error_type != "missed" and e.score is not None]
     fn_count = sum(1 for e in errors if e.error_type == "missed")
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = new_figure(figsize=figsize)
 
     if fp_scores:
         ax.hist(
@@ -503,10 +432,7 @@ def plot_confidence_histogram(
     ax.legend()
     ax.grid(True, alpha=0.3, axis="y")
 
-    fig.tight_layout()
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    _save(fig, save_path)
     return fig
 
 
@@ -515,16 +441,7 @@ def plot_size_recall(
     save_path: str | None = None,
     figsize: tuple[int, int] = (8, 5),
 ) -> matplotlib.figure.Figure:
-    """Bar chart of FP/FN counts by object size category (COCO).
-
-    Args:
-        summary: Error summary dict from ErrorAnalyzer.error_summary().
-        save_path: Optional file path to save the figure.
-        figsize: Figure size.
-
-    Returns:
-        matplotlib Figure object.
-    """
+    """Bar chart of FP/FN counts by object size category (COCO)."""
     size_data = summary.get("size_breakdown", {})
     categories = ["small", "medium", "large"]
     fp_vals = [size_data.get(c, {}).get("fp", 0) for c in categories]
@@ -533,7 +450,7 @@ def plot_size_recall(
     x = np.arange(len(categories))
     width = 0.35
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = new_figure(figsize=figsize)
     ax.bar(x - width / 2, fp_vals, width, label="FP", color="#e74c3c")
     ax.bar(x + width / 2, fn_vals, width, label="FN (missed)", color="#f39c12")
 
@@ -546,10 +463,7 @@ def plot_size_recall(
     ax.legend()
     ax.grid(True, alpha=0.3, axis="y")
 
-    fig.tight_layout()
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    _save(fig, save_path)
     return fig
 
 
@@ -561,29 +475,17 @@ def plot_hardest_images_grid(
     save_path: str | None = None,
     figsize: tuple[float, float] | None = None,
 ) -> matplotlib.figure.Figure:
-    """Grid of hardest images with error boxes drawn via supervision annotators.
-
-    Args:
-        errors: List of ErrorCase objects.
-        images: All evaluation images (BGR, same index order as predictions).
-        class_names: Mapping class_id -> name.
-        top_n: Number of hardest images to show.
-        save_path: Optional file path to save the figure.
-        figsize: Optional figure size.
-
-    Returns:
-        matplotlib Figure object.
-    """
-    # Rank images by error count
+    """Grid of hardest images with error boxes drawn via supervision annotators."""
     per_image: dict[int, int] = {}
     for err in errors:
         per_image[err.image_idx] = per_image.get(err.image_idx, 0) + 1
     ranked = sorted(per_image.items(), key=lambda item: -item[1])[:top_n]
 
     if not ranked:
-        fig, ax = plt.subplots()
+        fig, ax = new_figure()
         ax.text(0.5, 0.5, "No errors found", ha="center", va="center", transform=ax.transAxes)
         ax.axis("off")
+        _save(fig, save_path)
         return fig
 
     n = len(ranked)
@@ -595,7 +497,7 @@ def plot_hardest_images_grid(
     box_annotator = sv.BoxAnnotator(thickness=2)
     label_annotator = sv.LabelAnnotator(text_scale=0.4, text_thickness=1)
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+    fig, axes = new_figure(nrows=nrows, ncols=ncols, figsize=figsize)
     axes = np.asarray(axes).ravel()
 
     for ax_idx, (img_idx, err_count) in enumerate(ranked):
@@ -608,17 +510,18 @@ def plot_hardest_images_grid(
         img = images[img_idx].copy()
         img_errors = [e for e in errors if e.image_idx == img_idx]
 
-        # Draw missed GT (FN) boxes
         fn_errors = [e for e in img_errors if e.error_type == "missed"]
         if fn_errors:
             fn_boxes = np.array([e.box for e in fn_errors], dtype=np.float32)
             fn_cls = np.array([e.class_id for e in fn_errors], dtype=int)
             fn_dets = sv.Detections(xyxy=fn_boxes, class_id=fn_cls)
-            fn_labels = [f"FN: {class_names.get(e.class_id, str(e.class_id))}" for e in fn_errors]
+            fn_labels = [
+                f"FN: {shorten_label(class_names.get(e.class_id, str(e.class_id)))}"
+                for e in fn_errors
+            ]
             img = box_annotator.annotate(scene=img, detections=fn_dets)
             img = label_annotator.annotate(scene=img, detections=fn_dets, labels=fn_labels)
 
-        # Draw FP error boxes
         fp_errors = [e for e in img_errors if e.error_type != "missed"]
         if fp_errors:
             fp_boxes = np.array([e.box for e in fp_errors], dtype=np.float32)
@@ -629,7 +532,9 @@ def plot_hardest_images_grid(
             )
             fp_dets = sv.Detections(xyxy=fp_boxes, class_id=fp_cls, confidence=fp_scores)
             fp_labels = [
-                f"{e.error_type}: {class_names.get(e.class_id, str(e.class_id))} {e.score:.2f}"
+                (f"{e.error_type}: "
+                 f"{shorten_label(class_names.get(e.class_id, str(e.class_id)))} "
+                 f"{e.score:.2f}")
                 if e.score is not None else e.error_type
                 for e in fp_errors
             ]
@@ -643,11 +548,8 @@ def plot_hardest_images_grid(
         axes[ax_idx].axis("off")
 
     fig.suptitle("Hardest Images (ranked by error count)", fontsize=12)
-    fig.tight_layout()
 
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    _save(fig, save_path)
     return fig
 
 
@@ -659,16 +561,10 @@ def plot_threshold_curves(
 ) -> matplotlib.figure.Figure:
     """F1 vs confidence threshold curves per class with optimal points.
 
-    Args:
-        threshold_results: Dict from ErrorAnalyzer.compute_optimal_thresholds().
-        class_names: Mapping class_id -> name.
-        save_path: Optional file path to save the figure.
-        figsize: Figure size.
-
-    Returns:
-        matplotlib Figure object.
+    No numbered counterpart in ``CHART_FILENAMES`` — threshold sweep is
+    unique to this CLI. Filename is chosen by the caller.
     """
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = new_figure(figsize=figsize)
 
     colors = plt.cm.Set1(np.linspace(0, 1, max(len(threshold_results), 1)))
 
@@ -679,7 +575,7 @@ def plot_threshold_curves(
 
         thresholds = [pt[0] for pt in curve]
         f1_values = [pt[1] for pt in curve]
-        name = class_names.get(cls_id, f"class_{cls_id}")
+        name = shorten_label(class_names.get(cls_id, f"class_{cls_id}"))
         best_t = result.get("best_threshold", 0)
         best_f1 = result.get("best_f1", 0)
 
@@ -699,8 +595,5 @@ def plot_threshold_curves(
     ax.legend(loc="lower left", fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    fig.tight_layout()
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    _save(fig, save_path)
     return fig

@@ -24,8 +24,10 @@ uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs
 #   Every run auto-produces the full observability tree on on_train_end:
 #     <save_dir>/{best.pt, test_results.json,
 #                 data_preview/{dataset_stats,label_grids,aug_preview,normalized_input_preview},
-#                 val_predictions/{epochs/, best.png, error_analysis/{15 charts, failure_mode_examples/}},
+#                 val_predictions/{epochs/, best.png, error_analysis/{01_…png→14_…png, 09_failure_mode_examples/}},
 #                 test_predictions/{best.png, error_analysis/...}}
+#   Chart filenames are numbered by data-flow order; authoritative name map is
+#   `CHART_FILENAMES` in core/p08_evaluation/error_analysis_runner.py.
 #   Details + opt-out knobs: core/p06_training/CLAUDE.md
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml \

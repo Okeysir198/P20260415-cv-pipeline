@@ -27,6 +27,7 @@ from core.p10_inference.supervision_bridge import (
     build_labels,
     create_tracker,
     from_sv_detections,
+    render_gt_pred_side_by_side,
     to_sv_detections,
     update_tracker,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "build_labels",
     "annotate_frame",
     "annotate_gt_pred",
+    "render_gt_pred_side_by_side",
     "create_tracker",
     "update_tracker",
     # New helpers
@@ -49,6 +51,9 @@ __all__ = [
     "classification_banner",
     "save_image_grid",
     "apply_plot_style",
+    "fit_figsize",
+    "shorten_label",
+    "new_figure",
     # Constants
     "COCO_SKELETON_EDGES",
     "PLOT_COLOR_CYCLE",
@@ -414,3 +419,52 @@ def apply_plot_style() -> None:
         "axes.prop_cycle": mpl.cycler(color=PLOT_COLOR_CYCLE),
     })
     _PLOT_STYLE_APPLIED = True
+
+
+# ---------------------------------------------------------------------------
+# Matplotlib layout helpers (anti-overlap, consistent sizing)
+# ---------------------------------------------------------------------------
+
+
+def fit_figsize(
+    n_items: int,
+    *,
+    base: float = 9.0,
+    per_item: float = 0.45,
+    min_w: float = 9.0,
+    max_w: float = 24.0,
+    height: float = 5.0,
+) -> tuple[float, float]:
+    """Figure size that scales width with item count, clipped to ``[min_w, max_w]``.
+
+    Use for bar charts, confusion matrices, and any plot whose x-axis density
+    grows with ``n_items`` (class count, bin count, …).
+    """
+    w = base + per_item * max(0, int(n_items))
+    w = max(min_w, min(max_w, w))
+    return (w, height)
+
+
+def shorten_label(name: str, max_chars: int = 18) -> str:
+    """Ellipsize long class names for axis tick labels / titles.
+
+    Never use for filenames — those should stay filesystem-safe via ``_safe_name``.
+    """
+    s = str(name)
+    if len(s) <= max_chars:
+        return s
+    return s[: max_chars - 1] + "…"
+
+
+def new_figure(n_items: int | None = None, **fig_kwargs: Any):
+    """Create a ``(fig, ax)`` pair with ``constrained_layout=True`` and sized via
+    :func:`fit_figsize`.
+
+    Prefer over ``plt.subplots(...) + tight_layout()`` — constrained_layout
+    handles colorbars, outside-bbox legends, and rotated tick labels without
+    the overlap artifacts ``tight_layout`` produces.
+    """
+    import matplotlib.pyplot as plt
+
+    figsize = fig_kwargs.pop("figsize", fit_figsize(n_items or 1))
+    return plt.subplots(figsize=figsize, constrained_layout=True, **fig_kwargs)
