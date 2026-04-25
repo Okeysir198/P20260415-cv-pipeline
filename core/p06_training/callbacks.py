@@ -1009,6 +1009,27 @@ class AugLabelGridLogger(Callback):
                         wb_cb._wandb.log({f"viz/aug_labels_{split}_{label}": wandb.Image(str(out_path))})
 
 
+class HFCallbackAdapter(Callback):
+    """Run an HF-Trainer ``TrainerCallback`` from the pytorch backend.
+
+    The HF viz callbacks in :mod:`core.p06_training.hf_callbacks` only use
+    HF's ``on_train_begin(args, state, control, **kwargs)`` signature for the
+    return-value plumbing — they read everything they need from constructor
+    args. Wrapping them lets the pytorch trainer reuse the task-aware
+    rendering helpers (``_render_gt_panel`` / ``_extract_target_for_panel`` /
+    ``_tensor_to_denorm_bgr``) instead of duplicating drawing code.
+    """
+
+    def __init__(self, hf_callback: Any) -> None:
+        self._cb = hf_callback
+
+    def on_train_start(self, trainer: Any) -> None:  # noqa: ARG002
+        try:
+            self._cb.on_train_begin(args=None, state=None, control=None)
+        except Exception as e:  # pragma: no cover
+            logger.warning("HFCallbackAdapter(%s): %s", type(self._cb).__name__, e)
+
+
 class CallbackRunner:
     """Manages and invokes a list of training callbacks.
 

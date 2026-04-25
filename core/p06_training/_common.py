@@ -39,6 +39,52 @@ def task_from_output_format(output_format: str | None) -> str:
     return "detection"
 
 
+def build_dataset_for_viz(
+    task: str,
+    split: str,
+    data_config: dict,
+    base_dir: str,
+    transforms=None,
+):
+    """Return the right p05 Dataset class for a canonical task.
+
+    Mirrors the existing dispatch in ``trainer.py::_maybe_build_test_loader``
+    so HF-backend viz callbacks can load the same per-task dataset the
+    training loop uses. Raises if ``task`` is not in the supported set
+    ({detection, classification, segmentation, keypoint}) — callers should
+    gate on that upstream.
+    """
+    if task == "detection":
+        from core.p05_data.detection_dataset import YOLOXDataset
+
+        return YOLOXDataset(
+            data_config=data_config, split=split,
+            transforms=transforms, base_dir=base_dir,
+        )
+    if task == "classification":
+        from core.p05_data.classification_dataset import ClassificationDataset
+
+        return ClassificationDataset(
+            data_config=data_config, split=split,
+            transforms=transforms, base_dir=base_dir,
+        )
+    if task == "segmentation":
+        from core.p05_data.segmentation_dataset import SegmentationDataset
+
+        return SegmentationDataset(
+            data_config=data_config, split=split,
+            transforms=transforms, base_dir=base_dir,
+        )
+    if task == "keypoint":
+        from core.p05_data.keypoint_dataset import KeypointDataset
+
+        return KeypointDataset(
+            data_config=data_config, split=split,
+            transforms=transforms, base_dir=base_dir,
+        )
+    raise ValueError(f"build_dataset_for_viz: unsupported task {task!r}")
+
+
 def yolo_targets_to_xyxy(targets: np.ndarray, w: int, h: int):
     """Denormalize YOLO ``(cls, cx, cy, w, h)`` rows → pixel xyxy + class ids.
 

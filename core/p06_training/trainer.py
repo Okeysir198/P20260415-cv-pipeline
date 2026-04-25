@@ -484,43 +484,73 @@ class DetectionTrainer:
                     )
                 )
 
-        # Data label visualization (raw images + GT, once at train start)
+        # Task-aware viz callbacks — feature parity with the HF backend.
+        # The HF callbacks in core.p06_training.hf_callbacks own the per-task
+        # rendering primitives (`_render_gt_panel`, `_extract_target_for_panel`,
+        # `_tensor_to_denorm_bgr`). Reuse them via HFCallbackAdapter so the
+        # pytorch backend produces the same flat data_preview/ filenames
+        # (02_data_labels_<split>.png, 03_aug_labels_train.png,
+        # 05_normalized_input_preview.png) for detection / classification /
+        # segmentation / keypoint.
+        from core.p06_training.callbacks import HFCallbackAdapter
+        from core.p06_training.hf_callbacks import (
+            HFAugLabelGridCallback,
+            HFDataLabelGridCallback,
+            HFNormalizedInputPreviewCallback,
+        )
+
+        task = _task_from_output(getattr(self._base_model, "output_format", None))
+        input_size = tuple(loaded_data_cfg.get("input_size",
+                                              self._model_cfg.get("input_size", (640, 640))))
+        base_dir = str(self.config_path.parent)
+
+        # Per-split subset map mirrors the HF backend (only train/val
+        # available at this point in the pytorch trainer; test viz is
+        # rendered by the post-train runner).
+        subset_map: dict[str, list[int] | None] = {}
+        for split in ("train", "val"):
+            loader = getattr(self, f"{split}_loader", None)
+            if loader is not None:
+                ds = loader.dataset
+                subset_map[split] = list(ds.indices) if hasattr(ds, "indices") else None
+
+        # 02_data_labels_<split>.png — raw images + GT per split
         data_viz_cfg = self._train_cfg.get("data_viz", {})
-        if data_viz_cfg.get("enabled", False):
-            callbacks.append(
-                DataLabelGridLogger(
-                    save_dir=save_dir,
-                    splits=data_viz_cfg.get("splits", ["train"]),
-                    data_config=loaded_data_cfg,
-                    base_dir=str(self.config_path.parent),
-                    num_samples=data_viz_cfg.get("num_samples", 16),
-                    grid_cols=data_viz_cfg.get("grid_cols", 4),
-                    thickness=data_viz_cfg.get("thickness", 2),
-                    text_scale=data_viz_cfg.get("text_scale", 0.4),
-                    dpi=data_viz_cfg.get("dpi", 120),
-                )
-            )
+        if data_viz_cfg.get("enabled", True):
+            callbacks.append(HFCallbackAdapter(HFDataLabelGridCallback(
+                save_dir=save_dir,
+                splits=data_viz_cfg.get("splits", list(subset_map.keys()) or ["train", "val"]),
+                data_config=loaded_data_cfg,
+                base_dir=base_dir,
+                task=task,
+                subsets=subset_map,
+                num_samples=data_viz_cfg.get("num_samples", 16),
+                grid_cols=data_viz_cfg.get("grid_cols", 4),
+                thickness=data_viz_cfg.get("thickness", 2),
+                text_scale=data_viz_cfg.get("text_scale", 0.4),
+                dpi=data_viz_cfg.get("dpi", 120),
+            )))
 
-        # Augmentation label visualization (once at train start)
+        # 03_aug_labels_train.png — augmented + GT (train split only)
         aug_viz_cfg = self._train_cfg.get("aug_viz", {})
-        if aug_viz_cfg.get("enabled", False):
-            callbacks.append(
-                AugLabelGridLogger(
-                    save_dir=save_dir,
-                    splits=aug_viz_cfg.get("splits", ["train"]),
-                    data_config=loaded_data_cfg,
-                    aug_config=self.config.get("augmentation", {}),
-                    base_dir=str(self.config_path.parent),
-                    num_samples=aug_viz_cfg.get("num_samples", 16),
-                    grid_cols=aug_viz_cfg.get("grid_cols", 4),
-                    thickness=aug_viz_cfg.get("thickness", 2),
-                    text_scale=aug_viz_cfg.get("text_scale", 0.4),
-                    dpi=aug_viz_cfg.get("dpi", 120),
-                )
-            )
+        if aug_viz_cfg.get("enabled", True):
+            callbacks.append(HFCallbackAdapter(HFAugLabelGridCallback(
+                save_dir=save_dir,
+                splits=aug_viz_cfg.get("splits", ["train"]),
+                data_config=loaded_data_cfg,
+                aug_config=self.config.get("augmentation", {}),
+                base_dir=base_dir,
+                input_size=input_size,
+                task=task,
+                subsets=subset_map,
+                num_samples=aug_viz_cfg.get("num_samples", 16),
+                grid_cols=aug_viz_cfg.get("grid_cols", 4),
+                thickness=aug_viz_cfg.get("thickness", 2),
+                text_scale=aug_viz_cfg.get("text_scale", 0.4),
+                dpi=aug_viz_cfg.get("dpi", 120),
+            )))
 
-        # Step-by-step transform pipeline viz (per-class row walk + final
-        # Denormalize(Normalize) inverse-check cell).
+        # 04_transform_pipeline.png — per-step CPU transform walk (task-aware)
         transform_viz_cfg = self._train_cfg.get("transform_viz", {})
         if transform_viz_cfg.get("enabled", True):
             from core.p06_training.callbacks_viz import TransformPipelineCallback
@@ -531,11 +561,31 @@ class DetectionTrainer:
                     save_dir=save_dir,
                     data_config=loaded_data_cfg,
                     training_config=self.config,
-                    base_dir=str(self.config_path.parent),
+                    base_dir=base_dir,
                     class_names=class_names_nc,
                     max_samples=transform_viz_cfg.get("max_samples", 5),
+                    task=task,
                 )
             )
+
+        # 05_normalized_input_preview.png — val-pipeline samples denormalized
+        # back to RGB with task-aware GT overlay.
+        norm_viz_cfg = self._train_cfg.get("norm_viz", {})
+        if norm_viz_cfg.get("enabled", True):
+            callbacks.append(HFCallbackAdapter(HFNormalizedInputPreviewCallback(
+                save_dir=save_dir,
+                data_config=loaded_data_cfg,
+                training_config=self.config,
+                base_dir=base_dir,
+                input_size=input_size,
+                task=task,
+                subsets=subset_map,
+                num_samples=norm_viz_cfg.get("num_samples", 16),
+                grid_cols=norm_viz_cfg.get("grid_cols", 4),
+                thickness=norm_viz_cfg.get("thickness", 2),
+                text_scale=norm_viz_cfg.get("text_scale", 0.4),
+                dpi=norm_viz_cfg.get("dpi", 120),
+            )))
 
         return CallbackRunner(callbacks)
 
@@ -839,15 +889,27 @@ class DetectionTrainer:
 
             val_ds = getattr(self.val_loader, "dataset", None) if hasattr(self, "val_loader") else None
             test_ds = getattr(test_loader, "dataset", None) if test_loader is not None else None
+            train_ds = getattr(self.train_loader, "dataset", None) if hasattr(self, "train_loader") else None
 
             training_config = self._build_pytorch_training_config(
                 data_cfg_resolved=data_cfg_resolved, test_metrics=test_metrics,
             )
+            best_map = self._safe_best_metric()
+            test_map = None
+            if isinstance(test_metrics, dict):
+                for k in ("mAP50", "map_50", "mAP@0.5", "map"):
+                    if k in test_metrics:
+                        try:
+                            test_map = float(test_metrics[k]); break
+                        except (TypeError, ValueError):
+                            pass
             run_post_train_artifacts(
                 model=self.model,
                 save_dir=save_dir,
                 val_dataset=val_ds,
                 test_dataset=test_ds,
+                train_dataset=train_ds,
+                val_loader=getattr(self, "val_loader", None),
                 task=_task_from_output(getattr(self.model, "output_format", None)),
                 class_names=class_names,
                 input_size=input_size,
@@ -858,6 +920,8 @@ class DetectionTrainer:
                 error_analysis_iou_threshold=float(post_cfg.get("error_iou_threshold", 0.5)),
                 error_analysis_max_samples=post_cfg.get("error_max_samples", 500),
                 error_analysis_hard_images_per_class=int(post_cfg.get("hard_images_per_class", 20)),
+                log_history_best_map=float(best_map) if best_map is not None else None,
+                log_history_test_map=test_map,
                 training_config=training_config,
             )
         except Exception as e:
@@ -920,6 +984,10 @@ class DetectionTrainer:
                 "total_epochs": getattr(self, "_last_epoch", None),
                 "test_metrics": test_metrics,
             },
+            # Resolved data config — consumed by post_train.run_post_train_artifacts
+            # for duplicates/leakage analysis (needs split paths).
+            "_loaded_data_cfg": data_cfg_resolved,
+            "_config_dir": str(self.config_path.parent),
         }
 
     def _maybe_build_test_loader(self, data_cfg: dict, base_dir: str):

@@ -174,6 +174,42 @@ def viz_aug_labels(data_cfg, train_cfg, base_dir, class_names, split, num_sample
 # Dataset statistics
 # ---------------------------------------------------------------------------
 
+_SPLIT_COLORS = {"train": "#4C72B0", "val": "#DD8452", "test": "#55A868"}
+
+
+def _normalize_task(task: str | None) -> str:
+    """Normalize data_cfg['task'] value to a canonical token.
+
+    Accepts ``detection``, ``classification`` / ``cls``,
+    ``semantic_segmentation`` / ``segmentation`` / ``seg``,
+    ``keypoint`` / ``pose``. Defaults to ``detection``.
+    """
+    t = (task or "detection").lower().strip()
+    if t in {"detection", "det", "object_detection"}:
+        return "detection"
+    if t in {"classification", "cls", "image_classification"}:
+        return "classification"
+    if t in {"segmentation", "seg", "semantic_segmentation", "semseg"}:
+        return "segmentation"
+    if t in {"keypoint", "pose", "keypoints", "pose_estimation"}:
+        return "keypoint"
+    return "detection"
+
+
+def _save_stats(fig, json_out: dict, out_dir: Path, dpi: int) -> None:
+    """Write 01_dataset_stats.{png,json}."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    json_path = out_dir / "01_dataset_stats.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(json_out, f, indent=2, ensure_ascii=False)
+    logger.info("Saved: %s", json_path)
+    out_path = out_dir / "01_dataset_stats.png"
+    fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight")
+    import matplotlib.pyplot as _plt
+    _plt.close(fig)
+    logger.info("Saved: %s", out_path)
+
+
 def generate_dataset_stats(
     data_cfg: dict,
     base_dir: str,
@@ -183,14 +219,38 @@ def generate_dataset_stats(
     dpi: int = 120,
     subset_indices: dict[str, list[int]] | None = None,
 ) -> None:
-    """Generate dataset_stats.png: split sizes, class distribution, bbox stats.
+    """Task-aware dataset stats → ``01_dataset_stats.{png,json}``.
+
+    Dispatches on ``data_cfg['task']``:
+      - ``detection``     → bbox tiers, class balance, labels/image
+      - ``classification``→ class balance + imbalance ratio + img-size distrib
+      - ``segmentation``  → pixel-class %, mask coverage, component counts
+      - ``keypoint``      → instances + visibility + spatial heatmap + limb lengths
+
+    When ``subset_indices[split]`` is provided, stats reflect only those indices.
+    """
+    task = _normalize_task(data_cfg.get("task"))
+    if task == "classification":
+        return _stats_classification(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices)
+    if task == "segmentation":
+        return _stats_segmentation(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices)
+    if task == "keypoint":
+        return _stats_keypoint(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices)
+    return _stats_detection(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices)
+
+
+def _stats_detection(
+    data_cfg: dict,
+    base_dir: str,
+    class_names: dict,
+    splits: list[str],
+    out_dir: Path,
+    dpi: int = 120,
+    subset_indices: dict[str, list[int]] | None = None,
+) -> None:
+    """Detection stats — split sizes, class distribution, bbox area tiers.
 
     Reads only label .txt files — no image loading — so it's fast even on large splits.
-    Output: out_dir/dataset_stats.png
-
-    When ``subset_indices[split]`` is provided, stats reflect only those indices
-    (mirrors the run's active ``data.subset.*`` filtering). Splits without an
-    entry (or ``None``) use the full split.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -240,7 +300,7 @@ def generate_dataset_stats(
 
     split_list = [s for s in splits if s in stats]
     all_class_ids = sorted({cid for s in stats.values() for cid in s["class_counts"]})
-    split_colors = {"train": "#4C72B0", "val": "#DD8452", "test": "#55A868"}
+    split_colors = _SPLIT_COLORS
 
     # Figure
     total_images = sum(stats[s]["n_images"] for s in split_list)
@@ -439,11 +499,10 @@ def generate_dataset_stats(
         bbox=dict(boxstyle="round,pad=0.5", facecolor="whitesmoke", alpha=0.85),
     )
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     # --- JSON export ---
     json_out = {
         "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "task": "detection",
         "total_images": total_images,
         "total_annotations": total_ann,
         "splits": {},
@@ -502,15 +561,694 @@ def generate_dataset_stats(
                 for cid in all_class_ids
             },
         }
-    json_path = out_dir / "01_dataset_stats.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(json_out, f, indent=2, ensure_ascii=False)
-    logger.info("Saved: %s", json_path)
+    _save_stats(fig, json_out, out_dir, dpi)
 
-    out_path = out_dir / "01_dataset_stats.png"
-    fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    logger.info("Saved: %s", out_path)
+
+# ---------------------------------------------------------------------------
+# Classification / Segmentation / Keypoint sub-stats
+# ---------------------------------------------------------------------------
+
+
+def _palette_rgb(cid: int) -> tuple:
+    return tuple(c / 255 for c in _LABEL_PALETTE[cid % len(_LABEL_PALETTE)][::-1])
+
+
+def _bar_images_per_split(ax, split_list: list[str], n_imgs: list[int]) -> None:
+    colors = [_SPLIT_COLORS.get(s, "#888") for s in split_list]
+    bars = ax.barh(split_list, n_imgs, color=colors)
+    ax.set_title("Images per Split", fontsize=11, fontweight="bold")
+    ax.set_xlabel("# images")
+    mx = max(n_imgs) if n_imgs else 1
+    for bar, n in zip(bars, n_imgs, strict=True):
+        ax.text(bar.get_width() + mx * 0.02, bar.get_y() + bar.get_height() / 2,
+                f"{n:,}", va="center", fontsize=9)
+    ax.set_xlim(0, mx * 1.25)
+
+
+def _stats_classification(
+    data_cfg: dict, base_dir: str, class_names: dict,
+    splits: list[str], out_dir: Path, dpi: int,
+    subset_indices: dict[str, list[int]] | None,
+) -> None:
+    """Classification stats: split sizes + class histogram (+ imbalance ratio)
+    + image-resolution (aspect) distribution + per-channel mean/std table.
+
+    Image pixel stats are computed on a capped random subset of each split
+    (≤ 256 imgs) to keep runtime bounded on large datasets.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.gridspec as gridspec
+    import matplotlib.pyplot as plt
+
+    from core.p05_data.classification_dataset import ClassificationDataset
+
+    stats: dict[str, dict] = {}
+    PIXEL_SAMPLE_CAP = 256
+
+    for split in splits:
+        try:
+            ds = ClassificationDataset(
+                data_config=data_cfg, split=split, transforms=None, base_dir=base_dir,
+            )
+        except Exception as e:
+            logger.warning("Stats: skipping split %s — %s", split, e)
+            continue
+        idx_list = (subset_indices or {}).get(split)
+        samples = ds.samples if idx_list is None else [ds.samples[i] for i in idx_list]
+        class_counts: dict[int, int] = {}
+        widths: list[int] = []
+        heights: list[int] = []
+        aspects: list[float] = []
+        # Random subset for pixel stats
+        rng = random.Random(0)
+        n = len(samples)
+        pick_n = min(PIXEL_SAMPLE_CAP, n)
+        pick_idx = rng.sample(range(n), pick_n) if n else []
+        ch_means = np.zeros(3, dtype=np.float64)
+        ch_stds = np.zeros(3, dtype=np.float64)
+        n_pix = 0
+        for i, (path, cid) in enumerate(samples):
+            class_counts[int(cid)] = class_counts.get(int(cid), 0) + 1
+            # Cheap header-only read avoided; fall back to cv2 imread on sampled set
+            if i in pick_idx:
+                img = cv2.imread(str(path))
+                if img is None:
+                    continue
+                h, w = img.shape[:2]
+                widths.append(w)
+                heights.append(h)
+                aspects.append(w / max(h, 1))
+                rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+                flat = rgb.reshape(-1, 3)
+                ch_means += flat.sum(axis=0)
+                ch_stds += (flat ** 2).sum(axis=0)
+                n_pix += flat.shape[0]
+        if n_pix > 0:
+            mean = ch_means / n_pix
+            var = ch_stds / n_pix - mean ** 2
+            std = np.sqrt(np.clip(var, 0, None))
+        else:
+            mean = np.zeros(3); std = np.zeros(3)
+
+        stats[split] = {
+            "n_images": n,
+            "class_counts": class_counts,
+            "widths": widths,
+            "heights": heights,
+            "aspects": aspects,
+            "pix_mean_rgb": mean.tolist(),
+            "pix_std_rgb": std.tolist(),
+            "pixel_sample_n": pick_n,
+        }
+
+    if not stats:
+        logger.warning("Stats (classification): no splits loaded, skipping")
+        return
+
+    split_list = [s for s in splits if s in stats]
+    all_class_ids = sorted({cid for s in stats.values() for cid in s["class_counts"]})
+    total_images = sum(stats[s]["n_images"] for s in split_list)
+    split_summary = "  |  ".join(f"{sp.capitalize()}: {stats[sp]['n_images']:,}" for sp in split_list)
+
+    fig = plt.figure(figsize=(18, 10))
+    fig.suptitle(
+        f"{split_summary}  |  Total: {total_images:,} images  |  Classification",
+        fontsize=12, fontweight="bold", y=0.99,
+    )
+    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.48, wspace=0.38)
+    ax0 = fig.add_subplot(gs[0, 0])
+    ax1 = fig.add_subplot(gs[0, 1])
+    ax2 = fig.add_subplot(gs[0, 2])
+    ax3 = fig.add_subplot(gs[1, 0])
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax5 = fig.add_subplot(gs[1, 2])
+
+    # [0,0] Images per split
+    _bar_images_per_split(ax0, split_list, [stats[s]["n_images"] for s in split_list])
+
+    # [0,1] Class histogram grouped by split
+    x = np.arange(len(all_class_ids))
+    width = 0.75 / max(len(split_list), 1)
+    for i, sp in enumerate(split_list):
+        counts = [stats[sp]["class_counts"].get(cid, 0) for cid in all_class_ids]
+        offset = (i - len(split_list) / 2 + 0.5) * width
+        ax1.bar(x + offset, counts, width, label=sp,
+                color=_SPLIT_COLORS.get(sp, "#888"), alpha=0.85)
+    ax1.set_title("Images per Class", fontsize=11, fontweight="bold")
+    ax1.set_xlabel("class")
+    ax1.set_ylabel("# images")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels([class_names.get(cid, str(cid)) for cid in all_class_ids], rotation=20)
+    ax1.legend(fontsize=8, loc="upper right", framealpha=0.9)
+    y_max = ax1.get_ylim()[1] or 1
+    ax1.set_ylim(top=y_max * 1.18)
+
+    # Imbalance ratios (text annotation on class histogram)
+    imbalance_by_split = {}
+    for sp in split_list:
+        cc = list(stats[sp]["class_counts"].values())
+        if cc:
+            imbalance_by_split[sp] = (max(cc) / max(min(cc), 1))
+    if imbalance_by_split:
+        ann = " | ".join(f"{sp}: {r:.1f}×" for sp, r in imbalance_by_split.items())
+        ax1.text(0.02, 0.97, f"Imbalance (max/min): {ann}",
+                 transform=ax1.transAxes, fontsize=8, va="top",
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor="whitesmoke", alpha=0.9))
+
+    # [0,2] Class balance %
+    for i, sp in enumerate(split_list):
+        total = sum(stats[sp]["class_counts"].values()) or 1
+        left = 0.0
+        for cid in all_class_ids:
+            pct = stats[sp]["class_counts"].get(cid, 0) / total * 100
+            ax2.barh(sp, pct, left=left, color=_palette_rgb(cid),
+                     label=class_names.get(cid, str(cid)) if i == 0 else "")
+            if pct > 4:
+                ax2.text(left + pct / 2, i, f"{pct:.1f}%",
+                         ha="center", va="center", fontsize=8, color="white", fontweight="bold")
+            left += pct
+    ax2.set_title("Class Balance %", fontsize=11, fontweight="bold")
+    ax2.set_xlabel("% of images")
+    ax2.set_xlim(0, 100)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=_palette_rgb(cid)) for cid in all_class_ids]
+    ax2.legend(handles, [class_names.get(cid, str(cid)) for cid in all_class_ids],
+               fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0), framealpha=1.0)
+
+    # [1,0] Aspect-ratio histogram
+    all_aspects = [a for sp in split_list for a in stats[sp]["aspects"]]
+    if all_aspects:
+        bins = np.linspace(max(min(all_aspects) * 0.95, 0.1),
+                           max(all_aspects) * 1.05, 30)
+        for sp in split_list:
+            a = stats[sp]["aspects"]
+            if a:
+                ax3.hist(a, bins=bins, alpha=0.45, label=sp,
+                         color=_SPLIT_COLORS.get(sp, "#888"))
+        ax3.axvline(1.0, color="#555", linestyle="--", linewidth=0.8, alpha=0.7)
+        ax3.set_title("Image Aspect Ratio (W/H)", fontsize=11, fontweight="bold")
+        ax3.set_xlabel("aspect ratio  [sampled]")
+        ax3.set_ylabel("# images")
+        ax3.legend(fontsize=8, framealpha=0.9)
+
+    # [1,1] Resolution scatter (W vs H), sampled
+    for sp in split_list:
+        w = stats[sp]["widths"]; h = stats[sp]["heights"]
+        if w and h:
+            ax4.scatter(w, h, s=6, alpha=0.35, label=sp,
+                        color=_SPLIT_COLORS.get(sp, "#888"))
+    ax4.set_title("Resolution (sampled)", fontsize=11, fontweight="bold")
+    ax4.set_xlabel("width (px)")
+    ax4.set_ylabel("height (px)")
+    if any(stats[s]["widths"] for s in split_list):
+        ax4.legend(fontsize=8, framealpha=0.9)
+
+    # [1,2] Per-channel mean/std table
+    ax5.axis("off")
+    lines = ["Pixel statistics (RGB, [0,1])\n"]
+    for sp in split_list:
+        m = stats[sp]["pix_mean_rgb"]; s = stats[sp]["pix_std_rgb"]
+        n_s = stats[sp]["pixel_sample_n"]
+        lines.append(f"[{sp}]  (n={n_s} imgs sampled)")
+        lines.append(f"  mean  R={m[0]:.3f}  G={m[1]:.3f}  B={m[2]:.3f}")
+        lines.append(f"  std   R={s[0]:.3f}  G={s[1]:.3f}  B={s[2]:.3f}")
+        lines.append("")
+    lines.append("Class counts")
+    for sp in split_list:
+        lines.append(f"[{sp}]")
+        total = sum(stats[sp]["class_counts"].values()) or 1
+        for cid in all_class_ids:
+            cnt = stats[sp]["class_counts"].get(cid, 0)
+            name = class_names.get(cid, str(cid))
+            lines.append(f"  {name:<14} {cnt:>6,} ({cnt / total * 100:5.1f}%)")
+        lines.append("")
+    ax5.text(0.02, 0.97, "\n".join(lines), transform=ax5.transAxes,
+             fontsize=8.5, va="top", ha="left", family="monospace",
+             bbox=dict(boxstyle="round,pad=0.5", facecolor="whitesmoke", alpha=0.85))
+
+    json_out = {
+        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "task": "classification",
+        "total_images": total_images,
+        "splits": {
+            sp: {
+                "n_images": stats[sp]["n_images"],
+                "class_counts": {
+                    class_names.get(cid, str(cid)): stats[sp]["class_counts"].get(cid, 0)
+                    for cid in all_class_ids
+                },
+                "imbalance_ratio_max_over_min": round(imbalance_by_split.get(sp, 0.0), 3),
+                "pixel_mean_rgb": [round(v, 5) for v in stats[sp]["pix_mean_rgb"]],
+                "pixel_std_rgb": [round(v, 5) for v in stats[sp]["pix_std_rgb"]],
+                "pixel_sample_n": stats[sp]["pixel_sample_n"],
+                "resolution": {
+                    "width": {
+                        "min": int(min(stats[sp]["widths"])) if stats[sp]["widths"] else 0,
+                        "max": int(max(stats[sp]["widths"])) if stats[sp]["widths"] else 0,
+                        "mean": round(float(np.mean(stats[sp]["widths"])), 1) if stats[sp]["widths"] else 0.0,
+                    },
+                    "height": {
+                        "min": int(min(stats[sp]["heights"])) if stats[sp]["heights"] else 0,
+                        "max": int(max(stats[sp]["heights"])) if stats[sp]["heights"] else 0,
+                        "mean": round(float(np.mean(stats[sp]["heights"])), 1) if stats[sp]["heights"] else 0.0,
+                    },
+                    "aspect": {
+                        "mean": round(float(np.mean(stats[sp]["aspects"])), 3) if stats[sp]["aspects"] else 0.0,
+                        "median": round(float(np.median(stats[sp]["aspects"])), 3) if stats[sp]["aspects"] else 0.0,
+                    },
+                },
+            }
+            for sp in split_list
+        },
+    }
+    _save_stats(fig, json_out, out_dir, dpi)
+
+
+def _stats_segmentation(
+    data_cfg: dict, base_dir: str, class_names: dict,
+    splits: list[str], out_dir: Path, dpi: int,
+    subset_indices: dict[str, list[int]] | None,
+) -> None:
+    """Segmentation stats: pixel-class histogram + mask coverage + component counts.
+
+    Operates on capped sample of masks per split to keep runtime bounded.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.gridspec as gridspec
+    import matplotlib.pyplot as plt
+
+    from core.p05_data.segmentation_dataset import SegmentationDataset
+
+    MASK_SAMPLE_CAP = 400
+    num_classes = int(data_cfg.get("num_classes", 0))
+
+    stats: dict[str, dict] = {}
+    for split in splits:
+        try:
+            ds = SegmentationDataset(
+                data_config=data_cfg, split=split, transforms=None, base_dir=base_dir,
+            )
+        except Exception as e:
+            logger.warning("Stats: skipping split %s — %s", split, e)
+            continue
+        idx_list = (subset_indices or {}).get(split)
+        img_paths = ds.img_paths if idx_list is None else [ds.img_paths[i] for i in idx_list]
+        n = len(img_paths)
+        rng = random.Random(0)
+        pick_n = min(MASK_SAMPLE_CAP, n)
+        pick_idx = rng.sample(range(n), pick_n) if n else []
+
+        pixel_counts = np.zeros(max(num_classes, 1), dtype=np.int64)
+        coverage: list[float] = []  # non-bg % per image
+        comp_counts_per_class: dict[int, list[int]] = {}
+        comp_areas_per_class: dict[int, list[int]] = {}
+
+        for i in pick_idx:
+            img_path = img_paths[i]
+            mask_path = ds.mask_dir / f"{img_path.stem}.png"
+            if not mask_path.exists():
+                continue
+            m = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+            if m is None:
+                continue
+            bc = np.bincount(m.ravel(), minlength=pixel_counts.shape[0])
+            # Extend if mask has id beyond declared num_classes
+            if bc.shape[0] > pixel_counts.shape[0]:
+                extra = np.zeros(bc.shape[0] - pixel_counts.shape[0], dtype=np.int64)
+                pixel_counts = np.concatenate([pixel_counts, extra])
+            pixel_counts[: bc.shape[0]] += bc
+            total_px = m.size
+            non_bg = int((m != 0).sum())
+            coverage.append(non_bg / total_px * 100.0)
+
+            # Connected components per class (cheap loop over unique non-bg ids)
+            uniq = np.unique(m)
+            for cid in uniq:
+                cid = int(cid)
+                if cid == 0:
+                    continue
+                binm = (m == cid).astype(np.uint8)
+                nlab, labels, stats_cc, _ = cv2.connectedComponentsWithStats(binm, connectivity=8)
+                # stats_cc[0] is background of the binary map
+                n_comp = max(nlab - 1, 0)
+                comp_counts_per_class.setdefault(cid, []).append(n_comp)
+                if n_comp > 0:
+                    areas = stats_cc[1:, cv2.CC_STAT_AREA].tolist()
+                    comp_areas_per_class.setdefault(cid, []).extend(areas)
+
+        stats[split] = {
+            "n_images": n,
+            "sample_n": pick_n,
+            "pixel_counts": pixel_counts.tolist(),
+            "coverage_pct": coverage,
+            "comp_counts_per_class": comp_counts_per_class,
+            "comp_areas_per_class": comp_areas_per_class,
+        }
+
+    if not stats:
+        logger.warning("Stats (segmentation): no splits loaded, skipping")
+        return
+
+    split_list = [s for s in splits if s in stats]
+    # Build authoritative class-id list from both declared names and observed pixels
+    observed_cids = set()
+    for s in stats.values():
+        for i, c in enumerate(s["pixel_counts"]):
+            if c > 0:
+                observed_cids.add(i)
+    all_class_ids = sorted(set(class_names.keys()) | observed_cids)
+    total_images = sum(stats[s]["n_images"] for s in split_list)
+    split_summary = "  |  ".join(f"{sp.capitalize()}: {stats[sp]['n_images']:,}" for sp in split_list)
+
+    fig = plt.figure(figsize=(20, 11))
+    fig.suptitle(
+        f"{split_summary}  |  Total: {total_images:,} images  |  Semantic Segmentation",
+        fontsize=12, fontweight="bold", y=0.99,
+    )
+    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.55, wspace=0.38)
+    ax0 = fig.add_subplot(gs[0, 0])
+    ax1 = fig.add_subplot(gs[0, 1:])
+    ax2 = fig.add_subplot(gs[1, 0])
+    ax3 = fig.add_subplot(gs[1, 1])
+    ax4 = fig.add_subplot(gs[1, 2])
+
+    # [0,0] Images per split
+    _bar_images_per_split(ax0, split_list, [stats[s]["n_images"] for s in split_list])
+
+    # [0,1:] Pixel-class histogram per split (log y, includes bg class 0)
+    x = np.arange(len(all_class_ids))
+    width = 0.75 / max(len(split_list), 1)
+    for i, sp in enumerate(split_list):
+        pc = stats[sp]["pixel_counts"]
+        vals = [pc[cid] if cid < len(pc) else 0 for cid in all_class_ids]
+        offset = (i - len(split_list) / 2 + 0.5) * width
+        ax1.bar(x + offset, vals, width, label=sp,
+                color=_SPLIT_COLORS.get(sp, "#888"), alpha=0.85)
+    ax1.set_yscale("log")
+    ax1.set_title("Pixel Count per Class (log y)", fontsize=11, fontweight="bold")
+    ax1.set_xlabel("class")
+    ax1.set_ylabel("# pixels (sampled)")
+    ax1.set_xticks(x)
+    labels_x = [class_names.get(cid, str(cid)) for cid in all_class_ids]
+    ax1.set_xticklabels(labels_x, rotation=60, ha="right", fontsize=7)
+    ax1.legend(fontsize=8, loc="upper right", framealpha=0.9)
+
+    # [1,0] Mask coverage (non-bg %) distribution per split
+    for sp in split_list:
+        cov = stats[sp]["coverage_pct"]
+        if cov:
+            ax2.hist(cov, bins=30, alpha=0.45, label=sp,
+                     color=_SPLIT_COLORS.get(sp, "#888"))
+    ax2.set_title("Non-Background Coverage %", fontsize=11, fontweight="bold")
+    ax2.set_xlabel("% pixels labeled (non-bg)")
+    ax2.set_ylabel("# images")
+    ax2.legend(fontsize=8, framealpha=0.9)
+
+    # [1,1] Median components/image per class (bar)
+    # Aggregate across splits (weighted by split size)
+    agg_counts: dict[int, list[int]] = {}
+    for sp in split_list:
+        for cid, lst in stats[sp]["comp_counts_per_class"].items():
+            agg_counts.setdefault(cid, []).extend(lst)
+    if agg_counts:
+        cids_sorted = sorted(agg_counts)[:30]  # cap for readability
+        medians = [float(np.median(agg_counts[c])) for c in cids_sorted]
+        colors = [_palette_rgb(c) for c in cids_sorted]
+        ax3.bar(range(len(cids_sorted)), medians, color=colors)
+        ax3.set_xticks(range(len(cids_sorted)))
+        ax3.set_xticklabels([class_names.get(c, str(c)) for c in cids_sorted],
+                            rotation=60, ha="right", fontsize=7)
+        ax3.set_title("Median # Components / Image", fontsize=11, fontweight="bold")
+        ax3.set_ylabel("median components")
+
+    # [1,2] Median component area per class (log y)
+    agg_areas: dict[int, list[int]] = {}
+    for sp in split_list:
+        for cid, lst in stats[sp]["comp_areas_per_class"].items():
+            agg_areas.setdefault(cid, []).extend(lst)
+    if agg_areas:
+        cids_sorted = sorted(agg_areas)[:30]
+        medians = [float(np.median(agg_areas[c])) for c in cids_sorted]
+        colors = [_palette_rgb(c) for c in cids_sorted]
+        ax4.bar(range(len(cids_sorted)), medians, color=colors)
+        ax4.set_yscale("log")
+        ax4.set_xticks(range(len(cids_sorted)))
+        ax4.set_xticklabels([class_names.get(c, str(c)) for c in cids_sorted],
+                            rotation=60, ha="right", fontsize=7)
+        ax4.set_title("Median Component Area (px, log)", fontsize=11, fontweight="bold")
+        ax4.set_ylabel("pixels")
+
+    # JSON export
+    json_out = {
+        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "task": "segmentation",
+        "total_images": total_images,
+        "splits": {
+            sp: {
+                "n_images": stats[sp]["n_images"],
+                "sample_n": stats[sp]["sample_n"],
+                "pixel_counts_by_class": {
+                    class_names.get(cid, str(cid)):
+                        int(stats[sp]["pixel_counts"][cid])
+                        if cid < len(stats[sp]["pixel_counts"]) else 0
+                    for cid in all_class_ids
+                },
+                "coverage_pct": {
+                    "mean": round(float(np.mean(stats[sp]["coverage_pct"])), 3)
+                        if stats[sp]["coverage_pct"] else 0.0,
+                    "median": round(float(np.median(stats[sp]["coverage_pct"])), 3)
+                        if stats[sp]["coverage_pct"] else 0.0,
+                    "p25": round(float(np.percentile(stats[sp]["coverage_pct"], 25)), 3)
+                        if stats[sp]["coverage_pct"] else 0.0,
+                    "p75": round(float(np.percentile(stats[sp]["coverage_pct"], 75)), 3)
+                        if stats[sp]["coverage_pct"] else 0.0,
+                },
+                "components_per_class": {
+                    class_names.get(cid, str(cid)): {
+                        "median_count": round(
+                            float(np.median(stats[sp]["comp_counts_per_class"][cid])), 2
+                        ) if cid in stats[sp]["comp_counts_per_class"] else 0.0,
+                        "median_area_px": round(
+                            float(np.median(stats[sp]["comp_areas_per_class"][cid])), 2
+                        ) if cid in stats[sp]["comp_areas_per_class"] else 0.0,
+                    }
+                    for cid in all_class_ids
+                },
+            }
+            for sp in split_list
+        },
+    }
+    _save_stats(fig, json_out, out_dir, dpi)
+
+
+def _stats_keypoint(
+    data_cfg: dict, base_dir: str, class_names: dict,
+    splits: list[str], out_dir: Path, dpi: int,
+    subset_indices: dict[str, list[int]] | None,
+) -> None:
+    """Keypoint stats: images/split, instances/split, per-joint visibility rate,
+    spatial heatmap (normalized to bbox), inter-joint distance histogram.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.gridspec as gridspec
+    import matplotlib.pyplot as plt
+
+    from core.p05_data.keypoint_dataset import KeypointDataset
+
+    num_keypoints = int(data_cfg.get("num_keypoints", 0))
+    skeleton = data_cfg.get("skeleton") or []  # list of [a, b] joint-index pairs
+
+    stats: dict[str, dict] = {}
+    for split in splits:
+        try:
+            ds = KeypointDataset(
+                data_config=data_cfg, split=split, transforms=None, base_dir=base_dir,
+            )
+        except Exception as e:
+            logger.warning("Stats: skipping split %s — %s", split, e)
+            continue
+        idx_list = (subset_indices or {}).get(split)
+        img_paths = ds.img_paths if idx_list is None else [ds.img_paths[i] for i in idx_list]
+
+        n_instances = 0
+        vis_counts = np.zeros(num_keypoints, dtype=np.int64)   # visibility > 0
+        labeled_counts = np.zeros(num_keypoints, dtype=np.int64)  # total instances
+        # Spatial heatmap buffer (bbox-normalized keypoint locations)
+        HEAT = 64
+        heat = np.zeros((HEAT, HEAT), dtype=np.float64)
+        edge_lengths: dict[tuple[int, int], list[float]] = {}
+
+        for img_path in img_paths:
+            lbl = ds._load_label(img_path)
+            boxes = lbl["boxes"]           # (N, 5) normalized
+            kpts = lbl["keypoints"]        # (N, K, 3) normalized image coords
+            if len(boxes) == 0:
+                continue
+            n_instances += len(boxes)
+            labeled_counts += len(boxes)
+            vis = (kpts[:, :, 2] > 0)
+            vis_counts += vis.sum(axis=0).astype(np.int64)
+
+            # Bbox-normalize keypoint positions (0..1 inside bbox)
+            for i in range(len(boxes)):
+                cx, cy, bw, bh = boxes[i, 1], boxes[i, 2], boxes[i, 3], boxes[i, 4]
+                if bw <= 0 or bh <= 0:
+                    continue
+                x0, y0 = cx - bw / 2, cy - bh / 2
+                labeled_mask = kpts[i, :, 2] > 0
+                if labeled_mask.any():
+                    kx = (kpts[i, labeled_mask, 0] - x0) / bw
+                    ky = (kpts[i, labeled_mask, 1] - y0) / bh
+                    kx = np.clip(kx, 0, 0.999)
+                    ky = np.clip(ky, 0, 0.999)
+                    hx = (kx * HEAT).astype(int)
+                    hy = (ky * HEAT).astype(int)
+                    np.add.at(heat, (hy, hx), 1.0)
+                # Skeleton edge lengths (in normalized image coords)
+                for (a, b) in skeleton:
+                    if a < num_keypoints and b < num_keypoints:
+                        if kpts[i, a, 2] > 0 and kpts[i, b, 2] > 0:
+                            dx = kpts[i, a, 0] - kpts[i, b, 0]
+                            dy = kpts[i, a, 1] - kpts[i, b, 1]
+                            edge_lengths.setdefault((int(a), int(b)), []).append(
+                                float(np.sqrt(dx * dx + dy * dy))
+                            )
+
+        stats[split] = {
+            "n_images": len(img_paths),
+            "n_instances": n_instances,
+            "vis_counts": vis_counts.tolist(),
+            "labeled_counts": labeled_counts.tolist(),
+            "heat": heat,
+            "edge_lengths": edge_lengths,
+        }
+
+    if not stats:
+        logger.warning("Stats (keypoint): no splits loaded, skipping")
+        return
+
+    split_list = [s for s in splits if s in stats]
+    total_images = sum(stats[s]["n_images"] for s in split_list)
+    total_inst = sum(stats[s]["n_instances"] for s in split_list)
+    split_summary = "  |  ".join(
+        f"{sp.capitalize()}: {stats[sp]['n_images']:,} imgs / {stats[sp]['n_instances']:,} inst"
+        for sp in split_list
+    )
+
+    fig = plt.figure(figsize=(20, 11))
+    fig.suptitle(
+        f"{split_summary}  |  Total: {total_images:,} images / {total_inst:,} instances  |  Keypoint",
+        fontsize=12, fontweight="bold", y=0.99,
+    )
+    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.55, wspace=0.38)
+    ax0 = fig.add_subplot(gs[0, 0])
+    ax1 = fig.add_subplot(gs[0, 1])
+    ax2 = fig.add_subplot(gs[0, 2])
+    ax3 = fig.add_subplot(gs[1, 0])
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax5 = fig.add_subplot(gs[1, 2])
+
+    # [0,0] Images per split
+    _bar_images_per_split(ax0, split_list, [stats[s]["n_images"] for s in split_list])
+
+    # [0,1] Instances per split
+    _bar_images_per_split(ax1, split_list, [stats[s]["n_instances"] for s in split_list])
+    ax1.set_title("Instances per Split", fontsize=11, fontweight="bold")
+    ax1.set_xlabel("# instances")
+
+    # [0,2] Per-joint visibility rate
+    # Aggregate across splits
+    total_vis = np.zeros(num_keypoints, dtype=np.int64)
+    total_lab = np.zeros(num_keypoints, dtype=np.int64)
+    for sp in split_list:
+        total_vis += np.asarray(stats[sp]["vis_counts"], dtype=np.int64)
+        total_lab += np.asarray(stats[sp]["labeled_counts"], dtype=np.int64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rate = np.where(total_lab > 0, total_vis / np.maximum(total_lab, 1), 0.0)
+    ax2.bar(range(num_keypoints), rate * 100.0, color="#4C72B0")
+    ax2.set_ylim(0, 105)
+    ax2.set_title("Per-Joint Visibility Rate", fontsize=11, fontweight="bold")
+    ax2.set_xlabel("joint index")
+    ax2.set_ylabel("% instances w/ visible")
+
+    # [1,0] Spatial heatmap (bbox-normalized, aggregated across splits)
+    heat = np.zeros_like(next(iter(stats.values()))["heat"])
+    for sp in split_list:
+        heat += stats[sp]["heat"]
+    im = ax3.imshow(heat, origin="upper", cmap="magma", aspect="equal")
+    ax3.set_title("Keypoint Spatial Heatmap\n(normalized to bbox)",
+                  fontsize=11, fontweight="bold")
+    ax3.set_xticks([]); ax3.set_yticks([])
+    fig.colorbar(im, ax=ax3, fraction=0.046, pad=0.04)
+
+    # [1,1] Skeleton-edge length histogram (normalized image units)
+    agg_edges: dict[tuple[int, int], list[float]] = {}
+    for sp in split_list:
+        for k, v in stats[sp]["edge_lengths"].items():
+            agg_edges.setdefault(k, []).extend(v)
+    if agg_edges:
+        # Flat histogram of all edges (color-coded first 8 edges separately)
+        top_edges = list(agg_edges.items())[:8]
+        for (a, b), lens in top_edges:
+            ax4.hist(lens, bins=30, alpha=0.35, label=f"{a}-{b}")
+        ax4.set_title("Skeleton Edge Lengths (top 8)", fontsize=11, fontweight="bold")
+        ax4.set_xlabel("normalized length")
+        ax4.set_ylabel("count")
+        ax4.legend(fontsize=7, framealpha=0.9)
+    else:
+        ax4.axis("off")
+        ax4.text(0.5, 0.5, "(no skeleton: set data.skeleton)",
+                 ha="center", va="center", transform=ax4.transAxes, fontsize=10, color="#888")
+
+    # [1,2] Summary text panel
+    ax5.axis("off")
+    lines = ["Key Statistics (keypoint)\n"]
+    for sp in split_list:
+        s = stats[sp]
+        lines.append(f"[{sp}]")
+        lines.append(f"  images        {s['n_images']:>7,}")
+        lines.append(f"  instances     {s['n_instances']:>7,}")
+        if s["n_instances"]:
+            mean_vis = np.mean(np.asarray(s["vis_counts"]) /
+                               max(s["n_instances"], 1)) * 100
+            lines.append(f"  mean vis rate  {mean_vis:>6.1f}%")
+        lines.append("")
+    ax5.text(0.02, 0.97, "\n".join(lines), transform=ax5.transAxes,
+             fontsize=9, va="top", ha="left", family="monospace",
+             bbox=dict(boxstyle="round,pad=0.5", facecolor="whitesmoke", alpha=0.85))
+
+    json_out = {
+        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "task": "keypoint",
+        "num_keypoints": num_keypoints,
+        "total_images": total_images,
+        "total_instances": total_inst,
+        "splits": {
+            sp: {
+                "n_images": stats[sp]["n_images"],
+                "n_instances": stats[sp]["n_instances"],
+                "vis_counts": stats[sp]["vis_counts"],
+                "labeled_counts": stats[sp]["labeled_counts"],
+                "visibility_rate_per_joint": [
+                    round(v / max(l, 1), 4)
+                    for v, l in zip(stats[sp]["vis_counts"],
+                                    stats[sp]["labeled_counts"], strict=True)
+                ],
+                "skeleton_edge_lengths": {
+                    f"{a}-{b}": {
+                        "mean": round(float(np.mean(v)), 4),
+                        "median": round(float(np.median(v)), 4),
+                        "n": len(v),
+                    }
+                    for (a, b), v in stats[sp]["edge_lengths"].items()
+                },
+            }
+            for sp in split_list
+        },
+    }
+    _save_stats(fig, json_out, out_dir, dpi)
 
 
 _STATS_PNG = "01_dataset_stats.png"

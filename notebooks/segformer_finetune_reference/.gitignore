@@ -1,0 +1,9 @@
+# Generated artefacts — regeneratable from the scripts in this dir.
+# `runs/` is also covered by the repo-root .gitignore; kept here so this
+# folder is self-documenting about which outputs are intentionally untracked.
+runs/
+inference/
+.ipynb_checkpoints/
+
+# uv cache (local, not needed on shared clones)
+.venv*/

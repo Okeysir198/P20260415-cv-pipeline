@@ -77,22 +77,36 @@ SIZE_TIER_LABELS = {
 }
 
 # Logical name → numbered filename. Callers look up paths here.
+# Unified 01..20 flat map — reading order matches practitioner debugging order:
+# headline → val balance → split drift → label trust → split leakage →
+# capacity regime → per-class → confusion → calibration → failure decomposition
+# → slices → instances → galleries → robustness → task-specific deep dives.
 CHART_FILENAMES: dict[str, str] = {
     "overview":                  "01_overview.png",
     "data_distribution":         "02_data_distribution.png",
-    "per_class_performance":     "03_per_class_performance.png",
-    "confusion_matrix":          "04_confusion_matrix.png",
-    "top_confused_pairs":        "04_top_confused_pairs.png",
-    "confidence_calibration":    "05_confidence_calibration.png",
-    "failure_mode_contribution": "06_failure_mode_contribution.png",
-    "failure_by_attribute":      "07_failure_by_attribute.png",
-    "hardest_images":            "08_hardest_images.png",
-    "failure_mode_examples":     "09_failure_mode_examples",
-    "recoverable_map_vs_iou":    "10_recoverable_map_vs_iou.png",
-    "confidence_attribution":    "11_confidence_attribution.png",
-    "boxes_per_image":           "12_boxes_per_image.png",
-    "bbox_aspect_ratio":         "13_bbox_aspect_ratio.png",
-    "size_recall":               "14_size_recall.png",
+    "distribution_mismatch":     "03_distribution_mismatch.png",
+    "label_quality":             "04_label_quality.png",
+    "label_quality_gallery":     "04_label_quality_gallery.png",
+    "duplicates_leakage":        "05_duplicates_leakage.png",
+    "learning_ability":          "06_learning_ability.png",
+    "per_class_performance":     "07_per_class_performance.png",
+    "confusion_matrix":          "08_confusion_matrix.png",
+    "top_confused_pairs":        "08_top_confused_pairs.png",
+    "confidence_calibration":    "09_confidence_calibration.png",
+    "confidence_vs_error":       "09_confidence_vs_error.png",
+    "failure_mode_contribution": "10_failure_mode_contribution.png",
+    "failure_by_attribute":      "11_failure_by_attribute.png",
+    "hardest_images":            "12_hardest_images.png",
+    "failure_mode_examples":     "13_failure_mode_examples",
+    "robustness_sweep":          "14_robustness_sweep.png",
+    # Detection-specific (shifted from old 10..14 → 15..19).
+    "recoverable_map_vs_iou":    "15_recoverable_map_vs_iou.png",
+    "confidence_attribution":    "16_confidence_attribution.png",
+    "boxes_per_image":           "17_boxes_per_image.png",
+    "bbox_aspect_ratio":         "18_bbox_aspect_ratio.png",
+    "size_recall":               "19_size_recall.png",
+    # Segmentation-specific (shifted from old 15 → 20).
+    "pixel_confusion_matrix":    "20_pixel_confusion_matrix.png",
 }
 
 _LARGE_CLASS_THRESHOLD = 20  # confusion-matrix → top-K swap
@@ -235,6 +249,40 @@ def _plot_per_class_bars(
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.grid(axis="y", alpha=0.3)
+    return _savefig(fig, path)
+
+
+def _plot_pixel_confusion_matrix(
+    matrix: np.ndarray, class_names: dict[int, str], path: Path,
+) -> Path:
+    """Render a row-normalized pixel confusion matrix (seg).
+
+    Cell ``(i, j)`` shows the fraction of pixels in GT class ``i`` that
+    were predicted as class ``j`` — diagonal is recall, off-diagonal is
+    confusion.
+    """
+    if matrix.size == 0:
+        # Write a placeholder so chart_refs stays consistent.
+        fig, ax = plt.subplots(figsize=(4, 3))
+        ax.text(0.5, 0.5, "No pixel data", ha="center", va="center")
+        ax.axis("off")
+        return _savefig(fig, path)
+    cm = matrix.astype(np.float64)
+    row_sums = cm.sum(axis=1, keepdims=True) + 1e-9
+    cm_norm = cm / row_sums
+    n = cm.shape[0]
+    labels = [shorten_label(class_names.get(i, str(i))) for i in range(n)]
+    fig, ax = plt.subplots(figsize=(max(6, 0.35 * n + 2),
+                                    max(5, 0.35 * n + 2)))
+    im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1, aspect="auto")
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7)
+    ax.set_yticklabels(labels, fontsize=7)
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("Ground truth")
+    ax.set_title("Pixel confusion matrix (row-normalised)")
+    fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02, label="P(pred | gt)")
     return _savefig(fig, path)
 
 
@@ -457,21 +505,55 @@ def _render_gallery_side_by_side(
 def _write_json_md(
     out_dir: Path, summary: dict, *,
     title: str, header: list[str], chart_refs: list[str],
+    chart_metrics: dict[str, dict] | None = None,
 ) -> tuple[Path, Path]:
+    """Write ``summary.json`` and ``summary.md``.
+
+    ``chart_refs`` is the ordered list of chart filenames to render inline.
+    Each is enriched with a description + next-step suggestion looked up from
+    ``core/p08_evaluation/chart_annotations.CHART_META`` (keyed by filename
+    stem). ``chart_metrics`` — optional ``{stem: metrics_dict}`` — drives the
+    "Current signal" line and powers rule-based next-step selection. Missing
+    entries fall back to description-only.
+    """
+    from core.p08_evaluation.chart_annotations import (
+        CHART_META,
+        evaluate_next_step,
+        render_signal,
+    )
+
     json_path = out_dir / "summary.json"
     md_path = out_dir / "summary.md"
     json_path.parent.mkdir(parents=True, exist_ok=True)
     with open(json_path, "w") as f:
         json.dump(summary, f, indent=2, sort_keys=True, default=str)
 
+    chart_metrics = chart_metrics or {}
     lines = [f"# {title}", "", *header, ""]
     if chart_refs:
+        # Render in numeric filename order (01..20) so summary.md reads top-to-bottom
+        # matching the unified debugging sequence regardless of caller list order.
+        chart_refs = sorted(chart_refs)
         lines.append("## Charts")
         lines.append("")
         for ref in chart_refs:
-            lines.append(f"- `{ref}`")
-            lines.append(f"  ![{ref}]({ref})")
-        lines.append("")
+            stem = ref.rsplit(".", 1)[0] if ref.endswith(".png") else ref
+            meta = CHART_META.get(stem)
+            heading = meta.title if meta else stem
+            lines.append(f"### {heading}")
+            lines.append("")
+            lines.append(f"![{ref}]({ref})")
+            lines.append("")
+            if meta:
+                lines.append(f"**What this shows.** {meta.description}")
+                lines.append("")
+                signal = render_signal(meta, chart_metrics.get(stem))
+                if signal:
+                    lines.append(f"**Current signal.** {signal}")
+                    lines.append("")
+                advice = evaluate_next_step(chart_metrics.get(stem), meta)
+                lines.append(f"**Suggested next step.** {advice}")
+                lines.append("")
     for section, payload in summary.items():
         if section == "task":
             continue
@@ -523,7 +605,7 @@ def run_error_analysis(
     style = style or VizStyle()
 
     if task == "detection":
-        return _analyze_detection(
+        result = _analyze_detection(
             model=model, dataset=dataset, output_dir=output_dir,
             class_names=class_names, input_size=input_size, style=style,
             conf_threshold=conf_threshold, iou_threshold=iou_threshold,
@@ -531,29 +613,99 @@ def run_error_analysis(
             hard_images_per_class=hard_images_per_class,
             training_config=training_config,
         )
-    if task == "classification":
-        return _analyze_classification(
+    elif task == "classification":
+        result = _analyze_classification(
             model=model, dataset=dataset, output_dir=output_dir,
             class_names=class_names, input_size=input_size, style=style,
             max_samples=max_samples,
             hard_images_per_class=hard_images_per_class,
         )
-    if task == "segmentation":
-        return _analyze_segmentation(
+    elif task == "segmentation":
+        result = _analyze_segmentation(
             model=model, dataset=dataset, output_dir=output_dir,
             class_names=class_names, input_size=input_size, style=style,
             max_samples=max_samples,
             hard_images_per_class=hard_images_per_class,
         )
-    if task == "keypoint":
-        return _analyze_keypoint(
+    elif task == "keypoint":
+        result = _analyze_keypoint(
             model=model, dataset=dataset, output_dir=output_dir,
             class_names=class_names, input_size=input_size, style=style,
             conf_threshold=conf_threshold,
             max_samples=max_samples,
             hard_images_per_class=hard_images_per_class,
+            training_config=training_config,
         )
-    raise ValueError(f"Unknown task for error analysis: {task!r}")
+    else:
+        raise ValueError(f"Unknown task for error analysis: {task!r}")
+
+    # Phase 2.5a — Label Quality (Cleanlab-style confident-disagreement).
+    # Wrapped so a label-quality failure never breaks the main analysis.
+    try:
+        from core.p08_evaluation.label_quality import analyze_label_quality
+        lq = analyze_label_quality(
+            model=model, dataset=dataset, output_dir=output_dir,
+            task=task, class_names=class_names, input_size=input_size,
+            style=style, max_samples=max_samples,
+        )
+        if lq:
+            result.setdefault("label_quality", lq.get("artifacts", {}))
+            # Append a Label-Quality section to summary.md if it exists.
+            md_path = result.get("summary_md")
+            if md_path and Path(md_path).exists():
+                _append_label_quality_section(
+                    Path(md_path), output_dir, lq.get("artifacts", {}),
+                    lq.get("chart_metrics", {}),
+                )
+    except Exception as e:  # pragma: no cover
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "label_quality analyzer skipped: %s", e, exc_info=True,
+        )
+
+    return result
+
+
+def _append_label_quality_section(
+    summary_md: Path, output_dir: Path, artifacts: dict, chart_metrics: dict,
+) -> None:
+    """Append the Label-Quality section to an existing summary.md."""
+    from core.p08_evaluation.chart_annotations import (
+        CHART_META,
+        evaluate_next_step,
+        render_signal,
+    )
+
+    lines: list[str] = ["", "## Label Quality", ""]
+    for stem in ("04_label_quality", "04_label_quality_gallery"):
+        png = output_dir / f"{stem}.png"
+        if not png.exists():
+            continue
+        meta = CHART_META.get(stem)
+        rel = png.relative_to(summary_md.parent)
+        heading = meta.title if meta else stem
+        lines.append(f"### {heading}")
+        lines.append("")
+        lines.append(f"![{stem}]({rel})")
+        lines.append("")
+        if meta:
+            lines.append(f"**What this shows.** {meta.description}")
+            lines.append("")
+            signal = render_signal(meta, chart_metrics.get(stem))
+            if signal:
+                lines.append(f"**Current signal.** {signal}")
+                lines.append("")
+            advice = evaluate_next_step(chart_metrics.get(stem), meta)
+            lines.append(f"**Suggested next step.** {advice}")
+            lines.append("")
+    csv_path = output_dir / "04_suspected_mislabels.csv"
+    if csv_path.exists():
+        rel_csv = csv_path.relative_to(summary_md.parent)
+        lines.append(f"_Exported suspect samples_: [`{rel_csv}`]({rel_csv}) "
+                     "— consumable by Label Studio for human re-review.")
+        lines.append("")
+    with open(summary_md, "a") as f:
+        f.write("\n".join(lines))
 
 
 # ===========================================================================
@@ -1276,6 +1428,49 @@ def _analyze_detection(
         "recoverable_map_vs_iou", "confidence_attribution",
         "boxes_per_image", "bbox_aspect_ratio", "size_recall",
     )]
+    # Populate chart_metrics for rule-driven next-step text.
+    ap50_per_class = summary["model_metrics"].get("ap50_per_class", {})
+    ap50_items = sorted(ap50_per_class.items(), key=lambda kv: kv[1]) if ap50_per_class else []
+    worst_cls, worst_ap = ap50_items[0] if ap50_items else ("?", 0.0)
+    best_cls, best_ap = ap50_items[-1] if ap50_items else ("?", 0.0)
+    present_counts = [v for v in gt_per_class.values() if v > 0]
+    # Failure-mode table has per-mode Δ mAP50. Pick the dominant. The
+    # `contribution` dict nests the per-mode ``delta_map50`` under its mode
+    # name (sometimes as dict, sometimes as plain float depending on
+    # analyzer version); handle both.
+    mode_deltas: dict[str, float] = {}
+    for k, v in contribution.items():
+        if isinstance(v, dict) and "delta_map50" in v:
+            mode_deltas[k] = float(v["delta_map50"])
+        elif isinstance(v, (int, float)) and k not in {"baseline_map50", "ceiling_map50"}:
+            mode_deltas[k] = float(v)
+    top_mode = max(mode_deltas, key=mode_deltas.get) if mode_deltas else None
+    top_mode_delta = mode_deltas[top_mode] if top_mode else 0.0
+    overview_metrics = {
+        "primary_metric_name": "mAP50",
+        "primary_metric": float(contribution.get("baseline_map50", 0.0)),
+    }
+    if top_mode:
+        overview_metrics["top_mode"] = top_mode
+        overview_metrics["top_mode_delta"] = top_mode_delta
+    chart_metrics = {
+        "01_overview": overview_metrics,
+        "02_data_distribution": {
+            "imbalance_ratio": (
+                (max(present_counts) / min(present_counts))
+                if len(present_counts) >= 2 else 1.0
+            ),
+            "n_classes": len(class_names),
+        },
+        "07_per_class_performance": {
+            "best_class": best_cls, "best_score": best_ap,
+            "worst_class": worst_cls, "worst_score": worst_ap,
+        },
+    }
+    if top_mode:
+        chart_metrics["10_failure_mode_contribution"] = {
+            "dominant_mode": top_mode, "dominant_delta": top_mode_delta,
+        }
     json_path, md_path = _write_json_md(
         output_dir, summary,
         title="Detection Error Analysis",
@@ -1289,6 +1484,7 @@ def _analyze_detection(
             *ranking_lines,
         ],
         chart_refs=chart_refs,
+        chart_metrics=chart_metrics,
     )
     artifacts["summary_json"] = json_path
     artifacts["summary_md"] = md_path
@@ -1885,6 +2081,12 @@ def _analyze_classification(
     per_image: list[dict] = []
     # keyed by (gt_cid, pred_cid) for class_confusion-style grouping
     wrong_gallery: dict[tuple[int, int], list[dict]] = {}
+    # low-confidence correct (pred == gt, score < 0.6) and
+    # high-confidence wrong (pred != gt, score >= 0.9).
+    low_conf_correct_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
+    high_conf_wrong_gallery: dict[tuple[int, int], list[dict]] = {}
+    _LOW_CONF_THR = 0.6
+    _HIGH_CONF_THR = 0.9
     # count per-class GT for data distribution
     gt_per_class: dict[int, int] = {c: 0 for c in class_names}
 
@@ -1914,15 +2116,24 @@ def _analyze_classification(
         if pred == gt_cid:
             per_class[gt_cid]["tp"] += 1
             correct_scores.append(score)
+            if score < _LOW_CONF_THR and gt_cid in low_conf_correct_gallery:
+                low_conf_correct_gallery[gt_cid].append({
+                    "image_idx": int(real_idx),
+                    "path": raw.get("path", ""),
+                    "gt_cid": gt_cid, "pred_cid": pred, "score": score,
+                })
         else:
             per_class[pred]["fp"] += 1
             per_class[gt_cid]["fn"] += 1
             wrong_scores.append(score)
-            wrong_gallery.setdefault((gt_cid, pred), []).append({
+            rec = {
                 "image_idx": int(real_idx),
                 "path": raw.get("path", ""),
                 "gt_cid": gt_cid, "pred_cid": pred, "score": score,
-            })
+            }
+            wrong_gallery.setdefault((gt_cid, pred), []).append(rec)
+            if score >= _HIGH_CONF_THR:
+                high_conf_wrong_gallery.setdefault((gt_cid, pred), []).append(rec)
         per_image.append({
             "idx": int(real_idx), "path": raw.get("path", ""),
             "correct": bool(pred == gt_cid), "score": score,
@@ -2075,12 +2286,111 @@ def _analyze_classification(
                 sort_key=lambda r: r["_sort"],
                 suffix_fn=lambda r: f"score_{-r['_sort']:.2f}",
             )
+        # low_confidence_correct/<cls>/ — pred == gt but score < 0.6
+        for cid, items in low_conf_correct_gallery.items():
+            if not items:
+                continue
+            cases = []
+            for rec in items:
+                try:
+                    raw = raw_ds.get_raw_item(rec["image_idx"])
+                except Exception:
+                    continue
+                if raw["image"] is None:
+                    continue
+                cases.append({
+                    "image": raw["image"],
+                    "gt": rec["gt_cid"],
+                    "pred": (rec["pred_cid"], rec["score"]),
+                    "stem": Path(rec["path"]).stem or f"img_{rec['image_idx']}",
+                    "banner": {
+                        "title": f"low_confidence_correct: {class_names.get(cid, str(cid))}",
+                        "subtitle": f"score={rec['score']:.2f}",
+                    },
+                    "_sort": rec["score"],  # ascending → worst first
+                })
+            _render_gallery_side_by_side(
+                cases, examples_root / "low_confidence_correct" / _safe_name(class_names.get(cid, str(cid))),
+                task="classification", class_names=class_names, style=style,
+                cap=hard_images_per_class,
+                sort_key=lambda r: r["_sort"],
+                suffix_fn=lambda r: f"score_{r['_sort']:.2f}",
+            )
+        # high_confidence_wrong/<gt>__as__<pred>/ — score >= 0.9 and wrong
+        for (gt_cid, pred_cid), items in high_conf_wrong_gallery.items():
+            cases = []
+            for rec in items:
+                try:
+                    raw = raw_ds.get_raw_item(rec["image_idx"])
+                except Exception:
+                    continue
+                if raw["image"] is None:
+                    continue
+                cases.append({
+                    "image": raw["image"],
+                    "gt": rec["gt_cid"],
+                    "pred": (rec["pred_cid"], rec["score"]),
+                    "stem": Path(rec["path"]).stem or f"img_{rec['image_idx']}",
+                    "banner": {
+                        "title": f"high_confidence_wrong: gt={class_names.get(gt_cid, str(gt_cid))} "
+                                 f"as={class_names.get(pred_cid, str(pred_cid))}",
+                        "subtitle": f"score={rec['score']:.2f}",
+                    },
+                    "_sort": -rec["score"],
+                })
+            folder = f"{_safe_name(class_names.get(gt_cid, str(gt_cid)))}__as__" \
+                     f"{_safe_name(class_names.get(pred_cid, str(pred_cid)))}"
+            _render_gallery_side_by_side(
+                cases, examples_root / "high_confidence_wrong" / folder,
+                task="classification", class_names=class_names, style=style,
+                cap=hard_images_per_class,
+                sort_key=lambda r: r["_sort"],
+                suffix_fn=lambda r: f"score_{-r['_sort']:.2f}",
+            )
 
     chart_refs = [CHART_FILENAMES[k] for k in (
         "overview", "data_distribution", "per_class_performance",
         "confusion_matrix" if C <= _LARGE_CLASS_THRESHOLD else "top_confused_pairs",
         "confidence_calibration", "failure_mode_contribution", "hardest_images",
     )]
+    # Populate chart_metrics so rules fire with real numbers.
+    present_counts = [v for v in gt_per_class.values() if v > 0]
+    f1_items = sorted(
+        [(name, stats["f1"]) for name, stats in out_classes.items() if stats["tp"] + stats["fn"] > 0],
+        key=lambda kv: kv[1],
+    )
+    worst_cls, worst_f1 = f1_items[0] if f1_items else ("?", 0.0)
+    best_cls, best_f1 = f1_items[-1] if f1_items else ("?", 0.0)
+    tp_median = float(np.median(correct_scores)) if correct_scores else 1.0
+    fp_median = float(np.median(wrong_scores)) if wrong_scores else 0.0
+    # Score-distribution overlap: integrate min of two histograms over [0, 1].
+    if correct_scores and wrong_scores:
+        bins = np.linspace(0, 1, 21)
+        h_c, _ = np.histogram(correct_scores, bins=bins, density=True)
+        h_w, _ = np.histogram(wrong_scores, bins=bins, density=True)
+        overlap = float(np.minimum(h_c, h_w).sum() * (bins[1] - bins[0]))
+    else:
+        overlap = 0.0
+    chart_metrics = {
+        "01_overview": {
+            "primary_metric_name": "accuracy",
+            "primary_metric": overall_acc,
+        },
+        "02_data_distribution": {
+            "imbalance_ratio": (
+                (max(present_counts) / min(present_counts))
+                if len(present_counts) >= 2 else 1.0
+            ),
+            "n_classes": len([1 for _ in gt_per_class]),
+        },
+        "07_per_class_performance": {
+            "best_class": best_cls, "best_score": best_f1,
+            "worst_class": worst_cls, "worst_score": worst_f1,
+        },
+        "09_confidence_calibration": {
+            "tp_median": tp_median, "fp_median": fp_median, "overlap": overlap,
+        },
+    }
     json_path, md_path = _write_json_md(
         output_dir, summary,
         title="Classification Error Analysis",
@@ -2090,6 +2400,7 @@ def _analyze_classification(
             f"- Classes: **{C}**",
         ],
         chart_refs=chart_refs,
+        chart_metrics=chart_metrics,
     )
     artifacts["summary_json"] = json_path
     artifacts["summary_md"] = md_path
@@ -2118,6 +2429,16 @@ def _analyze_segmentation(
     gt_pixel_counts: dict[int, int] = {c: 0 for c in class_names}
     # per-class per-image IoUs → used for gallery bucketing + failure-mode bars
     per_class_iou_per_image: dict[int, list[dict]] = {c: [] for c in class_names}
+    # per-class galleries for new failure-mode subfolders.
+    missed_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
+    fp_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
+    boundary_gallery: dict[int, list[dict]] = {c: [] for c in class_names}
+    _MIN_GT_AREA_PX = 100
+    _BOUNDARY_DILATE_PX = 3
+    _BOUNDARY_F1_THR = 0.5
+    _BOUNDARY_INTERIOR_IOU_THR = 0.6
+    # CxC pixel confusion matrix accumulator (Phase 2 — seg gap fill).
+    pixel_confusion = np.zeros((C, C), dtype=np.int64)
 
     for ds_idx in indices:
         real_idx = idx_map(ds_idx)
@@ -2140,6 +2461,18 @@ def _analyze_segmentation(
             pred_mask = cv2.resize(pred_mask.astype(np.int32),
                                     (gt_mask.shape[1], gt_mask.shape[0]),
                                     interpolation=cv2.INTER_NEAREST)
+        # Accumulate the pixel confusion matrix in one shot via histogram2d.
+        try:
+            valid = (gt_mask >= 0) & (gt_mask < C) & (pred_mask >= 0) & (pred_mask < C)
+            if valid.any():
+                hist, _, _ = np.histogram2d(
+                    gt_mask[valid].ravel(), pred_mask[valid].ravel(),
+                    bins=(C, C), range=[[0, C], [0, C]],
+                )
+                pixel_confusion += hist.astype(np.int64)
+        except Exception as _e:  # pragma: no cover
+            logger.warning("pixel_confusion accumulation failed: %s", _e)
+
         img_inter = 0.0
         img_union = 0.0
         for cid in range(C):
@@ -2158,6 +2491,50 @@ def _analyze_segmentation(
                     "iou": float(inter / uni),
                     "gt_mask": gt_bin, "pred_mask": pr_bin,
                 })
+            # ---- new failure-mode buckets ----
+            gt_area = int(gt_bin.sum())
+            pr_area = int(pr_bin.sum())
+            if gt_area > _MIN_GT_AREA_PX and pr_area == 0:
+                missed_gallery[cid].append({
+                    "image_idx": int(real_idx), "path": raw.get("path", ""),
+                    "gt_area": gt_area, "gt_mask": gt_bin, "pred_mask": pr_bin,
+                })
+            elif gt_area == 0 and pr_area > _MIN_GT_AREA_PX:
+                fp_gallery[cid].append({
+                    "image_idx": int(real_idx), "path": raw.get("path", ""),
+                    "pr_area": pr_area, "gt_mask": gt_bin, "pred_mask": pr_bin,
+                })
+            elif gt_area > 0 and pr_area > 0 and uni > 0:
+                iou = float(inter / uni)
+                if iou >= _BOUNDARY_INTERIOR_IOU_THR:
+                    try:
+                        k = np.ones(
+                            (2 * _BOUNDARY_DILATE_PX + 1, 2 * _BOUNDARY_DILATE_PX + 1),
+                            dtype=np.uint8,
+                        )
+                        gt_edge = cv2.dilate(gt_bin.astype(np.uint8), k) & (
+                            ~cv2.erode(gt_bin.astype(np.uint8), k).astype(bool)
+                        )
+                        pr_edge = cv2.dilate(pr_bin.astype(np.uint8), k) & (
+                            ~cv2.erode(pr_bin.astype(np.uint8), k).astype(bool)
+                        )
+                        gt_edge_b = gt_edge.astype(bool)
+                        pr_edge_b = pr_edge.astype(bool)
+                        tp = int(np.logical_and(gt_edge_b, pr_edge_b).sum())
+                        fp_e = int(np.logical_and(~gt_edge_b, pr_edge_b).sum())
+                        fn_e = int(np.logical_and(gt_edge_b, ~pr_edge_b).sum())
+                        prec = tp / max(tp + fp_e, 1)
+                        recl = tp / max(tp + fn_e, 1)
+                        f1 = 2 * prec * recl / max(prec + recl, 1e-9)
+                        if f1 < _BOUNDARY_F1_THR:
+                            boundary_gallery[cid].append({
+                                "image_idx": int(real_idx),
+                                "path": raw.get("path", ""),
+                                "iou": iou, "boundary_f1": float(f1),
+                                "gt_mask": gt_bin, "pred_mask": pr_bin,
+                            })
+                    except Exception:
+                        pass
         per_image_records.append({
             "idx": int(real_idx), "path": raw.get("path", ""),
             "miou": float(img_inter / img_union) if img_union > 0 else 0.0,
@@ -2210,6 +2587,11 @@ def _analyze_segmentation(
         gap, _chart_path(output_dir, "failure_mode_contribution"),
         title=f"Per-class IoU gap vs mean ({mean_iou:.3f}) — larger bar = worse",
         ylabel="mean − class IoU", ylim=(0, 1),
+    )
+    # --- 15 pixel confusion matrix (Phase 2 segmentation gap fill) ---
+    artifacts["pixel_confusion_matrix"] = _plot_pixel_confusion_matrix(
+        pixel_confusion, class_names,
+        _chart_path(output_dir, "pixel_confusion_matrix"),
     )
     # --- 08 hardest-images overview (lowest mIoU) ---
     per_image_records.sort(key=lambda r: r["miou"])
@@ -2273,10 +2655,148 @@ def _analyze_segmentation(
                 suffix_fn=lambda r: f"iou_{r['_sort']:.2f}",
             )
 
+        # missed/<cls>/ — GT area > 100 px, pred absent for this class
+        for cid, items in missed_gallery.items():
+            if not items:
+                continue
+            cases = []
+            for rec in items:
+                try:
+                    raw = raw_ds.get_raw_item(rec["image_idx"])
+                except Exception:
+                    continue
+                if raw["image"] is None:
+                    continue
+                cases.append({
+                    "image": raw["image"],
+                    "gt": rec["gt_mask"], "pred": rec["pred_mask"],
+                    "stem": Path(rec["path"]).stem or f"img_{rec['image_idx']}",
+                    "banner": {
+                        "title": f"missed: {class_names.get(cid, str(cid))}",
+                        "subtitle": f"gt_area={rec['gt_area']} px",
+                    },
+                    "_sort": -rec["gt_area"],
+                })
+            _render_gallery_side_by_side(
+                cases, examples_root / "missed" / _safe_name(class_names.get(cid, str(cid))),
+                task="segmentation", class_names=class_names, style=style,
+                cap=hard_images_per_class,
+                sort_key=lambda r: r["_sort"],
+                suffix_fn=lambda r: f"gtarea_{-r['_sort']}",
+            )
+        # false_positive/<cls>/ — pred present, no GT for this class
+        for cid, items in fp_gallery.items():
+            if not items:
+                continue
+            cases = []
+            for rec in items:
+                try:
+                    raw = raw_ds.get_raw_item(rec["image_idx"])
+                except Exception:
+                    continue
+                if raw["image"] is None:
+                    continue
+                cases.append({
+                    "image": raw["image"],
+                    "gt": rec["gt_mask"], "pred": rec["pred_mask"],
+                    "stem": Path(rec["path"]).stem or f"img_{rec['image_idx']}",
+                    "banner": {
+                        "title": f"false_positive: {class_names.get(cid, str(cid))}",
+                        "subtitle": f"pr_area={rec['pr_area']} px",
+                    },
+                    "_sort": -rec["pr_area"],
+                })
+            _render_gallery_side_by_side(
+                cases, examples_root / "false_positive" / _safe_name(class_names.get(cid, str(cid))),
+                task="segmentation", class_names=class_names, style=style,
+                cap=hard_images_per_class,
+                sort_key=lambda r: r["_sort"],
+                suffix_fn=lambda r: f"prarea_{-r['_sort']}",
+            )
+        # boundary_error/<cls>/ — interior IoU high, boundary-F1 low
+        for cid, items in boundary_gallery.items():
+            if not items:
+                continue
+            cases = []
+            for rec in items:
+                try:
+                    raw = raw_ds.get_raw_item(rec["image_idx"])
+                except Exception:
+                    continue
+                if raw["image"] is None:
+                    continue
+                cases.append({
+                    "image": raw["image"],
+                    "gt": rec["gt_mask"], "pred": rec["pred_mask"],
+                    "stem": Path(rec["path"]).stem or f"img_{rec['image_idx']}",
+                    "banner": {
+                        "title": f"boundary_error: {class_names.get(cid, str(cid))}",
+                        "subtitle": f"iou={rec['iou']:.2f} bF1={rec['boundary_f1']:.2f}",
+                    },
+                    "_sort": rec["boundary_f1"],
+                })
+            _render_gallery_side_by_side(
+                cases, examples_root / "boundary_error" / _safe_name(class_names.get(cid, str(cid))),
+                task="segmentation", class_names=class_names, style=style,
+                cap=hard_images_per_class,
+                sort_key=lambda r: r["_sort"],
+                suffix_fn=lambda r: f"bf1_{r['_sort']:.2f}",
+            )
+
     chart_refs = [CHART_FILENAMES[k] for k in (
         "overview", "data_distribution", "per_class_performance",
         "failure_mode_contribution", "hardest_images",
+        "pixel_confusion_matrix",
     )]
+    # Build chart-level metrics so descriptions render "Current signal" +
+    # rule-driven next-step text instead of the default fallback.
+    # Exclude any class with zero pixel count (typically the ignore class
+    # `unlabeled`) from imbalance + best/worst summaries so those signals
+    # reflect actually-present classes.
+    present_counts = [c for c in gt_pixel_counts.values() if c > 0]
+    present_iou_items = sorted(
+        [
+            (class_names.get(i, str(i)), float(ious[i]))
+            for i in range(C)
+            if gt_pixel_counts.get(i, 0) > 0
+        ],
+        key=lambda kv: kv[1],
+    )
+    worst_cls, worst_iou = present_iou_items[0] if present_iou_items else ("?", 0.0)
+    best_cls, best_iou = present_iou_items[-1] if present_iou_items else ("?", 0.0)
+    # Find the worst off-diagonal pair in the pixel confusion matrix.
+    cm = pixel_confusion.astype(np.float64)
+    row_sums = cm.sum(axis=1, keepdims=True) + 1e-9
+    cm_norm = cm / row_sums
+    np.fill_diagonal(cm_norm, 0.0)
+    if cm_norm.size and cm_norm.max() > 0:
+        gt_idx, pred_idx = np.unravel_index(int(cm_norm.argmax()), cm_norm.shape)
+        top_pair = {
+            "top_pair_gt": class_names.get(int(gt_idx), str(gt_idx)),
+            "top_pair_pred": class_names.get(int(pred_idx), str(pred_idx)),
+            "top_pair_pct": float(cm_norm[gt_idx, pred_idx]),
+        }
+    else:
+        top_pair = {}
+    chart_metrics = {
+        "01_overview": {
+            "primary_metric_name": "mIoU",
+            "primary_metric": mean_iou,
+        },
+        "02_data_distribution": {
+            "imbalance_ratio": (
+                (max(present_counts) / min(present_counts))
+                if len(present_counts) >= 2 else 1.0
+            ),
+            "n_classes": len(present_counts),
+        },
+        "07_per_class_performance": {
+            "best_class": best_cls, "best_score": best_iou,
+            "worst_class": worst_cls, "worst_score": worst_iou,
+        },
+    }
+    if top_pair:
+        chart_metrics["20_pixel_confusion_matrix"] = top_pair
     json_path, md_path = _write_json_md(
         output_dir, summary,
         title="Segmentation Error Analysis",
@@ -2285,6 +2805,7 @@ def _analyze_segmentation(
             f"- Mean IoU: **{mean_iou:.4f}**",
         ],
         chart_refs=chart_refs,
+        chart_metrics=chart_metrics,
     )
     artifacts["summary_json"] = json_path
     artifacts["summary_md"] = md_path
@@ -2301,6 +2822,7 @@ def _analyze_keypoint(
     class_names: dict[int, str], input_size: tuple[int, int], style: VizStyle,
     conf_threshold: float,
     max_samples: int | None, hard_images_per_class: int,
+    training_config: dict | None = None,
 ) -> dict[str, Any]:
     """PCK@0.2 per keypoint — visibility-gated."""
     raw_ds, idx_map = _unwrap(dataset)
@@ -2312,6 +2834,27 @@ def _analyze_keypoint(
     per_kp_total: dict[int, int] = {}
     per_kp_errors: dict[int, list[dict]] = {}
     per_image_records: list[dict] = []
+    # New failure-mode galleries.
+    occluded_gallery: dict[int, list[dict]] = {}
+    keypoint_pairs: list[tuple[int, int]] = []
+    if isinstance(training_config, dict):
+        data_cfg = (
+            training_config.get("_loaded_data_cfg")
+            or training_config.get("data")
+            or {}
+        )
+        kp_pairs = data_cfg.get("keypoint_pairs") if isinstance(data_cfg, dict) else None
+        if kp_pairs:
+            try:
+                keypoint_pairs = [(int(a), int(b)) for a, b in kp_pairs]
+            except Exception:
+                keypoint_pairs = []
+    if not keypoint_pairs:
+        logger.info(
+            "keypoint failure-mode: data.keypoint_pairs not found — skipping swapped_pair gallery",
+        )
+    swapped_gallery: dict[tuple[int, int], list[dict]] = {}
+    _OCCL_CONF_THR = 0.5
 
     for ds_idx in indices:
         real_idx = idx_map(ds_idx)
@@ -2376,6 +2919,48 @@ def _analyze_keypoint(
             "pck": (correct / max(1, total)),
             "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
         })
+
+        # -- occluded_misprediction: GT vis=0 but pred placed on-image w/ conf>0.5
+        H, W = image.shape[:2]
+        for k in range(len(gt_kp)):
+            if gt_kp[k, 2] > 0:
+                continue  # GT visible — not "occluded"
+            if k >= K_pred:
+                continue
+            px, py, pconf = float(pred_kp[k, 0]), float(pred_kp[k, 1]), float(pred_kp[k, 2])
+            if pconf <= _OCCL_CONF_THR:
+                continue
+            if not (0 <= px < W and 0 <= py < H):
+                continue
+            occluded_gallery.setdefault(k, []).append({
+                "image_idx": int(real_idx), "path": raw.get("path", ""),
+                "joint": k, "pred_conf": pconf,
+                "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
+            })
+
+        # -- swapped_pair: L/R indices swapped
+        for a, b in keypoint_pairs:
+            if a >= len(gt_kp) or b >= len(gt_kp):
+                continue
+            if gt_kp[a, 2] <= 0 or gt_kp[b, 2] <= 0:
+                continue
+            if a >= K_pred or b >= K_pred:
+                continue
+            if pred_kp[a, 2] <= 0 or pred_kp[b, 2] <= 0:
+                continue
+            def _d(p, q):
+                return float(np.hypot(p[0] - q[0], p[1] - q[1]))
+            d_aa = _d(pred_kp[a], gt_kp[a])
+            d_ab = _d(pred_kp[a], gt_kp[b])
+            d_ba = _d(pred_kp[b], gt_kp[a])
+            d_bb = _d(pred_kp[b], gt_kp[b])
+            if d_ab < d_aa and d_ba < d_bb:
+                swapped_gallery.setdefault((a, b), []).append({
+                    "image_idx": int(real_idx), "path": raw.get("path", ""),
+                    "pair": (a, b),
+                    "d_aa": d_aa, "d_bb": d_bb, "d_ab": d_ab, "d_ba": d_ba,
+                    "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
+                })
 
     per_kp = {}
     for k in sorted(per_kp_total):
@@ -2495,6 +3080,82 @@ def _analyze_keypoint(
                 sort_key=lambda r: r["_sort"],
                 suffix_fn=lambda r: f"err_{-r['_sort']:.1f}"
                             if r["_sort"] > -1e8 else "err_missing",
+            )
+
+        # occluded_misprediction/kp_<k>/
+        for k, items in occluded_gallery.items():
+            cases = []
+            for rec in items:
+                try:
+                    raw = raw_ds.get_raw_item(rec["image_idx"])
+                except Exception:
+                    continue
+                if raw["image"] is None:
+                    continue
+                gt_kp = rec["gt_kp"].copy()
+                pred_kp = rec["pred_kp"].copy()
+                if pred_kp.size and pred_kp.shape[1] == 3:
+                    mask_p = np.zeros(pred_kp.shape[0], dtype=bool)
+                    if k < len(mask_p):
+                        mask_p[k] = True
+                    pred_kp[~mask_p, 2] = 0.0
+                cases.append({
+                    "image": raw["image"],
+                    "gt": gt_kp, "pred": pred_kp,
+                    "stem": Path(rec["path"]).stem or f"img_{rec['image_idx']}",
+                    "banner": {
+                        "title": f"occluded_misprediction: kp_{k}",
+                        "subtitle": f"pred_conf={rec['pred_conf']:.2f} (GT not visible)",
+                    },
+                    "_sort": -rec["pred_conf"],
+                })
+            _render_gallery_side_by_side(
+                cases, examples_root / "occluded_misprediction" / f"kp_{k}",
+                task="keypoint", class_names=class_names, style=style,
+                cap=hard_images_per_class,
+                sort_key=lambda r: r["_sort"],
+                suffix_fn=lambda r: f"conf_{-r['_sort']:.2f}",
+            )
+
+        # swapped_pair/<left>__<right>/
+        for (a, b), items in swapped_gallery.items():
+            cases = []
+            for rec in items:
+                try:
+                    raw = raw_ds.get_raw_item(rec["image_idx"])
+                except Exception:
+                    continue
+                if raw["image"] is None:
+                    continue
+                gt_kp = rec["gt_kp"].copy()
+                pred_kp = rec["pred_kp"].copy()
+                if gt_kp.shape[1] == 3:
+                    mask = np.zeros(gt_kp.shape[0], dtype=bool)
+                    if a < len(mask): mask[a] = True
+                    if b < len(mask): mask[b] = True
+                    gt_kp[~mask, 2] = 0.0
+                if pred_kp.size and pred_kp.shape[1] == 3:
+                    mp = np.zeros(pred_kp.shape[0], dtype=bool)
+                    if a < len(mp): mp[a] = True
+                    if b < len(mp): mp[b] = True
+                    pred_kp[~mp, 2] = 0.0
+                swap_err = rec["d_ab"] + rec["d_ba"]
+                cases.append({
+                    "image": raw["image"],
+                    "gt": gt_kp, "pred": pred_kp,
+                    "stem": Path(rec["path"]).stem or f"img_{rec['image_idx']}",
+                    "banner": {
+                        "title": f"swapped_pair: kp_{a} ↔ kp_{b}",
+                        "subtitle": f"cross_err={swap_err:.1f}px",
+                    },
+                    "_sort": -swap_err,
+                })
+            _render_gallery_side_by_side(
+                cases, examples_root / "swapped_pair" / f"kp_{a}__kp_{b}",
+                task="keypoint", class_names=class_names, style=style,
+                cap=hard_images_per_class,
+                sort_key=lambda r: r["_sort"],
+                suffix_fn=lambda r: f"crosserr_{-r['_sort']:.1f}",
             )
 
     chart_refs = [CHART_FILENAMES[k] for k in (

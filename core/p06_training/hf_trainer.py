@@ -46,6 +46,7 @@ from core.p06_training.hf_callbacks import (
     HFAugLabelGridCallback,
     HFDataLabelGridCallback,
     HFDatasetStatsCallback,
+    HFNormalizedInputPreviewCallback,
     HFValPredictionCallback,
 )
 
@@ -571,6 +572,7 @@ def train_with_hf(
         save_dir=training_args.output_dir,
         subset_map=subset_map,
         test_dataset=test_dataset,
+        train_dataset=train_dataset,
         config_path=config_path,
         dataset_config_path=dataset_config_path,
         full_sizes=full_sizes,
@@ -761,11 +763,11 @@ def _build_datasets(
         )
 
         def hf_cls_collate(batch):
-            """Collate for HF Trainer: uses 'images'+'targets' keys (model handles kwargs)."""
+            """Collate for HF Trainer: emits 'pixel_values'+'labels' so stock
+            Trainer can call model(**batch) directly."""
             result = classification_collate_fn(batch)
-            # HF Trainer extracts labels from batch for compute_metrics
             labels = torch.stack(result["targets"])
-            return {"images": result["images"], "targets": result["targets"], "labels": labels}
+            return {"pixel_values": result["images"], "labels": labels}
 
         return train_dataset, eval_dataset, hf_cls_collate
 
@@ -792,7 +794,18 @@ def _build_datasets(
         eval_dataset = SegmentationDataset(
             data_config, split="val", transforms=eval_transforms, base_dir=base_dir,
         )
-        return train_dataset, eval_dataset, segmentation_collate_fn
+
+        def hf_seg_collate(batch):
+            """HF-Trainer-compatible seg collate: {pixel_values, labels}."""
+            result = segmentation_collate_fn(batch)
+            labels = torch.stack(result["targets"]).long()
+            return {"pixel_values": result["images"], "labels": labels}
+
+        subset_cfg = training_config.get("data", {}).get("subset", {}) or {}
+        seed = int(training_config.get("seed", 42))
+        train_dataset = _maybe_subset(train_dataset, subset_cfg.get("train"), seed)
+        eval_dataset = _maybe_subset(eval_dataset, subset_cfg.get("val"), seed)
+        return train_dataset, eval_dataset, hf_seg_collate
 
     else:
         from core.p05_data.detection_dataset import YOLOXDataset
@@ -948,19 +961,29 @@ def _build_compute_metrics(output_format: str, config: dict):
     elif output_format == "segmentation":
         num_classes = config.get("model", {}).get("num_classes", 2)
 
+        ignore_index = int(config.get("training", {}).get("ignore_index", -1))
+
         def compute_metrics(eval_pred):
             logits, masks = eval_pred
-            preds = np.argmax(logits, axis=1)  # (N, H, W)
+            logits_t = torch.from_numpy(logits)
+            # SegFormer emits logits at H/4 — upsample to mask resolution.
+            logits_t = torch.nn.functional.interpolate(
+                logits_t, size=masks.shape[-2:], mode="bilinear", align_corners=False,
+            )
+            preds = logits_t.argmax(dim=1).numpy()  # (N, H, W)
             intersection = np.zeros(num_classes)
             union = np.zeros(num_classes)
             for pred, gt in zip(preds, masks, strict=True):
+                valid = gt != ignore_index if ignore_index >= 0 else np.ones_like(gt, dtype=bool)
                 for c in range(num_classes):
-                    p = pred == c
-                    g = gt == c
+                    if c == ignore_index:
+                        continue
+                    p = (pred == c) & valid
+                    g = (gt == c) & valid
                     intersection[c] += np.logical_and(p, g).sum()
                     union[c] += np.logical_or(p, g).sum()
             iou = np.where(union > 0, intersection / (union + 1e-10), 0.0)
-            return {"mIoU": float(np.mean(iou))}
+            return {"mean_iou": float(np.mean(iou[union > 0])) if (union > 0).any() else 0.0}
 
         return compute_metrics
 
@@ -985,6 +1008,7 @@ def _build_callbacks(
     save_dir: str | None = None,
     subset_map: dict[str, list[int] | None] | None = None,
     test_dataset=None,
+    train_dataset=None,
     config_path: Path | None = None,
     dataset_config_path: str | None = None,
     full_sizes: dict[str, int] | None = None,
@@ -1026,8 +1050,14 @@ def _build_callbacks(
         callbacks.append(FreezeBackboneCallback(freeze_epochs=int(freeze_epochs)))
 
     # Viz callbacks — native HF TrainerCallback subclasses
-    # (core/p06_training/hf_callbacks.py). Detection only for now.
-    if output_format != "detr" or data_config is None or save_dir is None:
+    # (core/p06_training/hf_callbacks.py). Gated on canonical task membership:
+    # detection/classification/segmentation/keypoint all supported. Unknown
+    # tasks bail gracefully (no viz, training still runs).
+    from core.p06_training._common import task_from_output_format
+    if data_config is None or save_dir is None:
+        return callbacks
+    task = task_from_output_format(output_format)
+    if task not in {"detection", "classification", "segmentation", "keypoint"}:
         return callbacks
 
     splits = train_cfg.get("data_viz", {}).get("splits", ["train", "val"])
@@ -1056,6 +1086,7 @@ def _build_callbacks(
         callbacks.append(HFDataLabelGridCallback(
             save_dir=save_dir, splits=splits,
             data_config=data_config, base_dir=base_dir or "",
+            task=task,
             subsets=subset_map,
             num_samples=data_viz.get("num_samples", 16),
             grid_cols=data_viz.get("grid_cols", 4),
@@ -1065,6 +1096,9 @@ def _build_callbacks(
         ))
 
     aug_viz = train_cfg.get("aug_viz", {})
+    # Aug-label grid — task-aware via HFDataLabelGridCallback's _render_gt_panel
+    # dispatch (detection=boxes, classification=banner, segmentation=mask,
+    # keypoint=dots+skeleton). Runs for every supported task.
     if aug_viz.get("enabled", True):
         callbacks.append(HFAugLabelGridCallback(
             save_dir=save_dir,
@@ -1073,6 +1107,7 @@ def _build_callbacks(
             aug_config=config.get("augmentation", {}),
             base_dir=base_dir or "",
             input_size=input_size,
+            task=task,
             subsets=subset_map,
             num_samples=aug_viz.get("num_samples", 16),
             grid_cols=aug_viz.get("grid_cols", 4),
@@ -1096,15 +1131,21 @@ def _build_callbacks(
             conf_threshold=val_viz.get("conf_threshold", 0.05),
             grid_cols=val_viz.get("grid_cols", 2),
             test_dataset=test_dataset if want_best_viz else None,
+            train_dataset=train_dataset if want_best_viz else None,
             best_num_samples=best_viz.get("num_samples", 16),
             best_conf_threshold=best_viz.get("conf_threshold", 0.1),
             enable_epoch_end=want_val_viz,
             enable_train_end=want_best_viz,
+            data_config=data_config,
+            base_dir=base_dir,
         ))
 
     # Step-by-step transform pipeline viz — fires once on train-begin. Catches
     # double/missing-normalize footguns, box-format drift, and broken
     # inverse-normalize algebra before the first GPU forward pass.
+    # Task-aware: render_transform_pipeline dispatches by task (detection walks
+    # paired boxes via tv_tensors; classification/segmentation/keypoint use a
+    # simpler per-task walker with _render_gt_panel for GT overlay).
     transform_viz = train_cfg.get("transform_viz", {})
     if transform_viz.get("enabled", True):
         from core.p06_training.callbacks_viz import TransformPipelineCallback
@@ -1115,6 +1156,28 @@ def _build_callbacks(
             base_dir=base_dir or "",
             class_names=class_names,
             max_samples=transform_viz.get("max_samples", 5),
+            task=task,
+        ))
+
+    # Normalized-input preview — flat `data_preview/05_normalized_input_preview.png`.
+    # Renders a grid of N val-transform samples (post-normalize → denormalized
+    # back to RGB) with task-aware GT overlays. Confirms the post-normalize
+    # tensor round-trips correctly for every task.
+    norm_viz = train_cfg.get("norm_viz", {})
+    if norm_viz.get("enabled", True):
+        callbacks.append(HFNormalizedInputPreviewCallback(
+            save_dir=save_dir,
+            data_config=data_config,
+            training_config=config,
+            base_dir=base_dir or "",
+            input_size=input_size,
+            task=task,
+            subsets=subset_map,
+            num_samples=norm_viz.get("num_samples", 16),
+            grid_cols=norm_viz.get("grid_cols", 4),
+            thickness=norm_viz.get("thickness", 2),
+            text_scale=norm_viz.get("text_scale", 0.4),
+            dpi=norm_viz.get("dpi", 120),
         ))
 
     # train_viz would run the same viz on the train_dataloader — not wired

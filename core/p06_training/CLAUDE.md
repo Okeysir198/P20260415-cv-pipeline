@@ -37,7 +37,7 @@ on features it doesn't implement yet. See `_validate_hf_backend_config`
 | `augmentation.library: albumentations` | ✓ | fast CPU aug backend with probability-gated transforms |
 | `checkpoint.metric: val/mAP50` | ✓ | auto-translated to HF's `eval_map_50` |
 | `checkpoint.save_best: true` | ✓ | uses HF's `load_best_model_at_end` |
-| Viz callbacks | ✓ native | `hf_callbacks.py` — four first-class `TrainerCallback` subclasses mirroring the pytorch-backend loggers. No proxy-trainer hack. |
+| Viz callbacks | ✓ native, **all CV tasks** | `hf_callbacks.py` — first-class `TrainerCallback` subclasses. `_build_callbacks` allows detection / classification / segmentation / keypoint via `task_from_output_format`. `HFDataLabelGridCallback` + `HFAugLabelGridCallback` + `HFNormalizedInputPreviewCallback` dispatch via `core.p06_training._common.build_dataset_for_viz` and route GT overlays through `_render_gt_panel` (per-task primitive: bbox / mask / banner / keypoints). `03_aug_labels_train.png` runs for every task via `_build_task_transforms` (detection→`build_transforms`, cls→`build_classification_transforms`, seg→`build_segmentation_transforms`, kpt→`build_keypoint_transforms`). `04_transform_pipeline.png` dispatches to `render_transform_pipeline` for detection (full per-step walker) and `render_transform_pipeline_task` for cls/seg/kpt (2-row raw↔denorm grid — the paired-box walker assumes YOLO targets). `05_normalized_input_preview.png` is a flat grid of `is_train=False` samples denormalized back to RGB with task-aware GT overlay. |
 | Final test-set eval | ✓ auto | writes `<output_dir>/test_results.json` when a test split is present |
 
 If a task / config combo isn't supported, `_validate_hf_backend_config` fails
@@ -53,7 +53,7 @@ fast at the top of `train_with_hf` rather than silently degrading.
 | `train.py` | CLI entry point — `auto_select_gpu`, determinism knobs (CUBLAS env var + `torch.use_deterministic_algorithms(True, warn_only=True)`), 3-warning filter for known-harmless PyTorch messages, dispatches to backend. |
 | `callbacks.py` | `Callback` base class (pytorch backend only), `CheckpointSaver`, `EarlyStopping`, `WandBLogger`, `ValPredictionLogger`, `DatasetStatsLogger`, `DataLabelGridLogger`, `AugLabelGridLogger`, `CallbackRunner`. Also `_run_splits_and_subsets(trainer)` — now iterates train/val/test so the HF bridge's stub test-loader shows up in data_preview. |
 | `callbacks_viz.py` | `TransformPipelineCallback` — fires once on train-start, renders `data_preview/04_transform_pipeline.png` (K rows × N cols: one representative sample per class walked step-by-step through the CPU transform pipeline; last col = Denormalize(Normalize) inverse check). Dual-backend (permissive `_AnyHook` base satisfies both pytorch `CallbackRunner` and HF `CallbackHandler` hook surfaces). |
-| `post_train.py` | Backend-agnostic post-train runner. `run_post_train_artifacts(model, save_dir, val_dataset, test_dataset, task, class_names, input_size, style, training_config, …)` renders best-checkpoint val+test grids and dispatches to `error_analysis_runner`. `render_prediction_grid` is the **single** grid renderer (per-epoch, best, hardest-overview all route here via `annotate_gt_pred`). |
+| `post_train.py` | Backend-agnostic post-train runner. `run_post_train_artifacts(model, save_dir, val_dataset, test_dataset, task, class_names, input_size, style, training_config, …)` renders best-checkpoint val+test grids and dispatches to `error_analysis_runner`. `render_prediction_grid` is the grid renderer for per-epoch + best-checkpoint previews (routes via `annotate_gt_pred`). The hardest-images overview (`08_hardest_images.png`) is rendered by `_plot_hardest_images_grid` in `error_analysis_runner.py`. |
 | `_common.py` | Shared helpers: `unwrap_subset`, `task_from_output_format`, `yolo_targets_to_xyxy`. Dedupes logic that previously had 3 copies across HF + pytorch backends. |
 | `losses.py` | `DetectionLoss` ABC, `YOLOXLoss` (SimOTA), `FocalLoss`, `IoULoss`, `_DETRPassthroughLoss`, registry + `build_loss()`. |
 | `lr_scheduler.py` | `WarmupScheduler`, `CosineScheduler`, `PlateauScheduler`, `StepScheduler`, `OneCycleScheduler` + `build_scheduler()`. |
@@ -66,53 +66,61 @@ Every training run produces a uniform per-run artifact tree — no per-config op
 
 ```
 runs/<ts>/
-├── data_preview/               (on_train_start, ~2 s total — numbered by data-flow step)
-│   ├── 00_dataset_info.{md,json}         ← provenance: feature, dataset, classes, splits, input_size, aug
-│   ├── 01_dataset_stats.{png,json}       split sizes + class balance + bbox tiers
-│   ├── 02_data_labels_{train,val,test}.png   raw images with GT
-│   ├── 03_aug_labels_train[_mosaic].png  CPU augmentation output
-│   └── 04_transform_pipeline.png    step-by-step transform walk (per class, max 5 samples); last col = Denormalize(Normalize) sanity check
+├── data_preview/               (on_train_start, ~2 s total — task-aware for det/cls/seg/kpt)
+│   ├── 00_dataset_info.{md,json}                provenance: feature, dataset, classes, splits, input_size, aug
+│   ├── 01_dataset_stats.{png,json}              task-aware: detection→bbox tiers + boxes-per-image;
+│   │                                              cls→class hist + resolution + per-channel mean/std;
+│   │                                              seg→pixel-class hist + mask coverage + components;
+│   │                                              kpt→per-joint visibility + spatial heatmap + edge lengths
+│   ├── 02_data_labels_{train,val,test}.png      raw images with GT (boxes/masks/banners/keypoints by task)
+│   ├── 03_aug_labels_train.png                  CPU augmentation output
+│   ├── 04_transform_pipeline.png                step-by-step transform walk; last col = Denorm(Norm) sanity check
+│   └── 05_normalized_input_preview.png          exact tensor the model sees post-normalize (denormalized for viewing)
 ├── val_predictions/
 │   ├── epochs/epoch_NNN.png    (per-epoch, ~2 s each — the only mid-run hook)
 │   ├── best.png                (on_train_end, best-checkpoint weights)
-│   └── error_analysis/         (task-dispatched; ~15 s total)
+│   └── error_analysis/         flat 01..20 layout, all diagnostics at depth 0 — both backends, all tasks
 │       ├── summary.{json,md}       3-axis: data_distribution + training_config + model_metrics
-│       │                             summary.md opens with the failure-mode ranking table (Δ mAP50 per mode)
-│       │                             summary.json::model_metrics.failure_mode has
-│       │                               {error_types, per_class, confusion_pairs_top, contribution,
-│       │                                modes_per_class, fn_attribution, miss_by_attribute, diagnosis}
-│       │   (chart PNGs carry a numeric `NN_` prefix mirroring data-flow order;
-│       │    authoritative name map is `CHART_FILENAMES` in
-│       │    `core/p08_evaluation/error_analysis_runner.py` — do not hardcode
-│       │    filenames, look up via that constant)
-│       ├── 01_overview.png                  headline: mAP + per-mode Δ mAP ranked bars
-│       ├── 02_data_distribution.png         class count + per-class × size-tier
-│       ├── 03_per_class_performance.png     P / R / F1 bars (renamed from per_class_pr_f1)
-│       ├── 04_confusion_matrix.png          GT×Pred (last col/row = background)
-│       ├── 04_top_confused_pairs.png        ranked class-pair bars
-│       ├── 05_confidence_calibration.png    TP vs FP score histogram
-│       ├── 06_failure_mode_contribution.png 2-panel: global Δ mAP + per-class × mode heatmap
-│       ├── 07_failure_by_attribute.png      miss-rate by size / aspect-ratio / crowdedness
-│       ├── 08_hardest_images.png            top-12 overview
-│       ├── 09_failure_mode_examples/        5-mode × per-class GT|Pred galleries (render_gt_pred_side_by_side)
-│       │   ├── missed/<class>/…
-│       │   ├── localization/<class>/…
-│       │   ├── class_confusion/<pred>__from__<gt>/…
-│       │   ├── duplicate/<class>/…
-│       │   └── background_fp/<class>/…
-│       ├── 10_recoverable_map_vs_iou.png    per-mode Δ mAP across IoU 0.5 → 0.9 (detection only)
-│       ├── 11_confidence_attribution.png    FN causality: true_miss / under_confidence / localization_fail
-│       ├── 12_boxes_per_image.png           crowdedness (mean/median/p95/max)
-│       ├── 13_bbox_aspect_ratio.png         per-class log-scale w/h
-│       └── 14_size_recall.png               small / medium / large with COCO px² thresholds
-│           ├── missed/<class>/<stem>__missed__area_<px>.png
-│           ├── localization/<class>/<stem>__loc__iou_<x>_score_<y>.png
-│           ├── class_confusion/<pred>__from__<gt>/<stem>__conf__iou_<x>_score_<y>.png
-│           ├── duplicate/<class>/<stem>__dup__iou_<x>_score_<y>.png
-│           └── background_fp/<class>/<stem>__bgfp__score_<y>.png
-├── test_predictions/           same layout as val_predictions/
+│       │                           summary.md auto-iterates 01→20 with description + signal +
+│       │                             suggested-next-step driven by `chart_annotations.py::CHART_META`
+│       │   (chart PNGs carry a numeric `NN_` prefix; authoritative name map is `CHART_FILENAMES`
+│       │    in `core/p08_evaluation/error_analysis_runner.py` — do not hardcode filenames)
+│       ├── 01_overview.png                       headline metric + per-mode Δ ranked bars
+│       ├── 02_data_distribution.png              val class/sample balance
+│       ├── 03_distribution_mismatch.{png,json}   train↔val/test drift (class %, JS div, image-stats KS)
+│       ├── 04_label_quality.{png,json}           per-class confident-disagreement rate
+│       ├── 04_label_quality_gallery.png          top-N suspected mislabels GT|Pred
+│       ├── 04_suspected_mislabels.csv            Label Studio re-import format
+│       ├── 05_duplicates_leakage.{png,json}      pHash near-dupes within / across splits (loader-based enumeration)
+│       ├── 06_learning_ability.{png,json}        train-vs-val regime + learning curves (det reuses main mAP evaluator)
+│       ├── 07_per_class_performance.png          P/R/F1 (det/cls), IoU (seg), PCK (kpt)
+│       ├── 08_confusion_matrix.png   OR  08_top_confused_pairs.png   (det/cls/seg; ≤20 classes vs >20)
+│       ├── 09_confidence_calibration.png         TP vs FP histogram (det/cls)
+│       │   OR 09_confidence_vs_error.png         heatmap-peak vs pixel error (kpt variant)
+│       ├── 10_failure_mode_contribution.png      global Δ + per-class × mode heatmap
+│       ├── 11_failure_by_attribute.png           task-aware attrs (size/aspect/crowdedness for det; resolution/brightness for cls; etc.)
+│       ├── 12_hardest_images.png                 top-12 worst GT|Pred grid
+│       ├── 13_failure_mode_examples/             per-task galleries; subfolder taxonomy:
+│       │   │  detection: missed/, localization/, class_confusion/, duplicate/, background_fp/   (each /<class>/)
+│       │   │  classification: misclassified/<gt>__as__<pred>/, low_confidence_correct/<cls>/, high_confidence_wrong/<gt>__as__<pred>/
+│       │   │  segmentation: low_iou/<cls>/, missed/<cls>/, false_positive/<cls>/, boundary_error/<cls>/
+│       │   │  keypoint: high_error/kp_<k>/, occluded_misprediction/kp_<k>/, swapped_pair/<L>__<R>/
+│       ├── 14_robustness_sweep.{png,json}        metric vs corruption (gaussian_blur · jpeg · brightness · rotation), 3 severities
+│       ├── 15_recoverable_map_vs_iou.png         (detection) per-mode Δ mAP across IoU 0.5→0.9
+│       ├── 16_confidence_attribution.png         (detection) FN causality: true_miss / under_conf / loc_fail
+│       ├── 17_boxes_per_image.png                (detection) crowdedness
+│       ├── 18_bbox_aspect_ratio.png              (detection) per-class log-scale w/h
+│       ├── 19_size_recall.png                    (detection) recall by COCO size bands
+│       └── 20_pixel_confusion_matrix.png         (segmentation) row-normalised C×C pixel cross-tab
+├── test_predictions/           same flat 01..20 layout as val_predictions/error_analysis/
 └── test_results.json           HF Trainer metrics on the test split
 ```
+
+No more sibling `distribution_mismatch/`, `learning_ability/`, or `label_quality/` folders at run root. The `DM_`/`LA_`/`LQ_` filename prefixes are retired — every diagnostic uses the flat `NN_` numeric prefix. Reading order matches debugging order: data → labels → splits → capacity → per-class → confusion → calibration → failure decomposition → slices → instances → galleries → robustness → task-specific deep dives.
+
+**Interpretation layer (Phase 3)** — every chart in `summary.md` is enriched with a description, a current-signal snapshot, and a rule-driven next-step suggestion. Lookup table is `core/p08_evaluation/chart_annotations.py::CHART_META` keyed by filename stem (e.g. `"05_confidence_calibration"`). Each entry has `title`, `description` (< 80 words plain English), an optional `signal_template`, and `next_step_rules` (each a `(when_metric_dict→bool, advice_template)` pair). The first matching rule's advice wins; if none fires the default is `"No action — signal is within acceptable band."`. Analyzers populate the per-chart `metrics` dict and pass it to `_write_json_md(..., chart_metrics=...)` — that drives both the signal snapshot and the rule selection.
+
+**Adding a new chart**: (1) add entry in `CHART_FILENAMES` (numbered prefix, never hardcode the filename downstream), (2) write the chart in the relevant `_analyze_*` function, (3) add a `ChartMeta` entry in `CHART_META` describing it + 1–3 `Rule`s referencing already-computed metrics, (4) populate the corresponding `chart_metrics["<stem>"]` dict so signals + rules fire.
 
 `VizStyle` (core/p10_inference/supervision_bridge.py) is the single source of truth for colors/thickness/text — no per-site drawing constants. `training_config` in `summary.json` snapshots arch / params / lr / optimizer / scheduler / bf16 / best-metric / test-metrics from both backends.
 

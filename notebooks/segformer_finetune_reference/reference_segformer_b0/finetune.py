@@ -57,6 +57,11 @@ _argp.add_argument("--seed", type=int, default=int(os.environ.get("SEED", 42)))
 _argp.add_argument("--tag", type=str, default=os.environ.get("RUN_TAG", ""))
 _argp.add_argument("--epochs", type=int, default=None)
 _argp.add_argument("--output-dir", type=str, default=None)
+_argp.add_argument("--batch-size", type=int, default=8)
+_argp.add_argument("--num-workers", type=int, default=4)
+_argp.add_argument("--eval-steps", type=int, default=200)
+_argp.add_argument("--logging-steps", type=int, default=20)
+_argp.add_argument("--bf16", action="store_true")
 _args, _ = _argp.parse_known_args()
 SEED = _args.seed
 
@@ -75,14 +80,14 @@ else:
 # ## Model
 
 model_checkpoint = "nvidia/mit-b0"  # pre-trained model from which to fine-tune
-batch_size = 2  # upstream default (per_device_{train,eval}_batch_size)
+batch_size = _args.batch_size  # upstream default was 2; raised to 8 — GPU was <5% util at bs=2
 
 # ## Loading the dataset
 # Switched from upstream's gated `segments/sidewalk-semantic` to the public
 # `-2` variant so the script runs without HF auth token.
 from datasets import load_dataset
 
-hf_dataset_identifier = "segments/sidewalk-semantic-2"
+hf_dataset_identifier = "segments/sidewalk-semantic"  # gated — requires HF_TOKEN
 ds = load_dataset(hf_dataset_identifier)
 
 # ## id2label / label2id
@@ -162,11 +167,14 @@ training_args = TrainingArguments(
     save_total_limit=3,
     eval_strategy="steps",
     save_strategy="steps",
-    save_steps=20,
-    eval_steps=20,
-    logging_steps=1,
+    save_steps=_args.eval_steps,
+    eval_steps=_args.eval_steps,
+    logging_steps=_args.logging_steps,
     eval_accumulation_steps=5,
     load_best_model_at_end=True,
+    dataloader_num_workers=_args.num_workers,
+    dataloader_pin_memory=True,
+    bf16=_args.bf16,
     push_to_hub=False,         # upstream pushes to Hub; reference port writes locally only
     report_to="none",          # no wandb/tb auth required — see CLAUDE.md
     seed=SEED,

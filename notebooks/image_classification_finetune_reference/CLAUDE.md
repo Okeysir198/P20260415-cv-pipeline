@@ -17,8 +17,8 @@ Upstream: https://github.com/huggingface/notebooks/blob/main/examples/image_clas
 ├── data_loader.py                  EuroSAT → ImageFolder dump CLI
 ├── .gitignore
 │
-├── reference_swin_tiny/            (pending) upstream .py port of the cookbook notebook
-└── our_swin_tiny/                  (pending) same experiment via core/p06_training/
+├── reference_swin_tiny/            upstream .py port of the cookbook notebook (finetune.py + inference.py + runs/)
+└── our_swin_tiny/                  same experiment via core/p06_training/ (05_data.yaml + 06_training.yaml + runs/)
 ```
 
 Two-kind folder convention — identical to `notebooks/detr_finetune_reference/`:
@@ -54,7 +54,7 @@ everything on one Python toolchain).
   normalize). Writing pre-upscaled copies wastes disk and bakes in resize
   semantics we may want to change later.
 
-## Key config invariants (pending `our_swin_tiny/`)
+## Key config invariants (for `our_swin_tiny/`)
 
 Inherited from the HF cookbook notebook + our DETR-reference conventions:
 

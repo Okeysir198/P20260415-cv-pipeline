@@ -332,9 +332,15 @@ class HFClassificationModel(DetectionModel):
     def output_format(self) -> str:
         return "classification"
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Run inference, return (B, num_classes) logits."""
-        outputs = self.hf_model(pixel_values=x)
+    def forward(self, x=None, pixel_values=None, labels=None, **kwargs):
+        """HF-Trainer-compatible: accepts pixel_values+labels kwargs and
+        returns the underlying HF ModelOutput (with .loss if labels given).
+        Also supports positional inference call `model(tensor)` → logits.
+        """
+        px = pixel_values if pixel_values is not None else x
+        if labels is not None:
+            return self.hf_model(pixel_values=px, labels=labels)
+        outputs = self.hf_model(pixel_values=px)
         return outputs.logits
 
     def forward_with_loss(
@@ -366,9 +372,15 @@ class HFSegmentationModel(DetectionModel):
     def output_format(self) -> str:
         return "segmentation"
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Run inference, return (B, num_classes, H, W) logits."""
-        outputs = self.hf_model(pixel_values=x)
+    def forward(self, x=None, pixel_values=None, labels=None, **kwargs):
+        """HF-Trainer-compatible: accepts pixel_values+labels kwargs and
+        returns the underlying HF ModelOutput (with .loss if labels given).
+        Also supports positional inference `model(tensor)` → logits.
+        """
+        px = pixel_values if pixel_values is not None else x
+        if labels is not None:
+            return self.hf_model(pixel_values=px, labels=labels)
+        outputs = self.hf_model(pixel_values=px)
         return outputs.logits
 
     def forward_with_loss(

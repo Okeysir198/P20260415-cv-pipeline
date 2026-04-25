@@ -31,11 +31,16 @@ import numpy as np
 import supervision as sv
 from transformers import TrainerCallback
 
-from core.p05_data.detection_dataset import YOLOXDataset
 from core.p05_data.transforms import build_transforms
+from core.p06_training._common import (
+    build_dataset_for_viz,
+    task_from_output_format,
+    yolo_targets_to_xyxy,
+)
 from utils.viz import (
     VizStyle,
     annotate_detections,
+    classification_banner,
     save_image_grid,
 )
 
@@ -56,17 +61,83 @@ def _draw_gt_boxes(
     if len(targets) == 0:
         return image.copy()
     h, w = image.shape[:2]
-    cx, cy, bw, bh = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
-    xyxy = np.stack([
-        (cx - bw / 2) * w, (cy - bh / 2) * h,
-        (cx + bw / 2) * w, (cy + bh / 2) * h,
-    ], axis=1).astype(np.float64)
-    class_ids = targets[:, 0].astype(np.int64)
-    dets = sv.Detections(xyxy=xyxy, class_id=class_ids)
+    xyxy, class_ids = yolo_targets_to_xyxy(targets, w, h)
+    dets = sv.Detections(xyxy=xyxy.astype(np.float64), class_id=class_ids)
     style = VizStyle(box_thickness=thickness, label_text_scale=text_scale)
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     annotated_rgb = annotate_detections(image_rgb, dets, class_names=class_names, style=style)
     return cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
+
+
+def _render_gt_panel(
+    image_bgr: np.ndarray,
+    target: Any,
+    task: str,
+    class_names: dict[int, str],
+    thickness: int = 2,
+    text_scale: float = 0.4,
+) -> np.ndarray:
+    """Task-aware single-panel GT rendering on a BGR image.
+
+    Dispatches to the correct primitive per task and returns a BGR uint8
+    image. Used by ``HFDataLabelGridCallback`` and ``HFAugLabelGridCallback``
+    so the ``02_data_labels_*.png`` / ``03_aug_labels_*.png`` grids reflect
+    each task's actual GT structure (boxes / mask / class label / keypoints).
+
+    Target contract per task:
+    - detection:     YOLO-normalized targets ``(N, 5)`` = ``[cls, cx, cy, w, h]``
+    - segmentation:  ``(H, W)`` uint8 mask (pixel values = class id)
+    - classification:scalar ``int`` class id
+    - keypoint:      ``(K, 2)`` or ``(K, 3)`` keypoint array
+    """
+    if task == "detection":
+        targets_np = (
+            target if isinstance(target, np.ndarray)
+            else np.zeros((0, 5), dtype=np.float32)
+        )
+        return _draw_gt_boxes(image_bgr, targets_np, class_names, thickness, text_scale)
+
+    from core.p10_inference.supervision_bridge import _draw_keypoints_panel, _mask_overlay
+
+    style = VizStyle(box_thickness=thickness, label_text_scale=text_scale)
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+    if task == "segmentation":
+        mask = target if isinstance(target, np.ndarray) else np.zeros(image_bgr.shape[:2], np.uint8)
+        annotated_rgb = _mask_overlay(image_rgb, mask, style.gt_color_rgb, style.mask_alpha)
+    elif task == "classification":
+        try:
+            cid = int(target)
+        except (TypeError, ValueError):
+            cid = -1
+        label = class_names.get(cid, str(cid)) if cid >= 0 else "?"
+        annotated_rgb = classification_banner(
+            image_rgb, f"Label: {label}", style=style, position="top",
+            bg_color_rgb=style.gt_color_rgb, text_color_rgb=(255, 255, 255),
+        )
+    elif task == "keypoint":
+        kpts = target if isinstance(target, np.ndarray) else None
+        annotated_rgb = _draw_keypoints_panel(image_rgb, kpts, style.gt_color_rgb, style)
+    else:
+        annotated_rgb = image_rgb
+
+    return cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
+
+
+def _extract_raw_target(ds, idx: int, task: str):
+    """Pull the per-task GT target for sample ``idx`` from a p05 Dataset.
+
+    Returns the target in the shape expected by :func:`_render_gt_panel`.
+    """
+    if task == "detection":
+        # YOLOXDataset: load YOLO normalized (N, 5) from the label .txt.
+        labels = ds._load_label(ds.img_paths[idx])
+        if labels is None or len(labels) == 0:
+            return np.zeros((0, 5), dtype=np.float32)
+        return labels
+    # Segmentation / classification / keypoint: get_raw_item returns the target directly.
+    item = ds.get_raw_item(idx)
+    return item.get("targets")
 
 
 def _save_image_grid(
@@ -91,6 +162,100 @@ logger = logging.getLogger(__name__)
 
 def _build_class_names(data_config: dict) -> dict[int, str]:
     return {int(k): str(v) for k, v in data_config.get("names", {}).items()}
+
+
+def _build_task_transforms(
+    task: str,
+    is_train: bool,
+    aug_config: dict,
+    input_size: tuple[int, int],
+    mean: list | None,
+    std: list | None,
+):
+    """Return a task-aware transform callable compatible with the p05 Dataset.
+
+    - detection: :class:`DetectionTransform` (via core.p05_data.transforms.build_transforms)
+    - classification: :func:`build_classification_transforms`
+    - segmentation: :func:`build_segmentation_transforms`
+    - keypoint: :func:`build_keypoint_transforms`
+
+    Returns ``None`` if the task has no dedicated builder (lets the dataset
+    fall back to its internal default).
+    """
+    if task == "detection":
+        return build_transforms(
+            config=aug_config, is_train=is_train, input_size=input_size,
+            mean=mean, std=std,
+        )
+    if task == "classification":
+        from core.p05_data.classification_dataset import build_classification_transforms
+        return build_classification_transforms(
+            is_train=is_train, input_size=input_size, mean=mean, std=std,
+        )
+    if task == "segmentation":
+        try:
+            from core.p05_data.segmentation_dataset import build_segmentation_transforms
+            return build_segmentation_transforms(
+                is_train=is_train, input_size=input_size, mean=mean, std=std,
+            )
+        except Exception:
+            return None
+    if task == "keypoint":
+        try:
+            from core.p05_data.keypoint_dataset import build_keypoint_transforms
+            return build_keypoint_transforms(
+                is_train=is_train, input_size=input_size, mean=mean, std=std,
+            )
+        except Exception:
+            return None
+    return None
+
+
+def _extract_target_for_panel(targets_tensor, task: str):
+    """Coerce a post-transform target into the shape :func:`_render_gt_panel` expects."""
+    if task == "detection":
+        if hasattr(targets_tensor, "numpy"):
+            arr = targets_tensor.numpy()
+        else:
+            arr = np.asarray(targets_tensor)
+        return arr if len(arr) > 0 else np.zeros((0, 5), dtype=np.float32)
+    if task == "segmentation":
+        if hasattr(targets_tensor, "numpy"):
+            return targets_tensor.numpy().astype(np.uint8)
+        return np.asarray(targets_tensor, dtype=np.uint8)
+    if task == "classification":
+        if hasattr(targets_tensor, "item"):
+            return int(targets_tensor.item())
+        return int(targets_tensor)
+    # keypoint
+    if hasattr(targets_tensor, "numpy"):
+        return targets_tensor.numpy()
+    if isinstance(targets_tensor, dict):
+        # KeypointDataset may return {"keypoints": tensor, ...}
+        kpts = targets_tensor.get("keypoints")
+        if hasattr(kpts, "numpy"):
+            return kpts.numpy()
+        return np.asarray(kpts) if kpts is not None else None
+    return np.asarray(targets_tensor)
+
+
+def _tensor_to_denorm_bgr(
+    tensor,
+    mean: np.ndarray,
+    std: np.ndarray,
+    normalize_applied: bool,
+) -> np.ndarray:
+    """Convert a post-transform CHW float tensor → HWC uint8 BGR.
+
+    If ``normalize_applied`` the tensor is denormalized via ``* std + mean``
+    before clamp+scale. Otherwise it is already in ``[0, 1]``.
+    """
+    arr = tensor.detach().cpu().float().numpy().transpose(1, 2, 0)
+    if normalize_applied:
+        arr = np.clip(arr * std + mean, 0, 1)
+    else:
+        arr = np.clip(arr, 0, 1)
+    return (arr[:, :, ::-1] * 255).astype(np.uint8)
 
 
 class HFDatasetStatsCallback(TrainerCallback):
@@ -170,7 +335,14 @@ class HFDatasetStatsCallback(TrainerCallback):
 
 
 class HFDataLabelGridCallback(TrainerCallback):
-    """Emits `data_preview/02_data_labels_<split>.png` once at training start."""
+    """Emits `data_preview/02_data_labels_<split>.png` once at training start.
+
+    Task-aware: dispatches to the right p05 Dataset via
+    :func:`build_dataset_for_viz` and renders GT per task via
+    :func:`_render_gt_panel` — bbox overlays for detection, mask overlays for
+    segmentation, class banners for classification, keypoint dots for
+    keypoint.
+    """
 
     def __init__(
         self,
@@ -178,6 +350,7 @@ class HFDataLabelGridCallback(TrainerCallback):
         splits: list[str],
         data_config: dict,
         base_dir: str,
+        task: str = "detection",
         subsets: dict[str, list[int] | None] | None = None,
         num_samples: int = 16,
         grid_cols: int = 4,
@@ -189,6 +362,7 @@ class HFDataLabelGridCallback(TrainerCallback):
         self.splits = splits
         self.data_config = data_config
         self.base_dir = base_dir or ""
+        self.task = task
         self.subsets = subsets or {s: None for s in splits}
         self.num_samples = num_samples
         self.grid_cols = grid_cols
@@ -200,9 +374,8 @@ class HFDataLabelGridCallback(TrainerCallback):
         class_names = _build_class_names(self.data_config)
         for split in self.splits:
             try:
-                ds = YOLOXDataset(
-                    data_config=self.data_config, split=split,
-                    transforms=None, base_dir=self.base_dir,
+                ds = build_dataset_for_viz(
+                    self.task, split, self.data_config, self.base_dir, transforms=None,
                 )
             except Exception as e:
                 logger.info("HFDataLabelGridCallback: skip split %s — %s", split, e)
@@ -217,12 +390,14 @@ class HFDataLabelGridCallback(TrainerCallback):
 
             annotated: list[np.ndarray] = []
             for idx in indices:
-                item = ds.get_raw_item(idx)
-                targets = ds._load_label(ds.img_paths[idx])
-                if targets is None or len(targets) == 0:
-                    targets = np.zeros((0, 5), dtype=np.float32)
-                annotated.append(_draw_gt_boxes(
-                    item["image"], targets, class_names,
+                try:
+                    item = ds.get_raw_item(idx)
+                    target = _extract_raw_target(ds, idx, self.task)
+                except Exception as e:
+                    logger.warning("HFDataLabelGridCallback: failed idx %d — %s", idx, e)
+                    continue
+                annotated.append(_render_gt_panel(
+                    item["image"], target, self.task, class_names,
                     self.thickness, self.text_scale,
                 ))
             if not annotated:
@@ -231,7 +406,7 @@ class HFDataLabelGridCallback(TrainerCallback):
             out_path = self.save_dir / "data_preview" / f"02_data_labels_{split}.png"
             _save_image_grid(
                 annotated, self.grid_cols,
-                f"Data + Labels [{split}] — {n} samples",
+                f"Data + Labels [{split}] — {n} samples ({self.task})",
                 out_path, self.dpi,
             )
             logger.info("HFDataLabelGridCallback: saved %s", out_path)
@@ -255,6 +430,7 @@ class HFAugLabelGridCallback(TrainerCallback):
         aug_config: dict,
         base_dir: str,
         input_size: tuple[int, int],
+        task: str = "detection",
         subsets: dict[str, list[int] | None] | None = None,
         num_samples: int = 16,
         grid_cols: int = 4,
@@ -268,6 +444,7 @@ class HFAugLabelGridCallback(TrainerCallback):
         self.aug_config = aug_config or {}
         self.base_dir = base_dir or ""
         self.input_size = tuple(input_size)
+        self.task = task
         self.subsets = subsets or {s: None for s in splits}
         self.num_samples = num_samples
         self.grid_cols = grid_cols
@@ -290,18 +467,26 @@ class HFAugLabelGridCallback(TrainerCallback):
         simple_cfg = {
             **self.aug_config, "mosaic": False, "mixup": False, "copypaste": False,
         }
-        transforms = build_transforms(
-            config=simple_cfg, is_train=True, input_size=self.input_size,
-            mean=self.data_config.get("mean"), std=self.data_config.get("std"),
-        )
+        try:
+            transforms = _build_task_transforms(
+                task=self.task, is_train=True, aug_config=simple_cfg,
+                input_size=self.input_size,
+                mean=self.data_config.get("mean"), std=self.data_config.get("std"),
+            )
+        except Exception as e:
+            logger.info(
+                "HFAugLabelGridCallback: transform-build failed for task=%s "
+                "(%s) — falling back to dataset default.", self.task, e,
+            )
+            transforms = None
 
         for split in self.splits:
             if split != "train":
                 continue
             try:
-                ds = YOLOXDataset(
-                    data_config=self.data_config, split=split,
-                    transforms=transforms, base_dir=self.base_dir,
+                ds = build_dataset_for_viz(
+                    self.task, split, self.data_config, self.base_dir,
+                    transforms=transforms,
                 )
             except Exception as e:
                 logger.info("HFAugLabelGridCallback: skip %s — %s", split, e)
@@ -322,18 +507,13 @@ class HFAugLabelGridCallback(TrainerCallback):
                 except Exception as e:
                     logger.warning("HFAugLabelGridCallback: failed idx %d — %s", i, e)
                     continue
-                aug_np = aug_tensor.numpy().transpose(1, 2, 0)
-                if self.aug_config.get("normalize", True):
-                    aug_np = np.clip(aug_np * std + mean, 0, 1)
-                else:
-                    aug_np = np.clip(aug_np, 0, 1)
-                aug_bgr = (aug_np[:, :, ::-1] * 255).astype(np.uint8)
-                targets_np = (
-                    targets_tensor.numpy() if len(targets_tensor) > 0
-                    else np.zeros((0, 5), dtype=np.float32)
+                aug_bgr = _tensor_to_denorm_bgr(
+                    aug_tensor, mean, std,
+                    normalize_applied=self.aug_config.get("normalize", True),
                 )
-                annotated.append(_draw_gt_boxes(
-                    aug_bgr, targets_np, class_names,
+                target = _extract_target_for_panel(targets_tensor, self.task)
+                annotated.append(_render_gt_panel(
+                    aug_bgr, target, self.task, class_names,
                     self.thickness, self.text_scale,
                 ))
             if not annotated:
@@ -342,7 +522,7 @@ class HFAugLabelGridCallback(TrainerCallback):
             out_path = self.save_dir / "data_preview" / f"03_aug_labels_{split}.png"
             _save_image_grid(
                 annotated, self.grid_cols,
-                f"Augmented + Labels [{split}] — {n} samples",
+                f"Augmented + Labels [{split}] — {n} samples ({self.task})",
                 out_path, self.dpi,
             )
             logger.info("HFAugLabelGridCallback: saved %s", out_path)
@@ -377,10 +557,13 @@ class HFValPredictionCallback(TrainerCallback):
         text_scale: float = 0.4,
         dpi: int = 150,
         test_dataset: Any = None,
+        train_dataset: Any = None,
         best_num_samples: int = 16,
         best_conf_threshold: float = 0.1,
         enable_epoch_end: bool = True,
         enable_train_end: bool = True,
+        data_config: dict | None = None,
+        base_dir: str | None = None,
     ) -> None:
         self.save_dir = Path(save_dir)
         self.class_names = class_names
@@ -393,10 +576,13 @@ class HFValPredictionCallback(TrainerCallback):
         self.text_scale = text_scale
         self.dpi = dpi
         self.test_dataset = test_dataset
+        self.train_dataset = train_dataset
         self.best_num_samples = best_num_samples
         self.best_conf_threshold = best_conf_threshold
         self.enable_epoch_end = enable_epoch_end
         self.enable_train_end = enable_train_end
+        self._loaded_data_cfg = data_config
+        self._config_dir = base_dir
         self._sample_indices: list[int] | None = None
 
     def on_epoch_end(self, args, state, control, **kwargs):
@@ -482,11 +668,19 @@ class HFValPredictionCallback(TrainerCallback):
 
         try:
             training_config = _build_hf_training_config(args, state, model, best_map, test_map)
+            # Plumb resolved data config + base_dir so post_train analyzers
+            # (duplicates_leakage, etc.) can resolve split paths.
+            if self._loaded_data_cfg is not None:
+                training_config["_loaded_data_cfg"] = self._loaded_data_cfg
+            if self._config_dir is not None:
+                training_config["_config_dir"] = self._config_dir
             run_post_train_artifacts(
                 model=model,
                 save_dir=self.save_dir,
                 val_dataset=val_ds,
                 test_dataset=self.test_dataset,
+                train_dataset=self.train_dataset,
+                val_loader=val_loader,
                 task=_infer_task_from_model(model),
                 class_names=self.class_names,
                 input_size=self.input_size,
@@ -550,14 +744,147 @@ def _build_hf_training_config(args, state, model, best_map: float, test_map: flo
 
 def _infer_task_from_model(model) -> str:
     """Map ``model.output_format`` → canonical task for the post-train runner."""
-    of = getattr(model, "output_format", None) or "detection"
-    of = of.lower()
-    if of in {"detr", "yolox", "detection"}:
-        return "detection"
-    if of in {"classification", "cls"}:
-        return "classification"
-    if of in {"segmentation", "seg"}:
-        return "segmentation"
-    if of in {"keypoint", "pose"}:
-        return "keypoint"
-    return "detection"
+    return task_from_output_format(getattr(model, "output_format", None))
+
+
+class HFNormalizedInputPreviewCallback(TrainerCallback):
+    """Emits flat ``data_preview/05_normalized_input_preview.png`` at train-begin.
+
+    Renders an ``N`` sample grid of the post-normalize tensor denormalized
+    back to RGB, with task-aware GT overlays (detection=boxes,
+    classification=banner, segmentation=mask, keypoint=dots+skeleton).
+
+    Uses the ``is_train=False`` transform pipeline (resize + normalize, no
+    aug) so the grid shows exactly what the model sees at val/test time.
+    A colour cast or clamped-to-grey output here indicates a
+    rescale/normalize mismatch between the training pipeline and model
+    processor — same footgun ``04_transform_pipeline.png`` catches, but
+    also visible for non-detection tasks.
+    """
+
+    def __init__(
+        self,
+        save_dir: str,
+        data_config: dict,
+        training_config: dict,
+        base_dir: str,
+        input_size: tuple[int, int],
+        task: str = "detection",
+        subsets: dict[str, list[int] | None] | None = None,
+        num_samples: int = 16,
+        grid_cols: int = 4,
+        thickness: int = 2,
+        text_scale: float = 0.4,
+        dpi: int = 120,
+    ) -> None:
+        self.save_dir = Path(save_dir)
+        self.data_config = data_config
+        self.training_config = training_config or {}
+        self.base_dir = base_dir or ""
+        self.input_size = tuple(input_size)
+        self.task = task
+        self.subsets = subsets or {}
+        self.num_samples = num_samples
+        self.grid_cols = grid_cols
+        self.thickness = thickness
+        self.text_scale = text_scale
+        self.dpi = dpi
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        class_names = _build_class_names(self.data_config)
+        mean = np.asarray(
+            self.data_config.get("mean", [0.485, 0.456, 0.406]),
+            dtype=np.float32,
+        ).reshape(1, 1, 3)
+        std = np.asarray(
+            self.data_config.get("std", [0.229, 0.224, 0.225]),
+            dtype=np.float32,
+        ).reshape(1, 1, 3)
+
+        # Val pipeline — resize + normalize, no aug. For detection we pass an
+        # augmentation dict with the stateless flags off; for other tasks
+        # _build_task_transforms picks the task-specific val builder.
+        aug_cfg = dict(self.training_config.get("augmentation", {}) or {})
+        aug_cfg["mosaic"] = False
+        aug_cfg["mixup"] = False
+        aug_cfg["copypaste"] = False
+        normalize_applied = bool(aug_cfg.get("normalize", True))
+
+        try:
+            transforms = _build_task_transforms(
+                task=self.task, is_train=False, aug_config=aug_cfg,
+                input_size=self.input_size,
+                mean=self.data_config.get("mean"),
+                std=self.data_config.get("std"),
+            )
+        except Exception as e:
+            logger.info(
+                "HFNormalizedInputPreviewCallback: transform-build failed for "
+                "task=%s (%s) — using dataset default.", self.task, e,
+            )
+            transforms = None
+
+        # Prefer the train split so 05_ aligns with 02_data_labels_train /
+        # 03_aug_labels_train. Falls back to the first available split.
+        split = "train" if "train" in (self.subsets or {"train": None}) else None
+        if split is None:
+            split = next(iter(self.subsets or ["train"]), "train")
+
+        try:
+            ds = build_dataset_for_viz(
+                self.task, split, self.data_config, self.base_dir,
+                transforms=transforms,
+            )
+        except Exception as e:
+            logger.info(
+                "HFNormalizedInputPreviewCallback: skip (dataset build failed "
+                "for split=%s): %s", split, e,
+            )
+            return control
+
+        subset = self.subsets.get(split)
+        pool = list(range(len(ds))) if subset is None else list(subset)
+        n = min(self.num_samples, len(pool))
+        if n == 0:
+            return control
+        indices = sorted(random.sample(pool, n))
+
+        annotated: list[np.ndarray] = []
+        for i in indices:
+            try:
+                result = ds[i]
+                img_tensor = result[0]
+                targets_tensor = result[1]
+            except Exception as e:
+                logger.warning(
+                    "HFNormalizedInputPreviewCallback: failed idx %d — %s", i, e,
+                )
+                continue
+            try:
+                img_bgr = _tensor_to_denorm_bgr(
+                    img_tensor, mean, std, normalize_applied=normalize_applied,
+                )
+                target = _extract_target_for_panel(targets_tensor, self.task)
+                annotated.append(_render_gt_panel(
+                    img_bgr, target, self.task, class_names,
+                    self.thickness, self.text_scale,
+                ))
+            except Exception as e:
+                logger.warning(
+                    "HFNormalizedInputPreviewCallback: render failed idx %d — %s",
+                    i, e,
+                )
+                continue
+
+        if not annotated:
+            return control
+
+        out_path = self.save_dir / "data_preview" / "05_normalized_input_preview.png"
+        _save_image_grid(
+            annotated, self.grid_cols,
+            f"Normalized input (denormalized) + GT [{split}] — "
+            f"{len(annotated)} samples ({self.task})",
+            out_path, self.dpi,
+        )
+        logger.info("HFNormalizedInputPreviewCallback: saved %s", out_path)
+        return control

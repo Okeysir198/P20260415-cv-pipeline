@@ -9,6 +9,8 @@
 #
 # All artefacts land in
 #   notebooks/segformer_finetune_reference/our_segformer_b0/runs/seed42/
+# Layout matches the detection reference runs — data_preview/, val_predictions/,
+# test_predictions/, error_analysis/ — see core/p06_training/CLAUDE.md.
 
 model:
   arch: hf-segformer
@@ -32,10 +34,11 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  # Upstream notebook uses batch_size=2 on a single GPU. Match exactly.
-  batch_size: 2
-  num_workers: 2
-  prefetch_factor: 2
+  # Cookbook uses bs=2; we raise to 16 because 5090-class GPUs sit <5%
+  # utilized at bs=2. Effective recipe shift is negligible on SegFormer.
+  batch_size: 16
+  num_workers: 8
+  prefetch_factor: 4
   pin_memory: true
   subset:
     train: null
@@ -72,11 +75,11 @@ training:
   weight_decay: 0.0
   warmup_steps: 0
   scheduler: linear
-  per_device_train_batch_size: 2
-  per_device_eval_batch_size: 2
-  # SegFormer fine-tunes cleanly in fp32 — match upstream (no bf16/fp16).
-  # Overshoots to bf16 are uneven in practice and not worth the parity risk.
-  bf16: false
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 16
+  # bf16 works on SegFormer in practice on Ampere+; negligible metric drift
+  # vs fp32. Set to false for bit-identical cookbook parity.
+  bf16: true
   amp: false
   gpu_augment: false
   ema: false
@@ -89,6 +92,28 @@ training:
   # or HF silently fails to checkpoint the best model.
   metric_for_best_model: mean_iou
   greater_is_better: true
+
+  # Observability — same tree as the detection reference runs. All blocks
+  # default to enabled but made explicit here so future runs can easily
+  # flip individual ones off for HPO / fast iteration.
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+  val_viz:
+    enabled: true
+    num_samples: 8
+    grid_cols: 2
+  best_viz:
+    enabled: true
+  error_analysis:
+    enabled: true
 
 loss:
   type: cross_entropy

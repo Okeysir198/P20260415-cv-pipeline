@@ -21,13 +21,22 @@ uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs
 uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml --dry-run
 
 # Train (each feature has arch-specific configs: 06_training_{yolox,rtdetr,dfine}.yaml)
-#   Every run auto-produces the full observability tree on on_train_end:
-#     <save_dir>/{best.pt, test_results.json,
-#                 data_preview/{dataset_stats,label_grids,aug_preview,normalized_input_preview},
-#                 val_predictions/{epochs/, best.png, error_analysis/{01_…png→14_…png, 09_failure_mode_examples/}},
-#                 test_predictions/{best.png, error_analysis/...}}
-#   Chart filenames are numbered by data-flow order; authoritative name map is
-#   `CHART_FILENAMES` in core/p08_evaluation/error_analysis_runner.py.
+#   Every run auto-produces a unified observability tree (all tasks, both backends):
+#     <save_dir>/
+#       best.pt, test_results.json,
+#       data_preview/   00_dataset_info, 01_dataset_stats, 02_data_labels_{train,val,test},
+#                       03_aug_labels_train, 04_transform_pipeline, 05_normalized_input_preview
+#       val_predictions/{epochs/, best.png, error_analysis/}
+#       test_predictions/{best.png, error_analysis/}
+#   error_analysis/ is flat-numbered 01..20 — every diagnostic at depth 0:
+#     01 overview · 02 data_distribution · 03 distribution_mismatch · 04 label_quality
+#     05 duplicates_leakage · 06 learning_ability · 07 per_class_performance
+#     08 confusion_matrix · 09 confidence_calibration · 10 failure_mode_contribution
+#     11 failure_by_attribute · 12 hardest_images · 13 failure_mode_examples/
+#     14 robustness_sweep · 15..19 (detection-only) · 20 pixel_confusion_matrix (seg-only)
+#     summary.md auto-iterates 01→20 with description + signal + suggested next step.
+#   Authoritative name map: `CHART_FILENAMES` in core/p08_evaluation/error_analysis_runner.py.
+#   No more sibling distribution_mismatch/, learning_ability/, or LQ_/DM_/LA_ prefixed files.
 #   Details + opt-out knobs: core/p06_training/CLAUDE.md
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml \
@@ -191,7 +200,7 @@ import from any `features/<name>/code/`**.
 - **TTA available via `scripts/yolox_tta_eval.py`**: multi-scale (default 512/640/768) × optional h-flip inference over val, reports mAP@0.5. Typical gain on scale-variant classes (smoke, small objects) is ~10% mAP@0.5; deployment cost is 6 inference passes per image (~6× slower). Invariants: use the SAME `build_transforms(is_train=False)` as the evaluator so inputs are ImageNet-normalized; downscale the normalized tensor with `F.interpolate` (no need to renormalize after resize); unflip boxes with `x ← W - x`, then scale back to `ref_size` before merging, then class-wise NMS.
 - **RT-DETRv2: HPO-derived LR often does not generalize from subset → full data**. An LR tuned on 5%-data short runs can be 1.5–2× too hot for full-data long runs, producing post-warmup divergence (val mAP peaks early then collapses). Use conservative settings for small-class fine-tune: `lr=5e-5`, `warmup_steps=300`, `epochs=30–40`, `patience=50`, `val_full_interval=0`, `bf16=true`, `amp=false`. This matches HF/Roboflow canonical recipes and the reference notebooks in `notebooks/detr_finetune_reference/`. Confirm with a short smoke (`data.subset.train=0.2`) before committing to full data.
 - **YOLOX postprocess must not re-sigmoid** (regression guard): both the custom `_DecoupledHead` (`yolox.py:555-559`) and the official adapter (`decode_in_inference=True`) sigmoid obj+cls inside the model's eval-mode forward. `_postprocess_yolox` (`p06_training/postprocess.py`) must **not** apply sigmoid again — doing so squashes every score into [0.25, 0.55] and makes `conf_threshold` meaningless. mAP is unaffected (sigmoid is monotonic → preserves PR ordering) but val-prediction visualizations become "green walls" (thousands of boxes per image) and production deployment confidences stop being real [0, 1] probabilities. If you add a new YOLOX-style head, respect this invariant.
-- **Dataset stats cache**: `DatasetStatsLogger` skips recompute if `<save_dir>/data_preview/dataset_stats.json` + `.png` already exist. Delete those files to force a refresh.
+- **Dataset stats cache**: `generate_dataset_stats()` (now task-aware: detection/cls/seg/kpt) skips recompute if `<save_dir>/data_preview/01_dataset_stats.{json,png}` already exist. Delete those files to force a refresh.
 - **Visualization defaults live in one place**: `utils.viz.VizStyle` is the single source of truth — palette, auto-thickness, label scale, error colors (TP/FP/FN/duplicate/bg_FP), grid cell size, banner style, keypoint radius, zone fill alpha. Override per-run via the `visualization:` (alias `viz:`) block in any training/inference config. Do not edit callsites to change colors/thickness; add a knob to `VizStyle` instead.
 - **DETR-family reference notebooks live in `.venv-notebook/`** — `notebooks/detr_finetune_reference/` contains byte-for-byte ports of qubvel's RT-DETRv2 + D-FINE fine-tune notebooks as runnable `.py` scripts, used as a known-good baseline when debugging our in-repo DETR training. Setup: `bash scripts/setup-notebook-venv.sh` creates `.venv-notebook/` with `albumentations==1.4.6` pin. Do **NOT** run via `uv run` (main venv has a newer albumentations with different box-clip semantics). See `notebooks/detr_finetune_reference/CLAUDE.md` for setup, phase 1/2 plan, and conversion gotchas (Jupyter magics stripped, `display()` commented, `datasets` 4.x access-pattern fix).
 - **D-FINE requires `bf16: false`, RT-DETRv2 is bf16-neutral** — D-FINE's distribution-focused loss stalls val mAP at ~0.15 through ep11 under bf16 (observed on `our_dfine_albumentations/` CPPE-5 runs; eval_loss climbs 2.2→2.9 = divergence). Fp32 restores convergence to test mAP ≈ 0.44. RT-DETRv2's vanilla regression head is bf16-safe (verified ±0.01 on CPPE-5). Set `training.bf16: false` for every D-FINE training config. `training.amp: true` (fp16) overflows both — stay on bf16 or fp32.

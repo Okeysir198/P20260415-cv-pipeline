@@ -277,6 +277,136 @@ def _pick_one_per_class(
 # ---------------------------------------------------------------------------
 
 
+def render_transform_pipeline_task(
+    out_path: Path,
+    *,
+    task: str,
+    data_config: dict,
+    training_config: dict,
+    base_dir: str,
+    class_names: dict[int, str],
+    max_samples: int = 5,
+    style: VizStyle | None = None,
+) -> Path | None:
+    """Classification / segmentation / keypoint variant of the pipeline viz.
+
+    Picks up to ``max_samples`` samples from the train split and renders a
+    2-row grid: (top) raw image with task-aware GT overlay, (bottom) the
+    post-transform tensor denormalized back to RGB with the same GT overlay.
+    Catches the same rescale/normalize footguns without the per-step walk,
+    which would require a box-aware paired pipeline we don't have for these
+    tasks.
+    """
+    import matplotlib.pyplot as plt
+
+    from core.p06_training._common import build_dataset_for_viz
+    from core.p06_training.hf_callbacks import (
+        _build_task_transforms,
+        _extract_target_for_panel,
+        _render_gt_panel,
+        _tensor_to_denorm_bgr,
+    )
+
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+
+    style = style or VizStyle()
+    aug_cfg = dict(training_config.get("augmentation", {}) or {})
+    aug_cfg["mosaic"] = False
+    aug_cfg["mixup"] = False
+    aug_cfg["copypaste"] = False
+    input_size = tuple(data_config.get("input_size") or (640, 640))
+    mean_list = data_config.get("mean") or IMAGENET_MEAN
+    std_list = data_config.get("std") or IMAGENET_STD
+    mean_arr = np.asarray(mean_list, dtype=np.float32).reshape(1, 1, 3)
+    std_arr = np.asarray(std_list, dtype=np.float32).reshape(1, 1, 3)
+    normalize_applied = bool(aug_cfg.get("normalize", True))
+
+    try:
+        raw_ds = build_dataset_for_viz(
+            task, "train", data_config, base_dir, transforms=None,
+        )
+    except Exception as e:
+        logger.warning("render_transform_pipeline_task: raw ds build failed — %s", e)
+        return None
+
+    try:
+        transforms = _build_task_transforms(
+            task=task, is_train=True, aug_config=aug_cfg,
+            input_size=input_size, mean=mean_list, std=std_list,
+        )
+        post_ds = build_dataset_for_viz(
+            task, "train", data_config, base_dir, transforms=transforms,
+        )
+    except Exception as e:
+        logger.warning("render_transform_pipeline_task: post ds build failed — %s", e)
+        return None
+
+    n = min(max_samples, len(raw_ds))
+    if n == 0:
+        return None
+    indices = sorted(random.sample(range(len(raw_ds)), n))
+
+    raw_panels: list[np.ndarray] = []
+    post_panels: list[np.ndarray] = []
+    for idx in indices:
+        try:
+            raw_item = raw_ds.get_raw_item(idx)
+            raw_bgr = raw_item["image"]
+            raw_target = raw_item.get("targets")
+            raw_panels.append(
+                _render_gt_panel(raw_bgr, raw_target, task, class_names, 2, 0.4)
+            )
+            post = post_ds[idx]
+            img_tensor, tgt = post[0], post[1]
+            post_bgr = _tensor_to_denorm_bgr(
+                img_tensor, mean_arr, std_arr, normalize_applied=normalize_applied,
+            )
+            post_target = _extract_target_for_panel(tgt, task)
+            post_panels.append(
+                _render_gt_panel(post_bgr, post_target, task, class_names, 2, 0.4)
+            )
+        except Exception as e:
+            logger.warning("render_transform_pipeline_task: idx %d failed — %s",
+                           idx, e)
+            continue
+
+    if not raw_panels:
+        return None
+
+    n_cols = len(raw_panels)
+    fig, axes = plt.subplots(
+        2, n_cols, figsize=(3.2 * n_cols + 1.2, 6.4), dpi=110, squeeze=False,
+    )
+    fig.subplots_adjust(wspace=0.04, hspace=0.2)
+    row_labels = ["[01] Raw", "[02] Transformed (Denorm)"]
+    for r, panels in enumerate([raw_panels, post_panels]):
+        for c, panel in enumerate(panels):
+            ax = axes[r, c]
+            ax.set_xticks([]); ax.set_yticks([])
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+            rgb = cv2.cvtColor(panel, cv2.COLOR_BGR2RGB)
+            ax.imshow(rgb)
+        axes[r, 0].set_ylabel(
+            row_labels[r], rotation=0, ha="right", va="center",
+            labelpad=60, fontsize=13, fontweight="bold",
+        )
+    feature = data_config.get("dataset_name") or "unknown"
+    fig.suptitle(
+        f"Transform pipeline (task={task}) — {feature} · "
+        f"input {input_size[0]}×{input_size[1]}",
+        y=0.995, fontsize=14, fontweight="bold",
+    )
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(out_path), bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.info("render_transform_pipeline_task: saved %s", out_path)
+    return out_path
+
+
 def render_transform_pipeline(
     out_path: Path,
     *,

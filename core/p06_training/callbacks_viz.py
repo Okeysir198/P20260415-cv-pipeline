@@ -59,6 +59,7 @@ class TransformPipelineCallback(_AnyHook):
         class_names: dict[int, str] | None = None,
         max_samples: int = 5,
         style: Any | None = None,
+        task: str = "detection",
     ) -> None:
         self.save_dir = Path(save_dir)
         self.data_config = data_config
@@ -67,8 +68,27 @@ class TransformPipelineCallback(_AnyHook):
         self.class_names = class_names or {}
         self.max_samples = max_samples
         self.style = style
+        self.task = task
 
     def _render(self) -> None:
+        if self.task != "detection":
+            # The paired-box walker in render_transform_pipeline assumes YOLO
+            # targets. For cls/seg/kpt, defer to the simpler per-task walker.
+            from core.p05_data.transform_pipeline_viz import (
+                render_transform_pipeline_task,
+            )
+            render_transform_pipeline_task(
+                out_path=self.save_dir / "data_preview" / "04_transform_pipeline.png",
+                task=self.task,
+                data_config=self.data_config,
+                training_config=self.training_config,
+                base_dir=self.base_dir,
+                class_names=self.class_names,
+                max_samples=self.max_samples,
+                style=self.style,
+            )
+            return
+
         from core.p05_data.transform_pipeline_viz import render_transform_pipeline
 
         render_transform_pipeline(

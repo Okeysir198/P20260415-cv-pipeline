@@ -1,0 +1,142 @@
+# Shared template — HF Trainer backend for semantic segmentation (SegFormer-family)
+#
+# Copy into a feature's configs/ and change the three commented lines to
+# reference the feature's own 05_data.yaml. Defaults are tuned to reproduce
+# the HF cookbook SegFormer-B0 fine-tune recipe
+# (https://huggingface.co/blog/fine-tune-segformer) while producing the full
+# observability tree (data_preview / val_predictions / test_predictions /
+# error_analysis) on `on_train_end` — same contract as the detection template.
+#
+# Quick start (from repo root):
+#     uv run core/p06_training/train.py \
+#         --config features/<feature>/configs/06_training.yaml
+#
+# Switching SegFormer size:
+#     --override model.pretrained=nvidia/mit-b1 model.arch=hf-segformer
+#     --override model.pretrained=nvidia/mit-b3 model.arch=hf-segformer
+#
+# Run artefacts land under logging.save_dir (or the default
+# `features/<f>/runs/<ts>_06_training/`) in HF-Trainer-standard layout
+# (checkpoint-*/, runs/<ts>_<host>/ tensorboard, trainer_state.json) plus
+# our lineage files (05_data.yaml, config_resolved.yaml) and the full
+# data_preview + val_predictions + error_analysis trees.
+
+model:
+  arch: hf-segformer
+  pretrained: nvidia/mit-b0              # mit-b0..b5; higher = slower, better
+  # num_classes: <N>                     # REQUIRED — match the feature's 05_data.yaml
+  input_size: [512, 512]                 # SegformerImageProcessor default
+  # Segmentation head shape changes with num_classes — must tolerate
+  # size mismatch on reload.
+  ignore_mismatched_sizes: true
+
+# Authoritative tensor-prep contract. The HF AutoImageProcessor
+# (SegformerImageProcessor) owns rescale+normalize; our v2 aug pipeline
+# skips them. See core/p06_training/CLAUDE.md for the contract.
+tensor_prep:
+  input_size: [512, 512]
+  rescale: true
+  normalize: imagenet
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml           # REQUIRED — relative to this config file
+  batch_size: 16                         # raised from cookbook's 2 — 5090-class GPUs are idle at bs=2
+  num_workers: 8
+  prefetch_factor: 4
+  pin_memory: true
+  subset:                                # quick-iteration overrides; null = full split
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  # Upstream cookbook: torchvision ColorJitter + horizontal flip. Random
+  # resize/crop handled by the SegformerImageProcessor default pipeline.
+  library: torchvision
+  mosaic: false
+  mixup: false
+  fliplr: 0.5
+  brightness: 0.25
+  contrast: 0.25
+  saturation: 0.25
+  hue: 0.1
+  # No geometric jitter beyond flip — matches cookbook.
+  perspective_p: 0.0
+  hsv_p: 0.0
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
+
+training:
+  backend: hf                            # routes through core/p06_training/hf_trainer.py
+  epochs: 50                             # cookbook default
+  optimizer: adamw
+  lr: 6.0e-5                             # cookbook default
+  weight_decay: 0.0                      # cookbook default
+  warmup_steps: 0                        # cookbook uses no warmup
+  scheduler: linear                      # cookbook default (HF Trainer's default lr_scheduler_type)
+  # bf16 usually works on SegFormer on Ampere+ GPUs with negligible metric
+  # drift. Flip to false for bit-identical parity with the cookbook's fp32 run.
+  bf16: true
+  amp: false                             # fp16 overflows — use bf16 or fp32 only
+  ema: false
+  # Upstream masks class 0 (unlabeled) from loss + metrics. Our pipeline
+  # forwards this as `ignore_index=0` into the HF SegFormer loss and
+  # mean_iou metric. Set to -100 for datasets without an "unlabeled" class.
+  ignore_index: 0
+  # Drives HF Trainer's best-checkpoint selection. The mean_iou metric
+  # emits "mean_iou" as a top-level key; must match exactly.
+  metric_for_best_model: mean_iou
+  greater_is_better: true
+  patience: 0                            # 0 disables HF EarlyStoppingCallback
+
+  # Viz callbacks run through the HF-Trainer bridge (core/p06_training/hf_callbacks.py).
+  # All produce output under runs/<ts>/ — see core/p06_training/CLAUDE.md
+  # "Post-train observability" for the full artefact tree.
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+  val_viz:
+    enabled: true                        # per-epoch val GT|pred overlays
+    num_samples: 8
+    grid_cols: 2
+  best_viz:
+    enabled: true                        # best-checkpoint val + test overlays
+  error_analysis:
+    enabled: true                        # confusion matrix + per-class IoU + hard examples
+
+loss:
+  type: cross_entropy
+  ignore_index: 0
+
+logging:
+  # save_dir: runs/<your_run_name>       # optional — resolves relative to this config
+  # wandb_project: <project_name>        # optional — auto-detect, else report_to=tensorboard only
+  # IMPORTANT: no `run_name` key — HF Trainer treats it as the output folder
+  # name (ghost-dir footgun). See core/p06_training/CLAUDE.md.
+  report_to: none                        # wandb/tb callbacks hard-fail w/o auth — enable only after `wandb login`
+
+checkpoint:
+  save_best: true
+  metric: mean_iou
+  mode: max
+  save_interval: 1
+
+evaluation:
+  metric: mean_iou
+  ignore_index: 0
+  score_threshold: 0.0                   # no-op for seg (kept for schema parity)
+  eval_strategy: epoch
+
+seed: 42

@@ -163,7 +163,7 @@ Default weights: structural=0.25, bbox_quality=0.30, classification=0.15, covera
 - `scoring.thresholds.*`: good (0.8), review (0.5)
 - `jobs.*`: `max_concurrent_jobs` (2), `ttl_seconds` (3600), `max_images_per_job` (500)
 
-Override via env: `SAM3_URL`, `OLLAMA_URL`, `ANNOTATION_QA_CONFIG=/path/to/config.yaml`
+Override via env: `SAM3_URL`, `OLLAMA_URL`, `ANNOTATION_QUALITY_ASSESSMENT_CONFIG=/path/to/config.yaml`
 
 ## Running
 
