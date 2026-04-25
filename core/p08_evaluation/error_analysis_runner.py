@@ -30,7 +30,6 @@ and tests never hardcode paths.
 from __future__ import annotations
 
 import json
-import logging
 import re
 import sys
 from collections.abc import Callable
@@ -65,10 +64,9 @@ from core.p10_inference.supervision_bridge import (
     render_gt_pred_side_by_side,
 )
 from utils.viz import apply_plot_style, fit_figsize, new_figure, shorten_label
+from loguru import logger
 
 apply_plot_style()
-
-logger = logging.getLogger(__name__)
 
 SIZE_TIER_LABELS = {
     "small":  f"small (<{int(_SMALL_AREA ** 0.5)}²px, i.e. <{_SMALL_AREA} px²)",
@@ -658,9 +656,8 @@ def run_error_analysis(
                     lq.get("chart_metrics", {}),
                 )
     except Exception as e:  # pragma: no cover
-        import logging as _logging
-        _logging.getLogger(__name__).warning(
-            "label_quality analyzer skipped: %s", e, exc_info=True,
+        logger.warning(
+            "label_quality analyzer skipped: {} — {}", type(e).__name__, e,
         )
 
     return result

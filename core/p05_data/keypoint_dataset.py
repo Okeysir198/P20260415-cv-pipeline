@@ -5,7 +5,6 @@ Reads image files and corresponding YOLO-pose format label ``.txt`` files
 normalised 0-1, visibility: 0=not labeled, 1=occluded, 2=visible).
 """
 
-import logging
 import random
 import sys
 from collections.abc import Sequence
@@ -22,9 +21,8 @@ from torchvision.transforms import v2
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, BaseDataset  # noqa: F401
+from loguru import logger
 from utils.config import resolve_path
-
-logger = logging.getLogger(__name__)
 
 # Image file extensions to search for
 _IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}

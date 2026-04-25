@@ -4,7 +4,6 @@ Supports image and video identification with supervision-based annotation.
 """
 
 import json
-import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -13,12 +12,11 @@ from typing import Any, Optional, Tuple
 import gradio as gr
 import numpy as np
 import supervision as sv
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from app_demo.utils import bgr_to_rgb, rgb_to_bgr
-
-logger = logging.getLogger(__name__)
 
 
 def _check_models_available() -> bool:

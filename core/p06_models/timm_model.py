@@ -4,7 +4,6 @@ All config passes directly to timm.create_model() — this module
 only adapts I/O format between timm and our trainer.
 """
 
-import logging
 from pathlib import Path
 
 import timm as timm_lib
@@ -14,9 +13,8 @@ import torch.nn.functional as F
 from transformers.utils import ModelOutput
 
 from core.p06_models.base import DetectionModel
+from loguru import logger
 from core.p06_models.registry import register_model
-
-logger = logging.getLogger(__name__)
 
 # Keys that belong to our pipeline, NOT to timm
 _NON_TIMM_KEYS = {"arch", "pretrained", "input_size", "num_classes", "depth", "width", "timm_name"}

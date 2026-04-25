@@ -25,7 +25,6 @@ Output lands in a timestamped run dir:
 import argparse
 import datetime
 import json
-import logging
 import random
 import sys
 from pathlib import Path
@@ -39,10 +38,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # projec
 from core.p05_data.detection_dataset import YOLOXDataset
 from core.p05_data.transforms import build_transforms
 from utils.config import feature_name_from_config_path, generate_run_dir, load_config
+from loguru import logger
 from utils.viz import VizStyle, annotate_detections, apply_plot_style, save_image_grid
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
 
 # Unified matplotlib rcParams for all statistical panels in this module.
 apply_plot_style()
@@ -1400,6 +1397,8 @@ def write_dataset_info(
 # ---------------------------------------------------------------------------
 
 def main():
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     parser = argparse.ArgumentParser(description="Visualize dataset samples and augmentation before training.")
     parser.add_argument("--config", required=True, help="Path to 06_training.yaml config")
     parser.add_argument("--splits", nargs="+", default=None,

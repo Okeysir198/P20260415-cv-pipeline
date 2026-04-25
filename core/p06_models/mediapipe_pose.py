@@ -6,8 +6,6 @@ poketenashi pipelines.  Supports three complexity levels (lite/full/heavy)
 controlled via YAML config.
 """
 
-import logging
-
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -18,9 +16,8 @@ from core.p06_models.pose_base import (
     MEDIAPIPE_TO_COCO,
     PoseModel,
 )
+from loguru import logger
 from core.p06_models.pose_registry import _POSE_VARIANT_MAP, register_pose_model
-
-logger = logging.getLogger(__name__)
 
 
 class MediaPipePoseModel(PoseModel):

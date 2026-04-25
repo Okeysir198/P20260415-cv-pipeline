@@ -8,19 +8,17 @@ Also retains the ``mask_to_polygon`` utility for direct use in tests.
 """
 
 import base64
-import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import requests
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 import cv2
-
-logger = logging.getLogger(__name__)
 
 # Default service URL and timeout
 DEFAULT_SERVICE_URL = "http://localhost:18104"

@@ -6,7 +6,6 @@ on configurable thresholds and confirmation windows.
 """
 
 import contextlib
-import logging
 import sys
 import time
 from collections import defaultdict
@@ -17,11 +16,11 @@ import av
 import cv2
 import numpy as np
 
+from loguru import logger
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from core.p10_inference.predictor import DetectionPredictor
-
-logger = logging.getLogger(__name__)
 
 import supervision as sv
 

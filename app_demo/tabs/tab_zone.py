@@ -6,7 +6,6 @@ drawing zones. Provides Image + Video sub-tabs with optional ByteTrack
 tracking.
 """
 
-import logging
 import sys
 import tempfile
 from collections import defaultdict
@@ -16,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import gradio as gr
 import numpy as np
 import supervision as sv
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -24,8 +24,6 @@ from core.p10_inference.supervision_bridge import (
     create_tracker,
     update_tracker,
 )
-
-logger = logging.getLogger(__name__)
 
 _COCO_PERSON_ID = 0
 

@@ -1,7 +1,6 @@
 """HPO results saving: JSON, best config YAML, and visualization plots."""
 
 import json
-import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class ResultsManager:

@@ -5,7 +5,6 @@ for frame-by-frame processing. All annotation uses the supervision library.
 No FastRTC dependency — pure Gradio 6 HTTP streaming.
 """
 
-import logging
 import sys
 import time
 from collections import Counter
@@ -14,6 +13,7 @@ from typing import Any, Optional, Tuple
 
 import gradio as gr
 import numpy as np
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -23,8 +23,6 @@ from core.p10_inference.supervision_bridge import (
     build_annotators,
     to_sv_detections,
 )
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

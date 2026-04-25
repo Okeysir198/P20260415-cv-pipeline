@@ -4,16 +4,14 @@ Discovers images that need annotation, supporting both YOLO split layouts
 and flat directory structures. Filter modes control which images are selected.
 """
 
-import logging
 import sys
 from pathlib import Path
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from utils.config import resolve_path
 from utils.yolo_io import IMAGE_EXTENSIONS
-
-logger = logging.getLogger(__name__)
 
 
 class ImageScanner:

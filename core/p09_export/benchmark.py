@@ -5,7 +5,6 @@ Measures: latency (ms), throughput (FPS), model size (MB), memory usage.
 """
 
 import json
-import logging
 import os
 import sys
 import time
@@ -15,9 +14,9 @@ import numpy as np
 import onnxruntime as ort
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 
 class ModelBenchmark:

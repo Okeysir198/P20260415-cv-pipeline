@@ -6,7 +6,6 @@ consistent, high-quality visualizations.
 """
 
 import json
-import logging
 import sys
 import tempfile
 from collections import Counter
@@ -15,6 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import gradio as gr
 import numpy as np
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -25,8 +25,6 @@ from core.p10_inference.supervision_bridge import (
     to_sv_detections,
 )
 from core.p10_inference.video_inference import VideoProcessor
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Shared video summary state

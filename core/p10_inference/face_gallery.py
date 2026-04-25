@@ -5,13 +5,12 @@ cosine similarity (equivalent to L2 distance on L2-normalized vectors) and
 runs on CUDA via a persistent ``torch.Tensor`` gallery matrix.
 """
 
-import logging
+from loguru import logger
 from pathlib import Path
 
 import numpy as np
 import torch
 
-logger = logging.getLogger(__name__)
 
 
 class FaceGallery:

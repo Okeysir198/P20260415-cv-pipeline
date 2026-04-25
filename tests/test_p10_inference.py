@@ -346,6 +346,157 @@ def test_alert_window_based():
     print(f"    Window-based: triggered after 5 consecutive violations")
 
 
+# ---------------------------------------------------------------------------
+# ModelAdapter tests
+# ---------------------------------------------------------------------------
+
+from core.p10_inference.model_adapter import (  # noqa: E402
+    ModelAdapter,
+    PredictorAdapter,
+    HFAdapter,
+    TorchScriptAdapter,
+    register_adapter,
+    resolve_adapter,
+)
+
+
+def test_adapter_registry_can_handle():
+    """PredictorAdapter matches .pth/.pt/.onnx; HFAdapter matches HF ids."""
+    data_config = load_config(DATA_CONFIG_PATH)
+
+    assert PredictorAdapter.can_handle("model.pth", data_config, None)
+    assert PredictorAdapter.can_handle("model.pt", data_config, None)
+    assert PredictorAdapter.can_handle("model.onnx", data_config, None)
+    assert not PredictorAdapter.can_handle("PekingU/rtdetr_v2_r18vd", data_config, None)
+
+    assert HFAdapter.can_handle("PekingU/rtdetr_v2_r18vd", data_config, None)
+    assert not HFAdapter.can_handle("model.pth", data_config, None)
+    assert not HFAdapter.can_handle("model.onnx", data_config, None)
+
+    # TorchScriptAdapter is intentionally never matched
+    assert not TorchScriptAdapter.can_handle("model.pt", data_config, None)
+
+    print("    can_handle() dispatch: all assertions passed")
+
+
+def test_adapter_resolve_pth():
+    """resolve_adapter returns PredictorAdapter for a .pth path."""
+    model_path = _get_model_path()
+    if model_path is None:
+        print("  SKIP: no checkpoint found — run test_p06_training.py first")
+        return
+
+    data_config = load_config(DATA_CONFIG_PATH)
+    adapter = resolve_adapter(str(model_path), data_config, None, conf_threshold=0.1)
+    assert isinstance(adapter, PredictorAdapter), f"Expected PredictorAdapter, got {type(adapter)}"
+    print(f"    resolve_adapter({model_path.suffix}) → {type(adapter).__name__}")
+
+
+def test_adapter_predict_batch_pth():
+    """PredictorAdapter.predict_batch returns correct dict structure."""
+    model_path = _get_model_path()
+    if model_path is None:
+        print("  SKIP: no checkpoint found — run test_p06_training.py first")
+        return
+
+    data_config = load_config(DATA_CONFIG_PATH)
+    adapter = resolve_adapter(str(model_path), data_config, None, conf_threshold=0.1)
+
+    images = [cv2.imread(str(p)) for p in _get_test_images(3)]
+    assert all(img is not None for img in images)
+
+    results = adapter.predict_batch(images)
+    assert isinstance(results, list), f"Expected list, got {type(results)}"
+    assert len(results) == len(images)
+
+    for i, r in enumerate(results):
+        assert "boxes" in r and "scores" in r and "labels" in r, f"Missing keys in result {i}"
+        assert r["boxes"].dtype == np.float32, f"boxes dtype: {r['boxes'].dtype}"
+        assert r["scores"].dtype == np.float32, f"scores dtype: {r['scores'].dtype}"
+        assert r["labels"].dtype == np.int64, f"labels dtype: {r['labels'].dtype}"
+        n = len(r["boxes"])
+        assert r["scores"].shape == (n,), f"scores shape mismatch"
+        assert r["labels"].shape == (n,), f"labels shape mismatch"
+        print(f"    Image {i}: {n} detections")
+
+
+def test_adapter_predict_batch_onnx():
+    """PredictorAdapter wraps .onnx correctly (single-image batch — exported ONNX has static batch=1)."""
+    onnx_path = EXPORT_OUTPUTS / "model.onnx"
+    if not onnx_path.exists():
+        print("  SKIP: model.onnx not found — run test_p09_export.py first")
+        return
+
+    data_config = load_config(DATA_CONFIG_PATH)
+    adapter = resolve_adapter(str(onnx_path), data_config, None, conf_threshold=0.1)
+    assert isinstance(adapter, PredictorAdapter)
+
+    images = [cv2.imread(str(p)) for p in _get_test_images(2)]
+    total = 0
+    for img in images:
+        results = adapter.predict_batch([img])
+        assert len(results) == 1
+        r = results[0]
+        assert {"boxes", "scores", "labels"} <= r.keys()
+        total += len(r["boxes"])
+    print(f"    ONNX adapter: {total} total detections across {len(images)} images")
+
+
+def test_adapter_custom_registration():
+    """Custom adapter registered with @register_adapter is picked up by resolve_adapter."""
+    import copy  # noqa: PLC0415
+    from core.p10_inference import model_adapter as _mod  # noqa: PLC0415
+
+    original_registry = copy.copy(_mod._ADAPTER_REGISTRY)
+
+    @register_adapter
+    class _DummyAdapter(ModelAdapter):
+        _called = False
+
+        def __init__(self, model_path, data_config, training_config,
+                     conf_threshold, iou_threshold, device) -> None:
+            _DummyAdapter._called = True
+
+        @classmethod
+        def can_handle(cls, model_path, data_config, training_config) -> bool:
+            return model_path == "__dummy__"
+
+        def predict_batch(self, images):
+            return [{"boxes": np.zeros((0, 4), np.float32),
+                     "scores": np.zeros(0, np.float32),
+                     "labels": np.zeros(0, np.int64)} for _ in images]
+
+    try:
+        data_config = load_config(DATA_CONFIG_PATH)
+        adapter = resolve_adapter("__dummy__", data_config, None)
+        assert isinstance(adapter, _DummyAdapter), f"Got {type(adapter)}"
+        assert _DummyAdapter._called
+        print("    Custom @register_adapter picked up by resolve_adapter correctly")
+    finally:
+        _mod._ADAPTER_REGISTRY[:] = original_registry
+
+
+def test_adapter_unknown_format_raises():
+    """resolve_adapter raises ValueError for unrecognised formats."""
+    import importlib  # noqa: PLC0415
+    from core.p10_inference import model_adapter as _mod  # noqa: PLC0415
+    import copy  # noqa: PLC0415
+
+    data_config = load_config(DATA_CONFIG_PATH)
+    original = copy.copy(_mod._ADAPTER_REGISTRY)
+    # Temporarily clear registry to guarantee no match
+    _mod._ADAPTER_REGISTRY.clear()
+    try:
+        try:
+            resolve_adapter("some_unknown.xyz", data_config, None)
+            assert False, "Should have raised ValueError"
+        except ValueError as e:
+            assert "No adapter can handle" in str(e)
+            print(f"    ValueError raised correctly: {e}")
+    finally:
+        _mod._ADAPTER_REGISTRY[:] = original
+
+
 if __name__ == "__main__":
     run_all([
         ("predict_pytorch", test_predict_pytorch),
@@ -357,4 +508,10 @@ if __name__ == "__main__":
         ("alert_immediate_trigger", test_alert_immediate_trigger),
         ("alert_cooldown", test_alert_cooldown),
         ("alert_window_based", test_alert_window_based),
+        ("adapter_registry_can_handle", test_adapter_registry_can_handle),
+        ("adapter_resolve_pth", test_adapter_resolve_pth),
+        ("adapter_predict_batch_pth", test_adapter_predict_batch_pth),
+        ("adapter_predict_batch_onnx", test_adapter_predict_batch_onnx),
+        ("adapter_custom_registration", test_adapter_custom_registration),
+        ("adapter_unknown_format_raises", test_adapter_unknown_format_raises),
     ], title="Test 08: Inference")

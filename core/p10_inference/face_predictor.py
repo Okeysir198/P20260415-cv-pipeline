@@ -16,19 +16,19 @@ landmarks for each violator, call
 overhead and CUDA round-trips when there are several violators per frame.
 """
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from loguru import logger
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from core.p06_models.face_base import FaceDetector, FaceEmbedder
 from core.p10_inference.face_gallery import FaceGallery
 
-logger = logging.getLogger(__name__)
 
 
 class FacePredictor:

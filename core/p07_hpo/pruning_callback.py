@@ -1,6 +1,5 @@
 """Optuna pruning callback for detection model training integration."""
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -9,9 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # projec
 
 import optuna
 
+from loguru import logger
 from core.p06_training.callbacks import Callback
-
-logger = logging.getLogger(__name__)
 
 
 class OptunaPruningCallback(Callback):

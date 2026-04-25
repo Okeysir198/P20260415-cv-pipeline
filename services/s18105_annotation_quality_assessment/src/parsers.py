@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import logging
-
 from fastapi import HTTPException
+from loguru import logger
 
 from src.schemas import ParsedAnnotation
-
-logger = logging.getLogger(__name__)
 
 
 def parse_yolo(labels: list[str]) -> list[ParsedAnnotation]:

@@ -14,7 +14,6 @@ exported model, and prints model info (size, params).
 """
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
@@ -26,15 +25,12 @@ from core.p05_data.detection_dataset import build_dataloader
 from core.p06_models import build_model
 from core.p09_export.exporter import ModelExporter
 from core.p09_export.quantize import ModelQuantizer
+from loguru import logger
 from utils.config import load_config
 from utils.device import get_device
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+logger.remove()
+logger.add(sys.stderr, level="INFO")
 
 
 def parse_args() -> argparse.Namespace:

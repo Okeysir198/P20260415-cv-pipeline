@@ -6,13 +6,13 @@ point for building custom detection tabs.
 """
 
 import json
-import logging
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict
 
 import gradio as gr
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -26,8 +26,6 @@ from core.p10_inference.supervision_bridge import (
     build_annotators,
     to_sv_detections,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def build_tab_generic(manager: Any, config: Dict) -> None:

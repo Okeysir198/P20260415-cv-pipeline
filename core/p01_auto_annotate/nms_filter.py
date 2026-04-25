@@ -4,18 +4,16 @@ Applies per-class and optional cross-class non-maximum suppression
 to remove overlapping detections.
 """
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from utils.metrics import nms_numpy, xywh_to_xyxy
-
-logger = logging.getLogger(__name__)
 
 
 class NMSFilter:

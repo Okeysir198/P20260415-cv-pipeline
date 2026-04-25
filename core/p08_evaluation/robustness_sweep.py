@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import io
 import json
-import logging
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -52,8 +51,9 @@ from torchvision.transforms import v2
 
 from utils.viz import apply_plot_style
 
+from loguru import logger
+
 matplotlib.use("Agg")
-logger = logging.getLogger(__name__)
 
 
 ROBUSTNESS_FILENAMES: dict[str, str] = {
@@ -381,5 +381,6 @@ def _smoke() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     _smoke()

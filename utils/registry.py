@@ -12,11 +12,10 @@ this class is an implementation detail, not part of the public API.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class Registry:

@@ -41,9 +41,10 @@ Outputs (under ``--save-dir`` — numbered-prefix scheme from
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 from pathlib import Path
+
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -64,7 +65,6 @@ from core.p08_evaluation.error_analysis_runner import (  # noqa: E402
 from utils.config import load_config  # noqa: E402
 from utils.device import get_device  # noqa: E402
 
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -159,11 +159,8 @@ def main() -> None:
                              "09_failure_mode_examples/ gallery.")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s] [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
 
     train_cfg_path = Path(args.training_config).resolve()
     ckpt_path = Path(args.checkpoint).resolve()

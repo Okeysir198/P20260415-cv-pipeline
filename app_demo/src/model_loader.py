@@ -5,19 +5,17 @@ Provides a generic model loading interface supporting both file browser uploads
 core/p10_inference/predictor.py for all model types.
 """
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import gradio as gr
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from core.p10_inference.predictor import DetectionPredictor
 from app_demo.model_manager import load_coco_data_config
-
-logger = logging.getLogger(__name__)
 
 
 class ModelLoader:

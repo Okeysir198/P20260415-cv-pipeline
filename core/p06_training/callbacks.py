@@ -8,7 +8,6 @@ Provides:
 - CallbackRunner: Manages and invokes a list of callbacks.
 """
 
-import logging
 import math
 import random
 import sys
@@ -31,7 +30,7 @@ from utils.viz import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 _LABEL_PALETTE = [
     (0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255),

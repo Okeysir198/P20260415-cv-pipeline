@@ -5,12 +5,13 @@ per identity) or single-person enrollment from a single image.
 """
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -18,7 +19,6 @@ from core.p06_models.face_registry import build_face_detector, build_face_embedd
 from core.p10_inference.face_gallery import FaceGallery
 from utils.config import load_config
 
-logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -187,5 +187,6 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     main()

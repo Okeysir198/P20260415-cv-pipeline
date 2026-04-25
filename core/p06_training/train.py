@@ -16,7 +16,6 @@ Usage:
 
 import argparse
 import importlib
-import logging
 import os
 import sys
 from pathlib import Path
@@ -70,6 +69,7 @@ _warnings.filterwarnings(
     category=UserWarning,
 )
 
+from loguru import logger  # noqa: E402
 from utils.config import load_config, parse_overrides  # noqa: E402
 
 
@@ -114,17 +114,13 @@ def main() -> None:
     args = parser.parse_args()
 
     # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    log = logging.getLogger("train")
+    logger.remove()
+    logger.add(sys.stderr, level=args.log_level)
 
     # Validate config file exists
     config_path = Path(args.config)
     if not config_path.exists():
-        log.error("Config file not found: %s", config_path)
+        logger.error("Config file not found: %s", config_path)
         sys.exit(1)
 
     # Parse overrides
@@ -132,9 +128,9 @@ def main() -> None:
     if args.override:
         try:
             overrides = parse_overrides(args.override)
-            log.info("Config overrides: %s", overrides)
+            logger.info("Config overrides: %s", overrides)
         except ValueError as e:
-            log.error("Invalid override: %s", e)
+            logger.error("Invalid override: %s", e)
             sys.exit(1)
 
     if args.device:
@@ -145,7 +141,7 @@ def main() -> None:
     config = load_config(str(config_path))
     training_cfg = config.get("training", {})
     backend = training_cfg.get("backend", "pytorch")
-    log.info("Training backend: %s", backend)
+    logger.info("Training backend: %s", backend)
 
     def _maybe_resume(trainer_obj: Any) -> None:
         """Load checkpoint into *trainer_obj* when --resume is set."""
@@ -153,10 +149,10 @@ def main() -> None:
             return
         resume_path = Path(args.resume)
         if not resume_path.exists():
-            log.error("Resume checkpoint not found: %s", resume_path)
+            logger.error("Resume checkpoint not found: %s", resume_path)
             sys.exit(1)
         trainer_obj.load_checkpoint(str(resume_path))
-        log.info("Resuming from checkpoint: %s", resume_path)
+        logger.info("Resuming from checkpoint: %s", resume_path)
 
     try:
         if backend == "hf":
@@ -167,12 +163,12 @@ def main() -> None:
                 overrides=overrides_or_none,
                 resume_from=args.resume,
             )
-            log.info("Training complete (HF Trainer).")
-            log.info("  Total epochs: %d", summary.get("total_epochs", 0))
+            logger.info("Training complete (HF Trainer).")
+            logger.info("  Total epochs: %d", summary.get("total_epochs", 0))
         elif backend == "custom":
             custom_class_path = training_cfg.get("custom_trainer_class")
             if not custom_class_path:
-                log.error(
+                logger.error(
                     "backend='custom' requires training.custom_trainer_class in config. "
                     "Example: training.custom_trainer_class: my_pkg.trainers.MyTrainer"
                 )
@@ -182,28 +178,28 @@ def main() -> None:
             trainer = TrainerClass(config_path=str(config_path), overrides=overrides_or_none)
             _maybe_resume(trainer)
             summary = trainer.train()
-            log.info("Training complete (custom: %s).", custom_class_path)
-            log.info("  Total epochs: %d", summary.get("total_epochs", 0))
+            logger.info("Training complete (custom: %s).", custom_class_path)
+            logger.info("  Total epochs: %d", summary.get("total_epochs", 0))
         elif backend in ("pytorch", "native"):
             from core.p06_training.trainer import DetectionTrainer
 
             trainer = DetectionTrainer(config_path=str(config_path), overrides=overrides_or_none)
             _maybe_resume(trainer)
             summary = trainer.train()
-            log.info("Training complete (pytorch).")
-            log.info("  Best metric: %.4f at epoch %d", summary["best_metric"] or 0.0, summary["best_epoch"])
-            log.info("  Total epochs: %d", summary["total_epochs"])
+            logger.info("Training complete (pytorch).")
+            logger.info("  Best metric: %.4f at epoch %d", summary["best_metric"] or 0.0, summary["best_epoch"])
+            logger.info("  Total epochs: %d", summary["total_epochs"])
         else:
-            log.error(
+            logger.error(
                 "Unknown training backend: '%s'. Valid values: pytorch, hf, custom", backend
             )
             sys.exit(1)
 
     except KeyboardInterrupt:
-        log.info("Training interrupted by user.")
+        logger.info("Training interrupted by user.")
         sys.exit(0)
     except Exception:
-        log.exception("Training failed with error:")
+        logger.exception("Training failed with error:")
         sys.exit(1)
 
 

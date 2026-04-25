@@ -20,7 +20,6 @@ there are pure (no trainer dependency).
 """
 from __future__ import annotations
 
-import logging
 import math
 import random
 from pathlib import Path
@@ -157,7 +156,7 @@ def _save_image_grid(
         header=title,
     )
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 def _build_class_names(data_config: dict) -> dict[int, str]:

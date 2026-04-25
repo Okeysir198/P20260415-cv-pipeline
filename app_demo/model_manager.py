@@ -1,9 +1,10 @@
 """Model manager with lazy loading and caching for the demo app."""
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any, Optional
+
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -14,8 +15,6 @@ from core.p10_inference.face_predictor import FacePredictor
 from core.p10_inference.pose_predictor import PosePredictor
 from core.p10_inference.predictor import DetectionPredictor
 from utils.config import load_config
-
-logger = logging.getLogger(__name__)
 
 _APP_DEMO_ROOT = Path(__file__).resolve().parent
 

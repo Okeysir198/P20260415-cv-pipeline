@@ -12,7 +12,6 @@ Usage:
 
 import argparse
 import json
-import logging
 import shutil
 import sys
 import time
@@ -22,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from loguru import logger
 from utils.config import (
     feature_name_from_config_path,
     generate_run_dir,
@@ -316,8 +316,6 @@ def apply_fixes(report_dir: str) -> None:
     Args:
         report_dir: Path to the QA report directory containing ``fixes.json``.
     """
-    logger = logging.getLogger(__name__)
-
     fixes_path = Path(report_dir) / "fixes.json"
     if not fixes_path.is_file():
         print(f"No fixes.json found at {fixes_path}")

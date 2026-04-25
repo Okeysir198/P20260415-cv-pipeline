@@ -11,7 +11,6 @@ algebra sanity check on ``v2.Normalize``.
 
 from __future__ import annotations
 
-import logging
 import random
 from pathlib import Path
 from typing import Any
@@ -28,9 +27,8 @@ from core.p05_data.transforms import (
     _to_v2_sample,
     build_transforms,
 )
+from loguru import logger
 from core.p10_inference.supervision_bridge import VizStyle
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

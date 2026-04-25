@@ -8,7 +8,6 @@ Works with any model registered in the model registry (YOLOX, D-FINE,
 RT-DETRv2, etc.).
 """
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,8 @@ import onnxruntime as ort
 import torch
 import torch.nn as nn
 
+from loguru import logger
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
@@ -26,7 +27,6 @@ from core.p06_models import build_model
 from core.p06_training.postprocess import postprocess as _postprocess_registry
 from utils.device import get_device
 
-logger = logging.getLogger(__name__)
 
 
 def _remap_megvii_state_dict(

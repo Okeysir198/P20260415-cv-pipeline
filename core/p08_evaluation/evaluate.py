@@ -14,7 +14,6 @@ Usage:
 
 import argparse
 import json
-import logging
 import sys
 from pathlib import Path
 
@@ -41,9 +40,8 @@ from core.p08_evaluation.visualization import (
     plot_threshold_curves,
 )
 from utils.config import load_config  # noqa: E402
+from loguru import logger
 from utils.device import get_device
-
-logger = logging.getLogger(__name__)
 
 
 def load_model(model_path: str, data_config: dict, device: torch.device) -> torch.nn.Module:

@@ -4,7 +4,6 @@ Reads image files and corresponding YOLO-format label ``.txt`` files
 (one row per object: ``class_id cx cy w h``, normalised 0-1).
 """
 
-import logging
 import random
 import sys
 from pathlib import Path
@@ -25,9 +24,8 @@ from core.p05_data.base_dataset import (  # noqa: F401
     BaseDataset,
 )
 from core.p05_data.transforms import build_transforms
+from loguru import logger
 from utils.config import resolve_path
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

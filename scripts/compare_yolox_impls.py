@@ -20,7 +20,6 @@ Usage (requires the official yolox venv — the main .venv/ has no yolox pkg):
 """
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
@@ -32,8 +31,10 @@ import numpy as np
 import torch
 from torchvision.ops import batched_nms
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger(__name__)
+from loguru import logger
+
+logger.remove()
+logger.add(sys.stderr, level="INFO")
 
 INPUT_SIZE = 640
 PRETRAINED = ROOT / "pretrained" / "yolox_m.pth"

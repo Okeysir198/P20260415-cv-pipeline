@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import base64
 import io
-import logging
 import os
 import tempfile
 import uuid
@@ -27,9 +26,8 @@ import gradio as gr
 import numpy as np
 import requests as _req
 import supervision as sv
+from loguru import logger as _logger
 from PIL import Image
-
-_logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants

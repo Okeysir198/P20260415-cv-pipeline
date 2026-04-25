@@ -5,12 +5,12 @@ worst-image visualizations, and auto-fix suggestion files from QA results.
 """
 
 import json
-import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -21,8 +21,6 @@ matplotlib.use("Agg")
 
 from utils.langgraph_common import make_serialisable
 from utils.metrics import xywh_to_xyxy
-
-logger = logging.getLogger(__name__)
 
 
 class QAReporter:

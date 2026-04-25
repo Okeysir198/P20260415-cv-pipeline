@@ -9,7 +9,6 @@ Five processing nodes plus an aggregate node:
 6. aggregate_node — dataset-level summary and reporting
 """
 
-import logging
 import random
 import sys
 import time
@@ -18,6 +17,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import numpy as np
+from loguru import logger
 from PIL import Image
 from typing_extensions import TypedDict
 
@@ -31,8 +31,6 @@ from utils.langgraph_common import (
     replace_reducer,
 )
 from utils.yolo_io import image_to_label_path, parse_yolo_label
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

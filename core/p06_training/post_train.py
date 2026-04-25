@@ -22,7 +22,6 @@ plan is that ``cv2.rectangle`` / ``cv2.putText`` do not appear in
 
 from __future__ import annotations
 
-import logging
 import math
 import random
 from pathlib import Path
@@ -46,9 +45,8 @@ from core.p10_inference.supervision_bridge import (
     VizStyle,
     annotate_gt_pred,
 )
+from loguru import logger
 from utils.viz import annotate_keypoints, classification_banner
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

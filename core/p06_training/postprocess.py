@@ -32,7 +32,6 @@ Example::
     # results[0]["labels"] → np.ndarray (N,)  int64
 """
 
-import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -40,9 +39,8 @@ import numpy as np
 import torch
 from torchvision.ops import nms
 
+from loguru import logger
 from utils.registry import Registry
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Registry

@@ -1,6 +1,5 @@
 """Optuna HPO optimizer wrapping the detection model trainer."""
 
-import logging
 import sys
 import time
 from pathlib import Path
@@ -15,9 +14,8 @@ from optuna.samplers import CmaEsSampler, RandomSampler, TPESampler
 from core.p06_training.trainer import DetectionTrainer
 from core.p07_hpo.pruning_callback import OptunaPruningCallback
 from core.p07_hpo.search_space import SearchSpace
+from loguru import logger
 from utils.config import load_config, merge_configs
-
-logger = logging.getLogger(__name__)
 
 
 class HPOOptimizer:

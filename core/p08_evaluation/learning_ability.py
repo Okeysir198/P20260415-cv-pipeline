@@ -24,7 +24,6 @@ stratified sample of train (default), so post-train wall-time grows by
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -33,8 +32,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from loguru import logger
+
 matplotlib.use("Agg")
-logger = logging.getLogger(__name__)
 
 
 LA_FILENAMES: dict[str, str] = {

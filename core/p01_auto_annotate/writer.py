@@ -4,16 +4,15 @@ Writes YOLO-format label files supporting both detection (bbox)
 and segmentation (polygon) output formats.
 """
 
-import logging
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 
 class LabelWriter:

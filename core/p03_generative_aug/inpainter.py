@@ -9,22 +9,19 @@ without errors.
 
 import base64
 import io
-import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import requests
+import torch
+from loguru import logger
+from PIL import Image as PILImage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-import requests
-import torch
-from PIL import Image as PILImage
-
 from utils.yolo_io import pil_to_b64
-
-logger = logging.getLogger(__name__)
 
 # Map config string to torch dtype
 _DTYPE_MAP: dict[str, Any] = {

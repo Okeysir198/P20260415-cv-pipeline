@@ -6,16 +6,14 @@ all inference to the SAM3 REST service.  No torch or transformers dependency.
 
 import base64
 import io
-import logging
 from typing import Any
 
 import httpx
 import numpy as np
+from loguru import logger
 from PIL import Image
 
 from utils.yolo_io import pil_to_b64
-
-logger = logging.getLogger(__name__)
 
 
 class SAM3Client:

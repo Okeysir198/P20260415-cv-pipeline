@@ -9,7 +9,6 @@ Version auto-increments (v1, v2, v3...). Add --onnx <path> for ONNX file, --note
 """
 
 import argparse
-import logging
 import shutil
 import subprocess
 import sys
@@ -19,10 +18,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # ai/ root
 
 import yaml
+from loguru import logger
 
 from utils.config import load_config
-
-logger = logging.getLogger(__name__)
 
 
 def _detect_use_case(run_dir: Path) -> str:
@@ -242,11 +240,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    import sys
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
 
     release_dir = release(
         run_dir=Path(args.run_dir),

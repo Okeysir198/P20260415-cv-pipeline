@@ -9,15 +9,12 @@ registry with their default depth/width multipliers.  Explicit ``depth``
 and ``width`` values in the config override the variant defaults.
 """
 
-import logging
-
 import torch
 import torch.nn as nn
 
 from core.p06_models.base import DetectionModel
+from loguru import logger
 from core.p06_models.registry import _VARIANT_MAP, register_model
-
-logger = logging.getLogger(__name__)
 
 # --- YOLOX variant defaults (depth, width) --------------------------------
 

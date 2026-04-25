@@ -10,18 +10,16 @@ Usage:
 """
 
 import importlib
-import logging
 import sys
 from pathlib import Path
 from typing import Dict
 
 import gradio as gr
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # project root
 
 from app_demo.model_manager import ModelManager
-
-logger = logging.getLogger(__name__)
 
 
 def _load_builder(dotted_path: str):

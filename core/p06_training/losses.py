@@ -8,7 +8,6 @@ Provides:
 - Loss registry: ``LOSS_REGISTRY``, ``@register_loss``, ``build_loss``.
 """
 
-import logging
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -20,9 +19,8 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from loguru import logger
 from utils.registry import Registry  # noqa: E402
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Loss registry

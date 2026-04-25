@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import base64
 import io
-import logging
 
 import requests
+from loguru import logger
 from PIL import Image
 
 from src.schemas import Detection
-
-logger = logging.getLogger("auto_label")
 
 
 def _ask_ollama(ollama_url: str, model: str, image_b64: str, prompt: str, timeout: int) -> str:

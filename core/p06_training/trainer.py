@@ -10,7 +10,6 @@ Usage:
 """
 
 import copy
-import logging
 import math
 import sys
 from pathlib import Path
@@ -44,9 +43,8 @@ from core.p06_training.postprocess import postprocess as _postprocess_registry
 from core.p06_training._common import task_from_output_format as _task_from_output
 from utils.config import feature_name_from_config_path, load_config, merge_configs, validate_config
 from utils.device import get_device, set_seed
+from loguru import logger
 from utils.progress import TrainingProgress
-
-logger = logging.getLogger(__name__)
 
 _LOSS_ZERO = torch.tensor(0.0)
 

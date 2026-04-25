@@ -5,7 +5,6 @@ and preview visualizations from auto-annotation results.
 """
 
 import json
-import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,14 +12,13 @@ from pathlib import Path
 import cv2
 import matplotlib
 import numpy as np
+from loguru import logger
 
 matplotlib.use("Agg")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from utils.langgraph_common import make_serialisable
-
-logger = logging.getLogger(__name__)
 
 
 class AutoAnnotateReporter:

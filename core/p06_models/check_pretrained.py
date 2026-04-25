@@ -12,7 +12,6 @@ Usage:
 """
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
@@ -24,8 +23,7 @@ import numpy as np
 import torch
 from torchvision.ops import batched_nms
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 INPUT_SIZE = 640
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -218,6 +216,8 @@ def _hstack_panels(panels: list[np.ndarray]) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     parser = argparse.ArgumentParser(description="Pretrained weight sanity check — COCO inference on one image")
     parser.add_argument("--image",  required=True, help="Input image path")
     parser.add_argument("--out",    default="pretrained_check.png", help="Output grid path")

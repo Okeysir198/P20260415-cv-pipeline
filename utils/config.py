@@ -1,7 +1,6 @@
 """Configuration loading, merging, and validation utilities."""
 
 import copy
-import logging
 import os
 import re
 from datetime import datetime
@@ -10,12 +9,12 @@ from typing import Any
 
 import yaml
 
+from loguru import logger
+
 _VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]
 _IMAGENET_STD = [0.229, 0.224, 0.225]
-
-_logger = logging.getLogger(__name__)
 
 
 def load_config(path: str | Path) -> dict:
@@ -292,7 +291,7 @@ def _migrate_legacy_tensor_prep(config: dict) -> None:
         "applied_by": applied_by,
         "_auto_migrated": True,
     }
-    _logger.warning(
+    logger.warning(
         "Legacy config: auto-migrated tensor_prep. Add an explicit tensor_prep "
         "block to 06_training.yaml to suppress this warning."
     )

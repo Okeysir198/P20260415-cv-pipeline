@@ -1,13 +1,12 @@
 """Search space definition and sampling for Optuna HPO."""
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class SearchSpace:

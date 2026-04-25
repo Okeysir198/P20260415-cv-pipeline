@@ -18,17 +18,14 @@ Typical usage::
     result = model.predict_keypoints(image, bbox)
 """
 
-import logging
-
 import cv2
 import numpy as np
 import onnxruntime as ort
 import torch
 
 from core.p06_models.pose_base import COCO_KEYPOINT_NAMES, COCO_SKELETON, PoseModel
+from loguru import logger
 from core.p06_models.pose_registry import _POSE_VARIANT_MAP, register_pose_model
-
-logger = logging.getLogger(__name__)
 
 # Default ONNX paths per variant
 _DEFAULT_ONNX_PATHS: dict[str, str] = {

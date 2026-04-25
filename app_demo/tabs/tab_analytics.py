@@ -4,7 +4,6 @@ Reads the last video processing summary stored by the detection tab (or any
 other video-processing tab) and renders charts and statistics.
 """
 
-import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -14,14 +13,13 @@ import gradio as gr
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from loguru import logger
 
 matplotlib.use("Agg")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from app_demo.tabs.tab_detection import get_video_summary
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

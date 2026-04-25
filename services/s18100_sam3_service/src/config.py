@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 
 import yaml
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("sam3_service")
+from loguru import logger
 
 # YAML config
 _CONFIG_PATH = os.environ.get(

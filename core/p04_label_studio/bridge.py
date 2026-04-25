@@ -39,7 +39,6 @@ Usage:
 
 import argparse
 import json
-import logging
 import os
 import shutil
 import sys
@@ -53,9 +52,9 @@ import requests
 from label_studio_sdk import Client as LSClient
 from tqdm import tqdm
 
-from utils.config import load_config, resolve_path
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+from utils.config import load_config, resolve_path
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1444,12 +1443,10 @@ def main() -> None:
     args = parser.parse_args()
 
     # Configure logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    import sys
+    log_level = "DEBUG" if args.verbose else "INFO"
+    logger.remove()
+    logger.add(sys.stderr, level=log_level)
 
     if args.command is None:
         parser.print_help()

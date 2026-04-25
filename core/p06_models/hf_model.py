@@ -4,7 +4,6 @@ All architecture config passes directly to HF's config system.
 These modules only adapt I/O format between HF and our trainer.
 """
 
-import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -20,9 +19,8 @@ from transformers import (
 )
 
 from core.p06_models.base import DetectionModel
+from loguru import logger
 from core.p06_models.registry import register_model
-
-logger = logging.getLogger(__name__)
 
 # arch name → (ModelClass, ConfigClass, default_pretrained)
 HF_MODEL_REGISTRY: dict[str, tuple[Any, Any, str]] = {

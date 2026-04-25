@@ -12,7 +12,6 @@ includes ``detection_classes``, ``class_rules``, and ``vlm_budget`` so the
 QA service can use the auto-label pipeline for smarter verification.
 """
 
-import logging
 import time
 from math import ceil
 from pathlib import Path
@@ -20,8 +19,7 @@ from typing import Any
 
 import numpy as np
 from langgraph.func import entrypoint, task
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 # ---------------------------------------------------------------------------

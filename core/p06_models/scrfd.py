@@ -18,16 +18,13 @@ Typical usage::
     result = detector.detect_faces(image, bbox)
 """
 
-import logging
-
 import cv2
 import numpy as np
 import onnxruntime as ort
 
 from core.p06_models.face_base import FaceDetector
+from loguru import logger
 from core.p06_models.face_registry import _FACE_DETECTOR_VARIANT_MAP, register_face_detector
-
-logger = logging.getLogger(__name__)
 
 # Default ONNX paths per variant
 _DEFAULT_ONNX_PATHS: dict[str, str] = {

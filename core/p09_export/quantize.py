@@ -11,7 +11,6 @@ onnxruntime.quantization settings with sensible built-in defaults.
 Graph optimization uses optimum.onnxruntime.ORTOptimizer (optional).
 """
 
-import logging
 import os
 import shutil
 import sys
@@ -28,9 +27,9 @@ from onnxruntime.quantization import (
     quantize_static,
 )
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 # Quantization preset configurations: maps preset name to ORT quantization params.
 _PRESET_CONFIGS = {

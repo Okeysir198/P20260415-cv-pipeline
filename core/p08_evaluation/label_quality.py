@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import csv
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -46,8 +45,9 @@ from core.p10_inference.supervision_bridge import (
 )
 from utils.viz import save_image_grid
 
+from loguru import logger
+
 matplotlib.use("Agg")
-logger = logging.getLogger(__name__)
 
 
 # Filename map — keep parallel to error_analysis_runner.CHART_FILENAMES so

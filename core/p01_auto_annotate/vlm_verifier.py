@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import base64
 import io
-import logging
 import re
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 _CROP_PROMPT = (
     "Is this image showing a '{class_name}'? "

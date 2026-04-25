@@ -11,7 +11,6 @@ Usage (from app_demo/ with its own venv):
 """
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
@@ -25,9 +24,8 @@ auto_select_gpu()
 
 import gradio as gr  # noqa: E402
 
+from loguru import logger  # noqa: E402
 from utils.config import load_config  # noqa: E402
-
-logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,10 +71,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     """Load config, build the Gradio app, and launch."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
 
     args = parse_args()
 

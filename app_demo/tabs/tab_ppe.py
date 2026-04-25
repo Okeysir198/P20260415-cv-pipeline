@@ -6,7 +6,6 @@ Video mode uses VideoProcessor with optional ByteTrack tracking.
 """
 
 import json
-import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -15,6 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 import gradio as gr
 import numpy as np
 import supervision as sv
+from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -22,8 +22,6 @@ from app_demo.utils import bgr_to_rgb, rgb_to_bgr
 from core.p10_inference.predictor import DetectionPredictor
 from core.p10_inference.supervision_bridge import build_labels, to_sv_detections
 from core.p10_inference.video_inference import VideoProcessor
-
-logger = logging.getLogger(__name__)
 
 # Color palette: green for compliance, red for violations, blue for person
 _COLOR_COMPLIANCE = sv.Color(r=0, g=200, b=0)

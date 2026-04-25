@@ -21,7 +21,6 @@ Both panels use random-subset sampling capped at ``max_samples_per_split``
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +29,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
+from loguru import logger
+
 matplotlib.use("Agg")
-logger = logging.getLogger(__name__)
 
 
 DM_FILENAMES: dict[str, str] = {

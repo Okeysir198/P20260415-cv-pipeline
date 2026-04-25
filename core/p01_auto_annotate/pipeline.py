@@ -11,15 +11,13 @@ When ``auto_label`` is absent from the data config, this pipeline falls
 back to direct text-prompt detection (identical to the StateGraph pipeline).
 """
 
-import logging
 import time
 from math import ceil
 from pathlib import Path
 from typing import Any
 
 from langgraph.func import entrypoint, task
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 # ---------------------------------------------------------------------------

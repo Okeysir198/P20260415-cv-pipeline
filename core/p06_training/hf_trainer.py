@@ -17,7 +17,6 @@ Usage:
                             overrides={"training": {"lr": 0.0005}})
 """
 
-import logging
 import shutil
 import sys
 from pathlib import Path
@@ -276,9 +275,8 @@ class _DetectionTrainer(Trainer):
 
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
 from core.p06_models import build_model
+from loguru import logger
 from utils.config import generate_run_dir, load_config, merge_configs
-
-logger = logging.getLogger(__name__)
 
 # Mapping: our optimizer names → HF optim names
 _OPTIM_MAP = {

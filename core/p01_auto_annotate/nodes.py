@@ -9,7 +9,6 @@ Six nodes that form the core processing stages:
 6. aggregate_node — dataset-level summary and reporting
 """
 
-import logging
 import sys
 import time
 from math import ceil
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import numpy as np
+from loguru import logger
 from typing_extensions import TypedDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
@@ -27,8 +27,6 @@ from utils.langgraph_common import (
     list_append_reducer,
     replace_reducer,
 )
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

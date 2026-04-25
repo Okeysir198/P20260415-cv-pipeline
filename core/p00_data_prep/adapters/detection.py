@@ -4,14 +4,13 @@ Detection task adapter.
 Handles object detection datasets with bounding box annotations.
 """
 
-import logging
 from pathlib import Path
+
+from loguru import logger
 
 from core.p00_data_prep.core.base import TaskAdapter
 from core.p00_data_prep.parsers import coco, voc, yolo
 from core.p00_data_prep.utils.class_mapper import ClassMapper
-
-logger = logging.getLogger(__name__)
 
 
 class DetectionAdapter(TaskAdapter):

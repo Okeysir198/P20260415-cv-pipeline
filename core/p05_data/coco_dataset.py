@@ -6,7 +6,6 @@ Reads images and COCO-format annotation JSON files
 ``(N, 5)`` float32 ``[class_id, cx, cy, w, h]`` normalised 0-1 representation.
 """
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -24,9 +23,8 @@ sys.path.insert(
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, BaseDataset  # noqa: E402
 from core.p05_data.detection_dataset import collate_fn  # noqa: E402
 from core.p05_data.transforms import build_transforms  # noqa: E402
+from loguru import logger
 from utils.config import resolve_path  # noqa: E402
-
-logger = logging.getLogger(__name__)
 
 # Image file extensions to search for
 _IMG_EXTENSIONS = {

@@ -7,7 +7,6 @@ Usage:
 """
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from utils.device import auto_select_gpu  # noqa: E402
 
 auto_select_gpu()
 
+from loguru import logger  # noqa: E402
 from utils.config import parse_overrides  # noqa: E402
 
 
@@ -101,26 +101,18 @@ def main() -> None:
     args = parser.parse_args()
 
     # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    log = logging.getLogger("hpo")
-
-    # Suppress verbose Optuna logging unless DEBUG
-    if args.log_level != "DEBUG":
-        logging.getLogger("optuna").setLevel(logging.WARNING)
+    logger.remove()
+    logger.add(sys.stderr, level=args.log_level)
 
     # Validate config files
     config_path = Path(args.config)
     if not config_path.exists():
-        log.error("Training config not found: %s", config_path)
+        logger.error("Training config not found: %s", config_path)
         sys.exit(1)
 
     hpo_config_path = Path(args.hpo_config)
     if not hpo_config_path.exists():
-        log.error("HPO config not found: %s", hpo_config_path)
+        logger.error("HPO config not found: %s", hpo_config_path)
         sys.exit(1)
 
     # Parse overrides
@@ -128,9 +120,9 @@ def main() -> None:
     if args.override:
         try:
             overrides = parse_overrides(args.override)
-            log.info("Training overrides: %s", overrides)
+            logger.info("Training overrides: %s", overrides)
         except ValueError as e:
-            log.error("Invalid override: %s", e)
+            logger.error("Invalid override: %s", e)
             sys.exit(1)
 
     if args.device:
@@ -168,10 +160,10 @@ def main() -> None:
             storage=args.storage,
         )
     except KeyboardInterrupt:
-        log.info("HPO interrupted by user.")
+        logger.info("HPO interrupted by user.")
         study = optimizer.study
         if study is None or len(study.trials) == 0:
-            log.info("No completed trials. Exiting.")
+            logger.info("No completed trials. Exiting.")
             sys.exit(0)
 
     # Save results

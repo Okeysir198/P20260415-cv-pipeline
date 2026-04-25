@@ -30,7 +30,6 @@ PNG + JSON and returns an ``{artifacts, chart_metrics, payload}`` dict.
 from __future__ import annotations
 
 import json
-import logging
 from itertools import combinations
 from pathlib import Path
 from typing import Any
@@ -42,8 +41,9 @@ from PIL import Image
 
 from utils.viz import apply_plot_style
 
+from loguru import logger
+
 matplotlib.use("Agg")
-logger = logging.getLogger(__name__)
 
 
 DL_FILENAMES: dict[str, str] = {

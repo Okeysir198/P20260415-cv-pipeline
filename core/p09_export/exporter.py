@@ -8,7 +8,6 @@ Handles ONNX export, optional simplification (onnxsim), and output
 validation against the original PyTorch model.
 """
 
-import logging
 import os
 import shutil
 import sys
@@ -23,9 +22,9 @@ from thop import profile
 
 from core.p06_models.hf_model import HFDetectionModel
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 _OUTPUT_FORMAT_TO_EXPORT_TASK = {
     "classification": "image-classification",

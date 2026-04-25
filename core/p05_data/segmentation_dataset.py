@@ -5,7 +5,6 @@ class IDs (0-indexed). Uses torchvision v2 transforms with tv_tensors
 for joint image+mask augmentation.
 """
 
-import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -21,9 +20,8 @@ from torch.utils.data import DataLoader, Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, IMG_EXTENSIONS
+from loguru import logger
 from utils.config import resolve_path
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

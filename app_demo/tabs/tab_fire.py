@@ -4,19 +4,17 @@ Provides image and video sub-tabs for detecting fire and smoke hazards.
 Uses a fine-tuned model when available, falling back to COCO pretrained.
 """
 
-import logging
 import tempfile
 from typing import Any, Dict, Optional, Tuple
 
 import gradio as gr
 import numpy as np
 import supervision as sv
+from loguru import logger
 
 from app_demo.utils import bgr_to_rgb, rgb_to_bgr
 from core.p10_inference.supervision_bridge import to_sv_detections
 from core.p10_inference.video_inference import VideoProcessor
-
-logger = logging.getLogger(__name__)
 
 
 def _detect_fire_image(
