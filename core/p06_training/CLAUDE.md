@@ -4,14 +4,15 @@ Authoritative notes on the training loop(s), callbacks, and the choice between
 the pytorch and HF Trainer backends. Companion to `README.md` — this file
 covers what's *between* files and the gotchas learned the hard way.
 
-## Two backends, one config
+## Three backends, one config
 
 `training.backend` in `06_training.yaml` picks the execution path:
 
-| Backend | File | Use when |
-|---|---|---|
-| `pytorch` (default) | `trainer.py::DetectionTrainer` | You need EMA + per-component LR + the full custom callback suite (`DatasetStatsLogger`, `AugLabelGridLogger`, `DataLabelGridLogger`, `ValPredictionLogger`, `CheckpointSaver`, `EarlyStopping`, `WandBLogger`). Covers every task type (detection, classification, segmentation, pose, keypoint). |
-| `hf` | `hf_trainer.py::train_with_hf` | Detection / classification / segmentation when you want DDP / DeepSpeed / gradient accumulation / bf16 tensor-core paths "for free", HF-Trainer-standard output layout (`checkpoint-N/`, `runs/<ts>_<host>/` TB, `trainer_state.json`), and the reference-notebook code pattern for DETR-family fine-tuning. |
+| Backend | File | Venv | Use when |
+|---|---|---|---|
+| `pytorch` (default) | `trainer.py::DetectionTrainer` | main `.venv/` | You need EMA + per-component LR + the full custom callback suite (`DatasetStatsLogger`, `AugLabelGridLogger`, `DataLabelGridLogger`, `ValPredictionLogger`, `CheckpointSaver`, `EarlyStopping`, `WandBLogger`). Covers every task type (detection, classification, segmentation, pose, keypoint). |
+| `hf` | `hf_trainer.py::train_with_hf` | main `.venv/` | Detection / classification / segmentation when you want DDP / DeepSpeed / gradient accumulation / bf16 tensor-core paths "for free", HF-Trainer-standard output layout (`checkpoint-N/`, `runs/<ts>_<host>/` TB, `trainer_state.json`), and the reference-notebook code pattern for DETR-family fine-tuning. |
+| `paddle` | `paddle_trainer.py::train_with_paddle` | sibling `.venv-paddle/` (`bash scripts/setup-paddle-venv.sh`) | PicoDet, PP-YOLOE[-plus], PP-LCNet/HGNet/MobileNetV3, PP-LiteSeg/MobileSeg, PP-TinyPose. Paddle ships its own bundled CUDA — incompatible with the main venv's CUDA 13 PyTorch wheels. Run as `.venv-paddle/bin/python core/p06_training/train.py --config ...`. Same observability tree (`data_preview/`, `val_predictions/`, `error_analysis/`) as the other backends. Checkpoints are paddle-native `.pdparams`+`.pdiparams` pairs; convert via `paddle2onnx` (also in `.venv-paddle/`) for downstream `p08`/`p09`/`p10` consumers. |
 
 Both respect the same YAML config keys; the HF backend falls back or warns
 on features it doesn't implement yet. See `_validate_hf_backend_config`
@@ -197,6 +198,17 @@ Need EMA / per-component LR / custom callback registry?
     └── No  → backend: pytorch (pose/face — top-down kpt now works on HF too)
 ```
 
+## Adding a new backend
+
+The dispatch happens in `train.py::main` keyed on `training.backend`. To add a fourth backend:
+
+1. Write `core/p06_training/<backend>_trainer.py` exposing a `train_with_<backend>(config, config_path)` entry point — same signature as `train_with_hf`. Reuse `_common.py` helpers (`task_from_output_format`, `unwrap_subset`).
+2. Add the dispatch branch in `train.py::main`. Keep heavy framework imports lazy (inside the function, not at module top) so the main venv doesn't need the framework installed to import `train.py`.
+3. Reuse `post_train.run_post_train_artifacts` so the `data_preview/` + `val_predictions/error_analysis/` tree comes out identical. The runner is backend-agnostic — it takes a `model` with a `__call__(image)` interface and a dataset.
+4. Document in this file's backend table (file path, venv, when-to-use) and in the root `CLAUDE.md` "Training Backends" bullet list.
+
+The paddle backend is the canonical reference for the sibling-venv + lazy-import pattern; see `core/p06_models/CLAUDE.md` for how `@register_model` keeps the main venv paddle-free.
+
 ## Adding a new loss function
 
 ```python
@@ -295,6 +307,10 @@ Gotchas
   `utils.checkpoint.strip_hf_prefix` before `load_state_dict(strict=False)`
   and warn on unexpected-key counts. The hazard above is specifically HF
   Trainer's in-process `_load_best_model`, which bypasses our reload sites.
+- **Paddle backend invocation** — never `uv run` paddle configs; paddle's bundled CUDA clashes with main `.venv/`'s CUDA 13 PyTorch wheels. Run as `.venv-paddle/bin/python core/p06_training/train.py --config features/<f>/configs/06_training_picodet.yaml`. The dispatcher in `train.py` raises a clear error if `training.backend: paddle` is selected but `import paddle` fails — the message points at `scripts/setup-paddle-venv.sh`.
+- **Paddle checkpoint format** — paddle saves `.pdparams` (weights) + `.pdiparams` (inference graph) pairs, not `.pt`. `post_train.run_post_train_artifacts` accepts both via the model wrapper; downstream `p08`/`p09`/`p10` go through ONNX after `paddle2onnx` conversion. Do not try to `torch.load` a paddle checkpoint.
+- **PP-TinyPose needs `KeypointTopDownDataset`** — same constraint as `hf_keypoint`. The bottom-up `KeypointDataset` returns `{boxes, keypoints}` full-frame and will silently produce zero training signal with PP-TinyPose's per-person heatmap targets. The dispatcher (`paddle_trainer._build_datasets`) branches on the arch name; new top-down paddle archs must be added to that allow-list.
+- **Paddle ONNX + ORT INT8** — PicoDet / PP-YOLOE (CNN backbones) generally hit real INT8 speedup on ORT CUDA EP. For any future transformer-y paddle arch, reuse the DETR-family exclusion list in `core/p09_export/quantize.py` (`LayerNormalization`/`Softmax`/`Gather` opt-out + `percentile` calibration default). `minmax` calibration is hard-blocked for DETR-family and should also be avoided for any transformer-paddle export.
 - **`self.save_dir` is an instance attribute** (set inside `_build_callbacks`)
   so `_finalize_training` and `_build_pytorch_training_config` can read it
   after the main loop. Do not convert it back to a local variable — it's the

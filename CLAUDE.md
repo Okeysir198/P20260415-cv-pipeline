@@ -7,6 +7,7 @@
 uv sync                        # Full p00→p10 pipeline + QA + LS + HPO + Gradio + Jupyter + Playwright + dev tools
 uv sync --extra analysis       # Add FiftyOne + Cleanlab (heavy, optional)
 bash scripts/setup-export-venv.sh   # Create .venv-export/ for quantized ONNX (optional)
+bash scripts/setup-paddle-venv.sh   # Create .venv-paddle/ for paddle backend (optional)
 
 # Auto-label a raw dir of JPEGs (no existing labels) via SAM3 → YOLO txt
 uv run core/p01_auto_annotate/run_auto_annotate.py \
@@ -44,6 +45,9 @@ uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml \
   --override training.lr=0.005 training.epochs=100
+# Paddle backend (PicoDet/PP-YOLOE/PP-LCNet/PP-LiteSeg/PP-TinyPose) — runs in sibling .venv-paddle/
+.venv-paddle/bin/python core/p06_training/train.py \
+  --config features/safety-fire_detection/configs/06_training_picodet.yaml
 
 # Evaluate
 uv run core/p08_evaluation/evaluate.py \
@@ -143,6 +147,10 @@ model = build_model(config)  # Dispatches by config["model"]["arch"]
 | `hf-classification` | Classification | HF Transformers |
 | `hf-segformer/mask2former/dinov2-seg` | Segmentation | HF Transformers |
 | `hf_keypoint` | Keypoint (top-down) | HF Transformers (ViTPose family) |
+| `picodet-{s,m,l}`, `pp-yoloe[-plus]-{s,m,l,x}` | Detection | PaddlePaddle (sibling `.venv-paddle/`) |
+| `pp-lcnet`, `pp-hgnet`, `pp-mobilenetv3` | Classification | PaddlePaddle (sibling `.venv-paddle/`) |
+| `pp-liteseg`, `pp-mobileseg` | Segmentation | PaddlePaddle (sibling `.venv-paddle/`) |
+| `pp-tinypose-{128x96,256x192}` | Keypoint (top-down) | PaddlePaddle (sibling `.venv-paddle/`) |
 
 ## Training Backends
 
@@ -150,6 +158,7 @@ Set `training.backend` in YAML:
 - **`pytorch`** (default): Custom trainer with EMA, SimOTA, per-component LR. YOLOX uses custom loss; HF/timm models use `forward_with_loss()`.
 - **`hf`**: HuggingFace Trainer with DDP/DeepSpeed.
 - **`custom`**: Dynamic import via `training.custom_trainer_class`.
+- **`paddle`**: Native PaddlePaddle trainer (PicoDet, PP-YOLOE, PP-LCNet/HGNet/MobileNetV3, PP-LiteSeg/MobileSeg, PP-TinyPose). Must run from the sibling `.venv-paddle/` venv (`bash scripts/setup-paddle-venv.sh`) — paddle ships its own bundled CUDA, kept out of the main `.venv/` to avoid clashing with the CUDA 13 PyTorch wheels. Heavy paddle imports are lazy: registries register without paddle installed; only the training/inference subprocess needs it. Checkpoints are paddle-native pairs (`.pdparams` + `.pdiparams`) — exported to `.onnx` via `paddle2onnx` (also in `.venv-paddle/`) for downstream `p08`/`p09`/`p10` consumers.
 
 ## Config System
 
@@ -225,6 +234,7 @@ import from any `features/<name>/code/`**.
 - **INT8 ONNX is slower than fp32 on ORT CUDA EP for DETR-family** — ORT CUDA has no real INT8 kernels for transformer attention/normalisation ops; emulation is often slower than fp32. Real INT8 speedup needs TensorRT EP engine build. Calibration runs on CPU EP and saturates cores for minutes on transformer models. **Now guarded**: `core/p09_export/quantize.py::quantize_static` defaults `calibration_method="percentile"`, auto-excludes `LayerNormalization/Softmax/Gather` from quantization when an arch hint or filename contains `dfine`/`rtdetr`/`detr`, and **hard-errors on `--calibration-method minmax` for DETR-family** (collapsed mAP→0 on D-FINE). `scripts/benchmark_detr_fp32_int8_vs_pytorch.py --strict` exits nonzero when INT8 isn't viable (≥1.2× speedup AND mAP drop ≤0.01). Use `percentile` (default) or `entropy`; YOLOX/timm/seg do not need the exclude list.
 - **ONNX inference: TensorRT EP is opt-in, not default** — `core/p10_inference/predictor.py::DetectionPredictor` accepts `providers: list[str] | None`; default stays `["CUDAExecutionProvider"]` for backward compat. Pass `providers=["TensorrtExecutionProvider", "CUDAExecutionProvider"]` to opt into TRT (ORT auto-falls-back to CUDA at session creation if TRT runtime libs aren't on `LD_LIBRARY_PATH`). Invalid provider names raise immediately. `onnxruntime-gpu` (already pinned) ships both EPs — no extra dep required. CPU EP remains forbidden by policy.
 - **Keypoint top-down (`hf_keypoint`) emits a different sample shape** — `KeypointTopDownDataset.__getitem__` returns `{pixel_values, target_heatmap, target_weight}` (per-person crops with Gaussian heatmap targets), NOT the `{boxes, keypoints}` full-frame YOLO-pose dict that `KeypointDataset` returns. Anything new that consumes a keypoint dataset needs to branch on the type or you'll silently hit detection-shaped postprocess paths that produce zero predictions. The HF Trainer dispatcher (`_build_datasets`) and the post-train runner (`_run_topdown_keypoint_post_train`) are the canonical examples.
+- **Paddle backend gotchas** (full overview in "Training Backends" above): never `uv add paddlepaddle-gpu` — its bundled CUDA clashes with main venv's CUDA 13 PyTorch wheels. `paddle2onnx` is `.venv-paddle/`-only (separate from `.venv-export/`'s optimum-onnx pin). For ORT INT8: PicoDet / PP-YOLOE (CNN) generally hit real speedup; any future transformer-y paddle arch should reuse the DETR-family exclusion list in `core/p09_export/quantize.py`. PP-TinyPose is top-down — feed `KeypointTopDownDataset`, not `KeypointDataset` (same constraint as `hf_keypoint`; bottom-up silently skips every transform stage past Raw).
 - **`pycocotools` APm/APl needs real source bboxes** — every top-down crop has identical area (input_h × input_w), so passing the crop bbox to `compute_oks_ap_pycocotools` collapses every person into a single area bucket and APm/ARm come back as -1.0. `_collect_source_bboxes(...)` in `core/p06_training/hf_callbacks.py` reads the YOLO label row + source image dims out of `KeypointTopDownDataset._index` to recover real source-pixel bboxes. New keypoint metric callers must do the same or their challenge-shape AP numbers will be misleading.
 
 ## Code Style

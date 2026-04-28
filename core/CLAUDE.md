@@ -15,7 +15,7 @@ Most phases expose a CLI under `run_*.py`; p05/p06_models/p10 are library-only. 
 | **p04** Label Studio bridge | `core/p04_label_studio/bridge.py` (subcommands `setup`, `import`, `export`) | `05_data.yaml`, LS REST API, `LS_API_KEY` env | LS project tasks on import; YOLO `.txt` over `labels/` on export |
 | **p05** data | library only — `YOLOXDataset`, `ClassificationDataset`, `SegmentationDataset`, `KeypointDataset` (full-frame YOLO-pose), `KeypointTopDownDataset` (per-person crops + heatmap targets, used with `hf_keypoint`) | `05_data.yaml` + split dirs | in-memory `Dataset` / `DataLoader` |
 | **p06_models** | library only — `build_model(config)` | `config["model"]["arch"]` | `nn.Module` |
-| **p06_training** | `core/p06_training/train.py` | `06_training.yaml` (refs `05_data.yaml` by filename) | `<save_dir>/{best.pt, last.pt, test_results.json, data_preview/, val_predictions/{epochs/, best.png, error_analysis/}, test_predictions/{best.png, error_analysis/}}` — full 3-axis observability tree produced on `on_train_end` (both backends). See `core/p06_training/CLAUDE.md` for the artifact map. |
+| **p06_training** | `core/p06_training/train.py` | `06_training.yaml` (refs `05_data.yaml` by filename) | `<save_dir>/{best.pt, last.pt, test_results.json, data_preview/, val_predictions/{epochs/, best.png, error_analysis/}, test_predictions/{best.png, error_analysis/}}` — full 3-axis observability tree produced on `on_train_end` (all three backends: pytorch / hf / paddle). See `core/p06_training/CLAUDE.md` for the artifact map. Paddle backend writes paddle-native `.pdparams`+`.pdiparams` instead of `.pt`; everything else is identical. |
 | **p07** HPO | `core/p07_hpo/run_hpo.py` | `06_training.yaml` + shared `08_hyperparameter_tuning.yaml` | `features/<f>/runs/hpo/<ds>/{study.pkl, best_config.yaml}` |
 | **p08** evaluation | `core/p08_evaluation/evaluate.py` | a `.pt` checkpoint + `05_data.yaml` | `metrics.json`, PR curves, confusion matrix |
 | **p09** export | `core/p09_export/export.py` | a `.pt` + `06_training.yaml` | `<save_dir>/<name>.onnx` |
@@ -68,7 +68,7 @@ Separate registries exist for:
 
 | Registry | File | Used by |
 |---|---|---|
-| `@register_model` | `p06_models/registry.py` | yolox, timm, hf_detection, hf_classification, hf_segmentation, hf_keypoint |
+| `@register_model` | `p06_models/registry.py` | yolox, timm, hf_detection, hf_classification, hf_segmentation, hf_keypoint, paddle (picodet, pp-yoloe, pp-lcnet, pp-hgnet, pp-mobilenetv3, pp-liteseg, pp-mobileseg, pp-tinypose) |
 | `@register_pose_model` | `p06_models/pose_registry.py` | rtmpose, mediapipe_pose |
 | `@register_face_detector` | `p06_models/face_registry.py` | scrfd |
 | `@register_face_embedder` | `p06_models/face_registry.py` | mobilefacenet |
@@ -124,6 +124,8 @@ p06_training   →  <save_dir>/best.pt        (or last.pt if best wasn't saved)
 **Auto-GPU-selection** — every CLI under `core/p06_training`, `core/p07_hpo`, `core/p08_evaluation` (and `app_demo/run.py`, `tests/test_p12_raw_pipeline.py`) calls `utils.device.auto_select_gpu()` near the top, before `import torch`. This picks the idle GPU on shared boxes. Respects user-set `CUDA_VISIBLE_DEVICES`. If you add a new CLI, add the call or document why not.
 
 **`model.cpu()` before ONNX export** — `ModelEvaluator` moves the model to GPU during eval. If you chain `evaluate → export` in the same process, call `model.cpu()` between them or `torch.onnx.export` silently runs on GPU and the resulting ONNX has GPU-pinned buffers.
+
+**Paddle backend lives in a third venv** — `training.backend: paddle` dispatches `core/p06_training/paddle_trainer.py` for the paddle archs registered in `p06_models/`. Paddle ships bundled CUDA incompatible with the main venv's CUDA 13 PyTorch wheels — runs from `.venv-paddle/` (`bash scripts/setup-paddle-venv.sh`). See `core/p06_training/CLAUDE.md` for the backend table and `core/p06_models/CLAUDE.md` for the lazy-import pattern that keeps `core.p06_models` paddle-free at module load.
 
 **Quantized export lives in a second venv** — `core/p09_export/export.py --optimize O2 --quantize dynamic` pulls in `optimum[onnxruntime]` which needs `transformers<4.58`, conflicting with the main venv's pinned git-transformers. Use `.venv-export/` (`scripts/setup-export-venv.sh`) for quantized, or `--skip-optimize` to stay in the main venv.
 
