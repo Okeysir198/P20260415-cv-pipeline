@@ -39,9 +39,119 @@ from core.p06_training._common import (
 from utils.viz import (
     VizStyle,
     annotate_detections,
+    annotate_keypoints,
     classification_banner,
     save_image_grid,
 )
+
+
+def _is_topdown_keypoint_dataset(ds: Any) -> bool:
+    """Return True for ``KeypointTopDownDataset`` (or a Subset wrapping one)."""
+    inner = getattr(ds, "dataset", ds)
+    return type(inner).__name__ == "KeypointTopDownDataset"
+
+
+def _denormalize_pixel_values(
+    pixel_values: np.ndarray,
+    mean=(0.485, 0.456, 0.406),
+    std=(0.229, 0.224, 0.225),
+) -> np.ndarray:
+    """Invert ImageNet normalization on a (3, H, W) tensor → uint8 RGB (H, W, 3)."""
+    px = pixel_values.astype(np.float32)
+    if px.ndim == 3 and px.shape[0] == 3:
+        px = px.transpose(1, 2, 0)
+    px = px * np.asarray(std, dtype=np.float32) + np.asarray(mean, dtype=np.float32)
+    px = np.clip(px * 255.0, 0, 255).astype(np.uint8)
+    return px
+
+
+def _render_topdown_keypoint_grid(
+    model: Any,
+    ds: Any,
+    indices: list[int],
+    out_path: Path,
+    *,
+    title: str,
+    grid_cols: int = 4,
+    dpi: int = 150,
+    pred_score_threshold: float = 0.3,
+) -> None:
+    """Render a GT+Pred skeleton grid for a top-down keypoint dataset.
+
+    For each sampled index we pull one (pixel_values, target_heatmap,
+    target_weight) triple from the dataset, run the model on the stacked
+    pixel_values, decode peaks for both pred + GT heatmaps, and draw both
+    skeletons on the denormalized crop (GT in purple, pred in green).
+    """
+    import torch
+    from core.p08_evaluation.keypoint_metrics import decode_heatmaps_to_xy
+
+    inner = getattr(ds, "dataset", ds)
+    index_map = (
+        (lambda i: ds.indices[i]) if hasattr(ds, "indices") else (lambda i: i)
+    )
+
+    samples = []
+    for idx in indices:
+        try:
+            real_idx = index_map(indices.index(idx))  # subset → underlying idx
+        except (TypeError, ValueError):
+            real_idx = idx
+        try:
+            item = ds[idx]  # respects Subset transparently
+        except Exception:
+            continue
+        samples.append((real_idx, item))
+
+    if not samples:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        return
+
+    device = next(model.parameters()).device
+    pixel_batch = torch.stack([s[1]["pixel_values"] for s in samples]).to(device)
+    target_hms = np.stack([s[1]["target_heatmap"].cpu().numpy() for s in samples])
+    target_ws = np.stack([s[1]["target_weight"].cpu().numpy() for s in samples])
+
+    with torch.inference_mode():
+        out = model(pixel_values=pixel_batch)
+    pred_hms_t = out["heatmaps"] if isinstance(out, dict) and "heatmaps" in out \
+        else getattr(out, "heatmaps", None)
+    if pred_hms_t is None:
+        pred_hms_t = getattr(out, "logits", None)
+    pred_hms = pred_hms_t.detach().float().cpu().numpy()
+
+    stride = int(inner.input_hw[0] // pred_hms.shape[2])
+    pred_xy, pred_scores = decode_heatmaps_to_xy(pred_hms, stride=stride)
+    gt_xy, _ = decode_heatmaps_to_xy(target_hms, stride=stride)
+
+    style = VizStyle()
+    panels: list[np.ndarray] = []
+    for i, (real_idx, _) in enumerate(samples):
+        crop = _denormalize_pixel_values(samples[i][1]["pixel_values"].cpu().numpy())
+        # GT in purple — gate by visibility weight
+        gt_kp = np.concatenate(
+            [gt_xy[i], (target_ws[i] > 0).astype(np.float32)[:, None] * 2.0],
+            axis=1,
+        )
+        pred_kp = np.concatenate(
+            [pred_xy[i], pred_scores[i, :, None]], axis=1,
+        )
+        from core.p10_inference.supervision_bridge import _draw_keypoints_panel
+        panel = _draw_keypoints_panel(crop, gt_kp, style.gt_color_rgb, style)
+        # Override threshold for pred dots: model heatmap-peak scores aren't
+        # in the same range as visibility {0,1,2}; use a configured cutoff.
+        pred_style = VizStyle(kpt_visibility_threshold=pred_score_threshold)
+        panel = _draw_keypoints_panel(panel, pred_kp, style.pred_color_rgb, pred_style)
+        # Caption: idx
+        from utils.viz import classification_banner as _banner
+        panel = _banner(panel, f"#{real_idx}", style=style, position="top",
+                       bg_color_rgb=(0, 0, 0), text_color_rgb=(255, 255, 255))
+        panels.append(panel)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    save_image_grid(
+        panels, out_path, cols=min(grid_cols, len(panels)), header=title,
+    )
 
 
 def _draw_gt_boxes(
@@ -647,8 +757,9 @@ class HFValPredictionCallback(TrainerCallback):
         if eval_loader is None or model is None:
             return control
 
+        ds = eval_loader.dataset
         if self._sample_indices is None:
-            n = len(eval_loader.dataset)
+            n = len(ds)
             if n == 0:
                 return control
             self._sample_indices = sorted(random.sample(range(n), min(self.num_samples, n)))
@@ -657,6 +768,37 @@ class HFValPredictionCallback(TrainerCallback):
         model.eval()
 
         epoch_idx = int(round(state.epoch or 0.0))
+
+        # Top-down keypoint short-circuit — the shared grid path uses the
+        # detection postprocess and doesn't fit our (pixel_values,
+        # target_heatmap, target_weight) sample shape.
+        task = _infer_task_from_model(model)
+        if task == "keypoint" and _is_topdown_keypoint_dataset(ds):
+            ap_val = 0.0
+            if state.log_history:
+                for entry in reversed(state.log_history):
+                    if "eval_AP" in entry:
+                        ap_val = float(entry["eval_AP"]); break
+            out_path = (
+                self.save_dir / "val_predictions" / "epochs"
+                / f"epoch_{epoch_idx:03d}.png"
+            )
+            try:
+                _render_topdown_keypoint_grid(
+                    model, ds, self._sample_indices, out_path,
+                    title=f"Epoch {epoch_idx} — AP: {ap_val:.4f}",
+                    grid_cols=self.grid_cols, dpi=self.dpi,
+                )
+                logger.info(
+                    "HFValPredictionCallback: saved epochs/epoch_%03d.png",
+                    epoch_idx,
+                )
+            except Exception as e:
+                logger.warning("per-epoch val grid skipped: %s", e)
+            if was_training:
+                model.train()
+            return control
+
         map_val = 0.0
         if state.log_history:
             for entry in reversed(state.log_history):
@@ -668,10 +810,10 @@ class HFValPredictionCallback(TrainerCallback):
         out_path = self.save_dir / "val_predictions" / "epochs" / f"epoch_{epoch_idx:03d}.png"
         try:
             render_prediction_grid(
-                model, eval_loader.dataset, self._sample_indices, out_path,
+                model, ds, self._sample_indices, out_path,
                 title=f"Epoch {epoch_idx} — mAP50: {map_val:.4f}",
                 class_names=self.class_names, input_size=self.input_size,
-                style=VizStyle(), task=_infer_task_from_model(model),
+                style=VizStyle(), task=task,
                 conf_threshold=self.conf_threshold, grid_cols=self.grid_cols,
                 dpi=self.dpi,
             )
