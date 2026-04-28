@@ -65,6 +65,301 @@ def _denormalize_pixel_values(
     return px
 
 
+def _run_topdown_keypoint_post_train(
+    model: Any,
+    val_ds: Any,
+    test_ds: Any,
+    save_dir: Path,
+    *,
+    best_num_samples: int = 16,
+    grid_cols: int = 4,
+    dpi: int = 150,
+) -> None:
+    """End-of-training observability for top-down keypoint runs.
+
+    Renders ``val_predictions/best.png`` (and ``test_predictions/best.png``
+    if a test split is present), then a compact error analysis tree:
+
+    - 01_overview: PCK@{0.05,0.1,0.2}, OKS-AP, OKS-AP50/75, mean pixel err.
+    - 07_per_joint_performance: per-joint PCK@0.1, sorted ascending.
+    - 08_confusion_left_right: 8 L↔R pairs × {correct, swapped, both wrong}
+      heatmap (the workhorse diagnostic for symmetric-joint failures).
+    - 12_hardest_crops: top-12 worst val crops (highest mean pixel err)
+      with GT|Pred skeletons side-by-side.
+    - summary.{json,md}: compact metrics dump.
+
+    No detection-shaped postprocess; everything goes through the same
+    heatmap decoder used by the per-epoch grid + compute_metrics.
+    """
+    import json
+    import torch
+    from core.p08_evaluation.keypoint_metrics import (
+        decode_heatmaps_to_xy, compute_pck, compute_oks, compute_oks_ap,
+        COCO_KP_SIGMAS,
+    )
+
+    inner = getattr(val_ds, "dataset", val_ds)
+    input_h, input_w = inner.input_hw
+    num_kp = inner.num_keypoints
+    sigmas = np.asarray(
+        getattr(inner, "data_config", {}).get("oks_sigmas") or COCO_KP_SIGMAS[:num_kp],
+        dtype=np.float32,
+    )
+
+    # ---- 1) Run model over the entire val split. ----
+    device = next(model.parameters()).device
+    was_training = model.training
+    model.eval()
+    all_pred_xy: list[np.ndarray] = []
+    all_pred_score: list[np.ndarray] = []
+    all_gt_xy: list[np.ndarray] = []
+    all_weight: list[np.ndarray] = []
+    all_pixel_err: list[np.ndarray] = []
+    all_per_idx: list[int] = []
+    batch_size = 32
+
+    n = len(val_ds)
+    indices = list(range(n))
+    with torch.inference_mode():
+        for start in range(0, n, batch_size):
+            chunk = indices[start:start + batch_size]
+            items = [val_ds[i] for i in chunk]
+            px = torch.stack([it["pixel_values"] for it in items]).to(device)
+            tg = torch.stack([it["target_heatmap"] for it in items]).numpy()
+            tw = torch.stack([it["target_weight"] for it in items]).numpy()
+            out = model(pixel_values=px)
+            pred_h = out["heatmaps"] if isinstance(out, dict) else out.heatmaps
+            pred_h = pred_h.detach().float().cpu().numpy()
+            stride = int(input_h // pred_h.shape[2])
+            pred_xy, pred_sc = decode_heatmaps_to_xy(pred_h, stride=stride)
+            gt_xy, _ = decode_heatmaps_to_xy(tg, stride=stride)
+            err = np.linalg.norm(pred_xy - gt_xy, axis=-1)
+            all_pred_xy.append(pred_xy)
+            all_pred_score.append(pred_sc)
+            all_gt_xy.append(gt_xy)
+            all_weight.append(tw)
+            all_pixel_err.append(err)
+            all_per_idx.extend(chunk)
+
+    pred_xy = np.concatenate(all_pred_xy, axis=0)
+    pred_score = np.concatenate(all_pred_score, axis=0)
+    gt_xy = np.concatenate(all_gt_xy, axis=0)
+    weight = np.concatenate(all_weight, axis=0)
+    pixel_err = np.concatenate(all_pixel_err, axis=0)
+    sample_idx = np.asarray(all_per_idx, dtype=np.int64)
+    if was_training:
+        model.train()
+
+    ref_size = float(np.sqrt(input_h * input_h + input_w * input_w))
+    pck = compute_pck(pred_xy, gt_xy, weight, ref_size=ref_size)
+    oks = compute_oks(pred_xy, gt_xy, weight, sigmas=sigmas, area=float(input_h * input_w))
+    ap_dict = compute_oks_ap(oks)
+
+    # ---- 2) best.png — top-N samples ranked by OKS (best first). ----
+    best_indices_topn = sorted_idx = np.argsort(-oks).tolist()[:best_num_samples]
+    pick = [sample_idx[i] for i in best_indices_topn]
+    best_path = save_dir / "val_predictions" / "best.png"
+    _render_topdown_keypoint_grid(
+        model, val_ds, pick, best_path,
+        title=f"Best-checkpoint val — AP {ap_dict['AP']:.4f} | PCK@0.1 {pck['pck_10']:.4f}",
+        grid_cols=grid_cols, dpi=dpi,
+    )
+
+    if test_ds is not None and len(test_ds) > 0:
+        test_path = save_dir / "test_predictions" / "best.png"
+        test_pick = list(range(min(best_num_samples, len(test_ds))))
+        try:
+            _render_topdown_keypoint_grid(
+                model, test_ds, test_pick, test_path,
+                title=f"Best-checkpoint test — n={len(test_pick)}",
+                grid_cols=grid_cols, dpi=dpi,
+            )
+        except Exception as e:
+            logger.warning("test-set best grid skipped: %s", e)
+
+    # ---- 3) Error analysis (compact). ----
+    ea_dir = save_dir / "val_predictions" / "error_analysis"
+    ea_dir.mkdir(parents=True, exist_ok=True)
+    _render_topdown_keypoint_error_analysis(
+        ea_dir=ea_dir, pred_xy=pred_xy, gt_xy=gt_xy, weight=weight,
+        pred_score=pred_score, pixel_err=pixel_err, sample_idx=sample_idx,
+        ref_size=ref_size, sigmas=sigmas, input_hw=(input_h, input_w),
+        kp_names=getattr(inner, "data_config", {}).get("keypoint_names"),
+        ds=val_ds, dpi=dpi,
+    )
+
+    summary = {**pck, **ap_dict, "n_persons": int(n)}
+    (ea_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    md_lines = [
+        "# Keypoint top-down error analysis",
+        "",
+        f"- N persons: **{n}**",
+        f"- AP (mean OKS≥{{0.5..0.95}}): **{ap_dict['AP']:.4f}**",
+        f"- AP50 / AP75: **{ap_dict['AP50']:.4f}** / **{ap_dict['AP75']:.4f}**",
+        f"- OKS mean: **{ap_dict['OKS_mean']:.4f}**",
+        f"- PCK@0.05 / 0.10 / 0.20: **{pck['pck_05']:.4f}** / "
+        f"**{pck['pck_10']:.4f}** / **{pck['pck_20']:.4f}**",
+        f"- Mean pixel error: **{pck['mean_pixel_err']:.2f} px**"
+        f" (ref scale = sqrt(H²+W²) = {ref_size:.0f} px)",
+        "",
+        "Charts:",
+        "- `01_overview.png` — headline metrics + per-joint err bar.",
+        "- `07_per_joint_performance.png` — PCK@0.1 per joint sorted ascending.",
+        "- `08_confusion_left_right.png` — symmetric-pair confusion heatmap.",
+        "- `12_hardest_crops.png` — top-12 worst predictions, GT vs Pred.",
+    ]
+    (ea_dir / "summary.md").write_text("\n".join(md_lines))
+    logger.info("post-train (top-down keypoint): saved %s", ea_dir)
+
+
+def _render_topdown_keypoint_error_analysis(
+    *,
+    ea_dir: Path,
+    pred_xy: np.ndarray, gt_xy: np.ndarray, weight: np.ndarray,
+    pred_score: np.ndarray, pixel_err: np.ndarray, sample_idx: np.ndarray,
+    ref_size: float, sigmas: np.ndarray, input_hw: tuple[int, int],
+    kp_names: list[str] | None, ds: Any, dpi: int,
+) -> None:
+    """Render charts 01, 07, 08, 12 to ``ea_dir``."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    K = pred_xy.shape[1]
+    if not kp_names:
+        kp_names = [f"kp{i:02d}" for i in range(K)]
+
+    vis = (weight > 0).astype(np.float32)
+
+    # ----- 01 overview -----
+    pck_thrs = [0.05, 0.1, 0.2]
+    pck_vals = []
+    for t in pck_thrs:
+        thr = t * ref_size
+        pck_vals.append(((pixel_err < thr) & (vis > 0)).sum() / max(vis.sum(), 1.0))
+
+    n_vis_per_joint = np.maximum(vis.sum(axis=0), 1.0)
+    err_per_joint = (pixel_err * vis).sum(axis=0) / n_vis_per_joint
+
+    fig, ax = plt.subplots(1, 2, figsize=(13, 4.5))
+    ax[0].bar(["PCK@0.05", "PCK@0.10", "PCK@0.20"], pck_vals,
+              color=["#7e22ce", "#9333ea", "#a855f7"])
+    for i, v in enumerate(pck_vals):
+        ax[0].text(i, v + 0.01, f"{v:.3f}", ha="center", fontsize=9)
+    ax[0].set_ylim(0, 1.05); ax[0].set_ylabel("Recall")
+    ax[0].set_title("Headline accuracy")
+    order = np.argsort(err_per_joint)
+    ax[1].barh([kp_names[i] for i in order], err_per_joint[order], color="#9333ea")
+    ax[1].set_xlabel("Mean pixel error (px)")
+    ax[1].set_title("Per-joint mean pixel error")
+    fig.tight_layout()
+    fig.savefig(ea_dir / "01_overview.png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+    # ----- 07 per_joint_performance (PCK@0.1 per joint, sorted) -----
+    thr10 = 0.1 * ref_size
+    correct_per_joint = ((pixel_err < thr10) & (vis > 0)).sum(axis=0)
+    pck10_per_joint = correct_per_joint / n_vis_per_joint
+    order10 = np.argsort(pck10_per_joint)
+    fig, ax = plt.subplots(figsize=(8, max(4, K * 0.3)))
+    ax.barh([kp_names[i] for i in order10], pck10_per_joint[order10], color="#9333ea")
+    for i, v in enumerate(pck10_per_joint[order10]):
+        ax.text(v + 0.005, i, f"{v:.3f}", va="center", fontsize=8)
+    ax.set_xlim(0, 1.05); ax.set_xlabel("PCK@0.1")
+    ax.set_title("Per-joint PCK@0.1 (sorted ascending — worst at top)")
+    fig.tight_layout()
+    fig.savefig(ea_dir / "07_per_joint_performance.png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+    # ----- 08 confusion_left_right -----
+    # COCO 17-kpt L↔R index pairs. Skipped silently for non-COCO schemas.
+    coco_lr_pairs = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12), (13, 14), (15, 16)]
+    pair_names = ["eyes", "ears", "shoulders", "elbows", "wrists", "hips", "knees", "ankles"]
+    if K >= 17:
+        thr = 0.1 * ref_size
+        cnt = np.zeros((len(coco_lr_pairs), 4), dtype=np.float32)  # both_ok, swapped, L_only, R_only
+        for pi, (l, r) in enumerate(coco_lr_pairs):
+            both_vis = (vis[:, l] > 0) & (vis[:, r] > 0)
+            if not both_vis.any():
+                continue
+            d_ll = np.linalg.norm(pred_xy[both_vis, l] - gt_xy[both_vis, l], axis=-1)
+            d_rr = np.linalg.norm(pred_xy[both_vis, r] - gt_xy[both_vis, r], axis=-1)
+            d_lr = np.linalg.norm(pred_xy[both_vis, l] - gt_xy[both_vis, r], axis=-1)
+            d_rl = np.linalg.norm(pred_xy[both_vis, r] - gt_xy[both_vis, l], axis=-1)
+            ll_ok = d_ll < thr
+            rr_ok = d_rr < thr
+            swap = (d_lr < thr) & (d_rl < thr) & ~ll_ok & ~rr_ok
+            cnt[pi, 0] = (ll_ok & rr_ok).sum()
+            cnt[pi, 1] = swap.sum()
+            cnt[pi, 2] = (ll_ok & ~rr_ok).sum()
+            cnt[pi, 3] = (~ll_ok & rr_ok).sum()
+            total = both_vis.sum()
+            if total > 0:
+                cnt[pi] = cnt[pi] / total
+        fig, ax = plt.subplots(figsize=(7, 3.6))
+        im = ax.imshow(cnt, aspect="auto", cmap="viridis", vmin=0, vmax=1)
+        ax.set_xticks(range(4))
+        ax.set_xticklabels(["both\nok", "L↔R\nswapped", "L only", "R only"])
+        ax.set_yticks(range(len(coco_lr_pairs)))
+        ax.set_yticklabels(pair_names)
+        for i in range(cnt.shape[0]):
+            for j in range(cnt.shape[1]):
+                ax.text(j, i, f"{cnt[i, j]:.2f}",
+                        ha="center", va="center",
+                        color="white" if cnt[i, j] < 0.6 else "black", fontsize=8)
+        fig.colorbar(im, ax=ax, fraction=0.04)
+        ax.set_title("L↔R confusion (PCK@0.1 gate)")
+        fig.tight_layout()
+        fig.savefig(ea_dir / "08_confusion_left_right.png", dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+
+    # ----- 12 hardest_crops — top-12 worst by mean per-image pixel err -----
+    n_vis_per_img = np.maximum(vis.sum(axis=1), 1.0)
+    img_err = (pixel_err * vis).sum(axis=1) / n_vis_per_img
+    hardest = np.argsort(-img_err)[:12].tolist()
+    pick_idx = [int(sample_idx[i]) for i in hardest]
+    if pick_idx:
+        # Render with the model again — re-uses the standard top-down grid path.
+        # Need access to a model handle. Pull from caller via closure isn't
+        # available; the caller already wrote best.png with a similar render.
+        # Instead, we render a static GT|Pred panel grid using already-decoded
+        # pred_xy/gt_xy in crop coords.
+        from core.p10_inference.supervision_bridge import _draw_keypoints_panel
+
+        inner = getattr(ds, "dataset", ds)
+        from utils.viz import classification_banner as _banner
+        style = VizStyle()
+        panels = []
+        for h in hardest:
+            real_idx = int(sample_idx[h])
+            try:
+                item = ds[real_idx]
+            except Exception:
+                continue
+            crop = _denormalize_pixel_values(item["pixel_values"].cpu().numpy())
+            gt_kp = np.concatenate(
+                [gt_xy[h], (weight[h] > 0).astype(np.float32)[:, None] * 2.0],
+                axis=1,
+            )
+            pred_kp = np.concatenate([pred_xy[h], pred_score[h, :, None]], axis=1)
+            panel = _draw_keypoints_panel(crop, gt_kp, style.gt_color_rgb, style)
+            pred_style = VizStyle(kpt_visibility_threshold=0.3)
+            panel = _draw_keypoints_panel(panel, pred_kp, style.pred_color_rgb, pred_style)
+            panel = _banner(
+                panel,
+                f"#{real_idx}  err={img_err[h]:.1f}px",
+                style=style, position="top",
+                bg_color_rgb=(0, 0, 0), text_color_rgb=(255, 255, 255),
+            )
+            panels.append(panel)
+        if panels:
+            save_image_grid(
+                panels, ea_dir / "12_hardest_crops.png",
+                cols=min(4, len(panels)),
+                header="Hardest crops — top-12 by mean per-image pixel error",
+            )
+
+
 def _render_topdown_keypoint_grid(
     model: Any,
     ds: Any,
@@ -857,6 +1152,26 @@ class HFValPredictionCallback(TrainerCallback):
 
         val_loader = kwargs.get("eval_dataloader")
         val_ds = val_loader.dataset if val_loader is not None else None
+
+        # Top-down keypoint short-circuit — run_post_train_artifacts assumes
+        # detection-shaped postprocess. We render best.png + a compact
+        # error_analysis directly from the heatmap-decoded predictions.
+        task_now = _infer_task_from_model(model)
+        if task_now == "keypoint" and _is_topdown_keypoint_dataset(val_ds):
+            try:
+                _run_topdown_keypoint_post_train(
+                    model=model, val_ds=val_ds, test_ds=self.test_dataset,
+                    save_dir=self.save_dir,
+                    best_num_samples=self.best_num_samples,
+                    grid_cols=self.grid_cols,
+                    dpi=self.dpi,
+                )
+            except Exception as e:
+                logger.warning(
+                    "post-train artifacts (top-down keypoint) skipped: %s",
+                    e, exc_info=True,
+                )
+            return control
 
         try:
             training_config = _build_hf_training_config(args, state, model, best_map, test_map)
