@@ -17,6 +17,7 @@ __pycache__/
 .venv-export/
 .venv-notebook/
 .venv-yolox-official/
+.venv-paddle/
 venv/
 .env
 
