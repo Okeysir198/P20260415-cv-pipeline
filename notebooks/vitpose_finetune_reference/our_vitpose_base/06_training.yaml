@@ -87,9 +87,11 @@ training:
   heatmap:
     stride: 4                             # input/4 → 64x48 for 256x192
     sigma: 2.0
-  # Pair with `checkpoint.metric: loss` above. HF Trainer prepends `eval_`.
-  metric_for_best_model: loss
-  greater_is_better: false
+  # Pair with `checkpoint.metric: AP` above. HF Trainer prepends `eval_`.
+  # Other available eval metrics (logged but not for selection): pck_05,
+  # pck_10, pck_20, AP50, AP75, OKS_mean, mean_pixel_err, err_kp00..16.
+  metric_for_best_model: AP
+  greater_is_better: true
 
   # Same observability tree as detection/seg/cls — keypoint viz routes
   # through utils/viz.py::draw_keypoints (skeleton + dots).

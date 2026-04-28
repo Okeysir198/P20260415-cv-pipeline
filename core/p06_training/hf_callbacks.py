@@ -116,6 +116,12 @@ def _render_gt_panel(
         )
     elif task == "keypoint":
         kpts = target if isinstance(target, np.ndarray) else None
+        # KeypointDataset (multi-instance YOLO-pose) emits (N, K, 3); top-down
+        # emits (1, K, 3). For now we render the first instance per sample —
+        # top-down has exactly one anyway, and multi-instance datasets get a
+        # representative skeleton. TODO: per-instance overlay loop.
+        if isinstance(kpts, np.ndarray) and kpts.ndim == 3 and kpts.shape[0] >= 1:
+            kpts = kpts[0]
         annotated_rgb = _draw_keypoints_panel(image_rgb, kpts, style.gt_color_rgb, style)
     else:
         annotated_rgb = image_rgb
@@ -134,8 +140,25 @@ def _extract_raw_target(ds, idx: int, task: str):
         if labels is None or len(labels) == 0:
             return np.zeros((0, 5), dtype=np.float32)
         return labels
-    # Segmentation / classification / keypoint: get_raw_item returns the target directly.
     item = ds.get_raw_item(idx)
+    if task == "keypoint":
+        # `targets` here holds bboxes (compat with detection-style schema);
+        # the GT skeleton lives under `keypoints`. Multi-instance YOLO-pose
+        # `KeypointDataset` returns normalized [0,1] coords — denormalize to
+        # pixel space for the renderer (which expects pixel coords).
+        # Top-down `KeypointTopDownDataset` already returns pixel coords; we
+        # detect the convention by max-coord magnitude rather than dataset
+        # type so both work without coupling.
+        kpts = item.get("keypoints")
+        if isinstance(kpts, np.ndarray) and kpts.size and kpts[..., :2].max() <= 1.5:
+            img = item.get("image")
+            if img is not None:
+                ih, iw = img.shape[:2]
+                kpts = kpts.copy()
+                kpts[..., 0] *= iw
+                kpts[..., 1] *= ih
+        return kpts
+    # Segmentation / classification: get_raw_item returns the target directly.
     return item.get("targets")
 
 

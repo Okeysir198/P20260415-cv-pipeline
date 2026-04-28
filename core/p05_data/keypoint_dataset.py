@@ -265,17 +265,23 @@ class KeypointDataset(BaseDataset):
             base_dir = Path.cwd()
         self.base_dir = Path(base_dir)
 
-        # Resolve image directory
+        # Resolve image directory. Two supported layouts:
+        #   A) <root>/<split>/images + <root>/<split>/labels       (preferred)
+        #   B) <root>/<split>        + <root>/labels               (legacy)
         dataset_root = resolve_path(data_config["path"], self.base_dir)
         split_subdir = data_config.get(split)
         if split_subdir is None:
             raise ValueError(f"data config missing '{split}' key")
-        self.img_dir = dataset_root / split_subdir
+        candidate_a_img = dataset_root / split_subdir / "images"
+        candidate_a_lbl = dataset_root / split_subdir / "labels"
+        if candidate_a_img.exists():
+            self.img_dir = candidate_a_img
+            self.label_dir = candidate_a_lbl
+        else:
+            self.img_dir = dataset_root / split_subdir
+            self.label_dir = self.img_dir.parent / "labels"
         if not self.img_dir.exists():
             raise FileNotFoundError(f"Image directory not found: {self.img_dir}")
-
-        # Derive label directory: sibling "labels" directory
-        self.label_dir = self.img_dir.parent / "labels"
 
         # Collect image paths
         self.img_paths: list[Path] = sorted(

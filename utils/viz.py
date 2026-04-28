@@ -160,8 +160,10 @@ def annotate_keypoints(
     """Draw keypoint vertices + skeleton edges using supervision annotators.
 
     Low-confidence points (below ``style.kpt_visibility_threshold``) are
-    hidden by zeroing their coordinates before construction of
-    :class:`sv.KeyPoints`.
+    truly hidden by moving them off-canvas before construction of
+    :class:`sv.KeyPoints` — supervision's annotators draw at the given
+    xy regardless of the per-point confidence value, so simply zeroing
+    coords would cluster every hidden kpt at the top-left corner.
     """
     style = _default_style(style)
     h, w = image.shape[:2]
@@ -177,10 +179,10 @@ def annotate_keypoints(
         conf = np.asarray(confidence, dtype=np.float32)
         if conf.ndim == 1:
             conf = conf[None, ...]
-        # hide low-conf points
+        # Move hidden points far off-canvas so cv2.circle / line clip them out.
         mask = conf < style.kpt_visibility_threshold
         xy = xy.copy()
-        xy[mask] = 0.0
+        xy[mask] = -1.0e6
 
     keypoints = sv.KeyPoints(xy=xy, confidence=conf)
 

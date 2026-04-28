@@ -535,7 +535,7 @@ def train_with_hf(
             score_threshold=eval_thr,
         )
     else:
-        compute_metrics = _build_compute_metrics(output_format, config)
+        compute_metrics = _build_compute_metrics(output_format, config, data_config)
 
     # Compute subset indices to pass into data-preview callbacks so their
     # stats/grids reflect the 20%-subset run (not the full underlying dataset).
@@ -977,7 +977,9 @@ def _config_to_training_args(
     return training_args
 
 
-def _build_compute_metrics(output_format: str, config: dict):
+def _build_compute_metrics(
+    output_format: str, config: dict, data_config: dict | None = None,
+):
     """Build a compute_metrics function for HF Trainer based on task type."""
     if output_format == "classification":
         def compute_metrics(eval_pred):
@@ -1024,10 +1026,27 @@ def _build_compute_metrics(output_format: str, config: dict):
         return compute_metrics
 
     elif output_format == "keypoint":
-        # In-loop selection uses eval_loss (weighted heatmap MSE). Real OKS-AP
-        # is computed offline via pycocotools. Returning None lets HF Trainer
-        # report only the loss + runtime metrics.
-        return None
+        # Top-down keypoint compute_metrics — PCK + OKS-AP via numpy.
+        # Sigmas come from 05_data.yaml::oks_sigmas (falls back to the
+        # COCO 17-kpt defaults). Input HW from data config / tensor_prep.
+        from core.p08_evaluation.keypoint_metrics import (
+            build_compute_metrics_keypoint,
+        )
+        from utils.config import resolve_tensor_prep as _rtp
+
+        sigmas = (data_config or {}).get("oks_sigmas")
+        input_hw = None
+        if data_config and data_config.get("input_size"):
+            input_hw = tuple(data_config["input_size"])
+        if input_hw is None:
+            _tp = _rtp(config, backend="hf") or {}
+            input_hw = tuple(_tp.get("input_size") or (256, 192))
+        stride = int(
+            (config.get("training", {}).get("heatmap", {}) or {}).get("stride", 4)
+        )
+        return build_compute_metrics_keypoint(
+            sigmas=sigmas, input_hw=input_hw, stride=stride,
+        )
 
     else:
         logger.warning(
