@@ -153,10 +153,10 @@ model = build_model(config)  # Dispatches by config["model"]["arch"]
 | `hf-classification` | Classification | HF Transformers |
 | `hf-segformer/mask2former/dinov2-seg` | Segmentation | HF Transformers |
 | `hf_keypoint` | Keypoint (top-down) | HF Transformers (ViTPose family) |
-| `picodet-{s,m,l}`, `pp-yoloe[-plus]-{s,m,l,x}` | Detection | PaddlePaddle (sibling `.venv-paddle/`) |
-| `pp-lcnet`, `pp-hgnet`, `pp-mobilenetv3` | Classification | PaddlePaddle (sibling `.venv-paddle/`) |
-| `pp-liteseg`, `pp-mobileseg` | Segmentation | PaddlePaddle (sibling `.venv-paddle/`) |
-| `pp-tinypose-{128x96,256x192}` | Keypoint (top-down) | PaddlePaddle (sibling `.venv-paddle/`) |
+
+Paddle archs (PicoDet, PP-YOLOE) are NOT in this unified registry — they live
+in their own package (`core/p06_paddle/`) and run in `.venv-paddle/`. See
+`core/p06_paddle/CLAUDE.md`.
 
 ## Training Backends
 
@@ -164,7 +164,7 @@ Set `training.backend` in YAML:
 - **`pytorch`** (default): Custom trainer with EMA, SimOTA, per-component LR. YOLOX uses custom loss; HF/timm models use `forward_with_loss()`.
 - **`hf`**: HuggingFace Trainer with DDP/DeepSpeed.
 - **`custom`**: Dynamic import via `training.custom_trainer_class`.
-- **`paddle`**: Native PaddlePaddle trainer (PicoDet, PP-YOLOE, PP-LCNet/HGNet/MobileNetV3, PP-LiteSeg/MobileSeg, PP-TinyPose). Must run from the sibling `.venv-paddle/` venv (`bash scripts/setup-paddle-venv.sh`) — paddle ships its own bundled CUDA, kept out of the main `.venv/` to avoid clashing with the CUDA 13 PyTorch wheels. Heavy paddle imports are lazy: registries register without paddle installed; only the training/inference subprocess needs it. Checkpoints are paddle-native pairs (`.pdparams` + `.pdiparams`) — exported to `.onnx` via `paddle2onnx` (also in `.venv-paddle/`) for downstream `p08`/`p09`/`p10` consumers.
+- **`paddle`**: Selecting `backend: paddle` in the unified dispatcher prints a redirect — paddle is NOT handled by `core/p06_training/train.py`. Train via `.venv-paddle/bin/python core/p06_paddle/train.py` (separate package, separate venv, drives upstream `ppdet.engine.Trainer` directly). Convergence with the rest of the pipeline happens at ONNX (`core/p06_paddle/export.py` → main-venv ORT path). Setup: `bash scripts/setup-paddle-venv.sh`. v1 = detection only (PicoDet, PP-YOLOE). See `core/p06_paddle/CLAUDE.md`.
 
 ## Config System
 

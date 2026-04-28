@@ -69,7 +69,7 @@ Separate registries exist for:
 
 | Registry | File | Used by |
 |---|---|---|
-| `@register_model` | `p06_models/registry.py` | yolox, timm, hf_detection, hf_classification, hf_segmentation, hf_keypoint, paddle (picodet, pp-yoloe, pp-lcnet, pp-hgnet, pp-mobilenetv3, pp-liteseg, pp-mobileseg, pp-tinypose) |
+| `@register_model` | `p06_models/registry.py` | yolox, timm, hf_detection, hf_classification, hf_segmentation, hf_keypoint (paddle archs are NOT here — see `core/p06_paddle/CLAUDE.md`) |
 | `@register_pose_model` | `p06_models/pose_registry.py` | rtmpose, mediapipe_pose |
 | `@register_face_detector` | `p06_models/face_registry.py` | scrfd |
 | `@register_face_embedder` | `p06_models/face_registry.py` | mobilefacenet |

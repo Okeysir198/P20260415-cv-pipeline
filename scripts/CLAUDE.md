@@ -18,4 +18,5 @@ exists.
   (PaddleDetection / PaddleClas / PaddleSeg + paddle2onnx). Paddle's
   `paddlepaddle-gpu` wheel bundles its own CUDA 12.x runtime; the main venv
   uses CUDA 13 torch and the two cannot coexist in one venv. Run paddle-backed
-  training via `.venv-paddle/bin/python core/p06_training/train.py ...`.
+  training via `.venv-paddle/bin/python core/p06_paddle/train.py ...` (paddle is
+  a separate package, not a `core/p06_training` backend — see `core/p06_paddle/CLAUDE.md`).
