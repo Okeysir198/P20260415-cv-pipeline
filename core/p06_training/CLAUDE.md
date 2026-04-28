@@ -17,7 +17,14 @@ Both respect the same YAML config keys; the HF backend falls back or warns
 on features it doesn't implement yet. See `_validate_hf_backend_config`
 (`hf_trainer.py`) for the allow/deny list.
 
-### HF backend support matrix (detection)
+### HF backend support matrix (all CV tasks)
+
+`hf_keypoint` (top-down ViTPose-family) requires `KeypointTopDownDataset`,
+NOT the bottom-up `KeypointDataset`. The two emit different sample shapes —
+top-down returns `{pixel_values, target_heatmap, target_weight}` per-person
+crops; bottom-up returns `{boxes, keypoints}` full-frame. The HF Trainer
+dispatcher (`_build_datasets`) and post-train callbacks branch on this.
+
 
 | Config key | Respected | Notes |
 |---|---|---|

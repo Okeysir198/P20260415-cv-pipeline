@@ -350,34 +350,34 @@ def _overlay_segmentation(
     h, w = image_rgb.shape[:2]
     if mask.shape != (h, w):
         try:
-            mask = cv2.resize(mask.astype(np.uint8), (w, h),
+            mask = cv2.resize(mask.astype(np.int32), (w, h),
                               interpolation=cv2.INTER_NEAREST)
         except Exception:
             return
-    fg = mask > 0
-    if not fg.any():
-        return
-    color_rgb = getattr(style, "gt_color_rgb", (0, 200, 0))
+    mask = mask.astype(np.int64)
+    # Class-id 0 = background (not rendered). 255 (and other ignore values)
+    # also skipped. Color each remaining class via the shared label palette.
     rgba = np.zeros((h, w, 4), dtype=np.float32)
-    rgba[fg, 0] = color_rgb[0] / 255.0
-    rgba[fg, 1] = color_rgb[1] / 255.0
-    rgba[fg, 2] = color_rgb[2] / 255.0
-    rgba[fg, 3] = 0.4
-    ax.imshow(rgba)
+    unique = [int(c) for c in np.unique(mask) if 0 < int(c) < 255]
+    if not unique:
+        return
     try:
-        bin_mask = (fg.astype(np.uint8)) * 255
-        contours, _ = cv2.findContours(bin_mask, cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_SIMPLE)
-        edge_color = tuple(c / 255.0 for c in color_rgb)
-        for cnt in contours:
-            if len(cnt) < 2:
-                continue
-            pts = cnt.squeeze(1)
-            if pts.ndim != 2:
-                continue
-            ax.plot(pts[:, 0], pts[:, 1], color=edge_color, linewidth=1.5)
+        from core.p05_data.run_viz import _LABEL_PALETTE  # type: ignore[attr-defined]
     except Exception:
-        pass
+        _LABEL_PALETTE = None  # noqa: N806
+    for cid in unique:
+        sel = mask == cid
+        if _LABEL_PALETTE is not None:
+            bgr = _LABEL_PALETTE[cid % len(_LABEL_PALETTE)]
+            color = (bgr[2] / 255.0, bgr[1] / 255.0, bgr[0] / 255.0)
+        else:
+            base = getattr(style, "gt_color_rgb", (0, 200, 0))
+            color = tuple(c / 255.0 for c in base)
+        rgba[sel, 0] = color[0]
+        rgba[sel, 1] = color[1]
+        rgba[sel, 2] = color[2]
+        rgba[sel, 3] = 0.45
+    ax.imshow(rgba)
 
 
 def _default_skeleton() -> list[tuple[int, int]]:
@@ -668,13 +668,18 @@ def _walk_keypoint(
     transform_obj: Any,
     mean: list[float],
     std: list[float],
+    *,
+    is_topdown: bool = False,
 ) -> list[dict]:
-    """KeypointTransform is monolithic — step it as one opaque block.
+    """Render the keypoint transform pipeline.
 
-    Cells: Raw → KeypointTransform(opaque) → Denormalize(Normalize).
-    `raw_target_dict` is the dataset's raw targets dict; the keypoint overlay
-    expects an (N, K, 3) array, so unpack ``keypoints`` denormalized to pixel
-    coords for the raw row.
+    Bottom-up (``KeypointDataset`` + ``KeypointTransform``) is monolithic
+    so we render Raw → opaque-transform → Denormalize.
+
+    Top-down (``KeypointTopDownDataset`` + HF ``VitPoseImageProcessor``)
+    decomposes into 4 visible stages: Raw → BBoxCrop → ResizeToInput →
+    Normalize → Denormalize. Each is rendered with the appropriate
+    keypoints overlay so the user can see crop, scale, and color shift.
     """
     rgb_raw = cv2.cvtColor(raw_bgr, cv2.COLOR_BGR2RGB)
     h_raw, w_raw = rgb_raw.shape[:2]
@@ -684,25 +689,102 @@ def _walk_keypoint(
         if kp is not None:
             arr = np.asarray(kp, dtype=np.float32)
             if arr.ndim == 3 and arr.shape[0] > 0:
-                # Normalized 0–1 → pixel coords; flatten across instances.
                 arr = arr.reshape(-1, arr.shape[-1]).copy()
-                arr[:, 0] *= w_raw
-                arr[:, 1] *= h_raw
+                # Top-down `get_raw_item` already returns pixel coords;
+                # bottom-up returns normalized 0–1.
+                if not is_topdown:
+                    arr[:, 0] *= w_raw
+                    arr[:, 1] *= h_raw
                 raw_kpts_arr = arr
 
     cells: list[dict] = [{
         "image": rgb_raw, "target": raw_kpts_arr,
         "step_name": "Raw", "meta": _cell_meta(rgb_raw), "is_normalize": False,
     }]
-    if transform_obj is None or post_tensor is None:
+    if post_tensor is None:
         return cells
 
-    # Opaque step: raw → fully transformed (post-normalize tensor).
-    name = type(transform_obj).__name__
+    # Top-down decomposition: bbox-crop → resize → normalize → denorm.
+    if is_topdown and isinstance(raw_target_dict, dict):
+        try:
+            from core.p05_data.keypoint_dataset import _expand_bbox_topdown
+        except Exception:
+            _expand_bbox_topdown = None  # noqa: N806
+
+        targets = raw_target_dict.get("targets")
+        if (
+            _expand_bbox_topdown is not None
+            and targets is not None
+            and len(targets) >= 1
+        ):
+            row = np.asarray(targets, dtype=np.float32).reshape(-1, 5)[0]
+            cx, cy, w_box, h_box = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+            input_h, input_w = int(post_tensor.shape[-2]), int(post_tensor.shape[-1])
+            bx, by, bw, bh = _expand_bbox_topdown(
+                cx, cy, w_box, h_box, w_raw, h_raw,
+                aspect_hw=(input_h, input_w), padding=1.25,
+            )
+            # Stage 1: crop rectangle drawn on the source image.
+            x0 = int(max(0, round(bx)))
+            y0 = int(max(0, round(by)))
+            x1 = int(min(w_raw, round(bx + bw)))
+            y1 = int(min(h_raw, round(by + bh)))
+            crop_rgb = rgb_raw[y0:y1, x0:x1].copy() if (x1 > x0 and y1 > y0) else rgb_raw
+            # Map raw kpts into crop pixel coords.
+            crop_kpts = None
+            if raw_kpts_arr is not None and crop_rgb.size:
+                k = raw_kpts_arr.copy()
+                k[:, 0] -= x0
+                k[:, 1] -= y0
+                crop_kpts = k
+            cells.append({
+                "image": crop_rgb, "target": crop_kpts,
+                "step_name": f"BBoxCrop (pad=1.25 → {crop_rgb.shape[1]}×{crop_rgb.shape[0]})",
+                "meta": _cell_meta(crop_rgb), "is_normalize": False,
+            })
+
+            # Stage 2: resize crop to input HxW (no normalize yet).
+            if crop_rgb.size:
+                resized = cv2.resize(crop_rgb, (input_w, input_h),
+                                     interpolation=cv2.INTER_LINEAR)
+            else:
+                resized = np.full((input_h, input_w, 3), 114, dtype=np.uint8)
+            sx = input_w / max(crop_rgb.shape[1], 1)
+            sy = input_h / max(crop_rgb.shape[0], 1)
+            resized_kpts = None
+            if crop_kpts is not None:
+                k = crop_kpts.copy()
+                k[:, 0] *= sx
+                k[:, 1] *= sy
+                resized_kpts = k
+            cells.append({
+                "image": resized, "target": resized_kpts,
+                "step_name": f"ResizeToInput ({input_w}×{input_h})",
+                "meta": _cell_meta(resized), "is_normalize": False,
+            })
+
+            # Stage 3: normalize (false-color jet of the post-Normalize tensor).
+            cells.append({
+                "image": false_color_normalize(post_tensor),
+                "target": None,
+                "step_name": "Normalize (jet ±3σ)",
+                "meta": _cell_meta(post_tensor), "is_normalize": True,
+            })
+
+            # Stage 4: Denormalize sanity check — keypoints should match.
+            denorm = denormalize_chw(post_tensor, mean, std)
+            cells.append({
+                "image": denorm, "target": resized_kpts,
+                "step_name": "Denormalize(Normalize)",
+                "meta": _cell_meta(denorm), "is_normalize": False,
+            })
+            return cells
+
+    # Bottom-up (monolithic transform): raw → opaque-transform → denorm.
+    name = type(transform_obj).__name__ if transform_obj is not None else "(transform)"
     is_norm = bool(getattr(transform_obj, "mean", None) is not None)
     disp = false_color_normalize(post_tensor) if is_norm else _tensor_chw_to_uint8_rgb(post_tensor)
 
-    # Convert post target to pixel keypoints for the post row.
     post_kpts_arr = None
     h_p, w_p = post_tensor.shape[-2], post_tensor.shape[-1]
     if isinstance(post_target, np.ndarray):
@@ -787,22 +869,43 @@ def _render_task_walker(
         logger.warning("_render_task_walker: no overlay for task=%s", task)
         return None
 
+    # Detect top-down keypoint via training-config arch — bottom-up
+    # `KeypointDataset` doesn't fit ViTPose-family models.
+    is_topdown_kpt = task == "keypoint" and (
+        (training_config.get("model") or {}).get("arch") == "hf_keypoint"
+        or (training_config.get("model") or {}).get("top_down") is True
+    )
+
     try:
-        raw_ds = build_dataset_for_viz(
-            task, "train", data_config, base_dir, transforms=None,
-        )
+        if is_topdown_kpt:
+            from core.p05_data.keypoint_dataset import KeypointTopDownDataset
+            from transformers import AutoImageProcessor
+            model_cfg = training_config.get("model") or {}
+            pretrained = model_cfg.get("pretrained") or model_cfg.get("hf_model_id")
+            processor = AutoImageProcessor.from_pretrained(pretrained) if pretrained else None
+            raw_ds = KeypointTopDownDataset(
+                data_config=data_config, split="train", processor=processor,
+                bbox_padding=float(model_cfg.get("bbox_padding", 1.25)),
+                is_train=False, base_dir=base_dir,
+            )
+            transforms = None  # opaque — we drive it through __getitem__
+        else:
+            raw_ds = build_dataset_for_viz(
+                task, "train", data_config, base_dir, transforms=None,
+            )
     except Exception as e:
         logger.warning("_render_task_walker: raw ds build failed — %s", e)
         return None
 
-    try:
-        transforms = _build_task_transforms(
-            task=task, is_train=True, aug_config=aug_cfg,
-            input_size=input_size, mean=mean_list, std=std_list,
-        )
-    except Exception as e:
-        logger.warning("_render_task_walker: transforms build failed — %s", e)
-        transforms = None
+    if not is_topdown_kpt:
+        try:
+            transforms = _build_task_transforms(
+                task=task, is_train=True, aug_config=aug_cfg,
+                input_size=input_size, mean=mean_list, std=std_list,
+            )
+        except Exception as e:
+            logger.warning("_render_task_walker: transforms build failed — %s", e)
+            transforms = None
 
     n = min(max_samples, len(raw_ds))
     if n == 0:
@@ -829,12 +932,31 @@ def _render_task_walker(
                     raw_bgr, mask, transforms, mean_list, std_list,
                 )
             elif task == "keypoint":
-                # Run the monolithic transform once to get post-tensor + post-target.
                 post_tensor: torch.Tensor | None = None
                 post_target: Any = None
-                if transforms is not None:
+                if is_topdown_kpt:
+                    # Drive the dataset's processor + crop pipeline directly.
                     try:
-                        out = transforms(raw_bgr, raw_item)
+                        item = raw_ds[idx]
+                        pv = item.get("pixel_values") if isinstance(item, dict) else None
+                        if pv is not None:
+                            post_tensor = pv if isinstance(pv, torch.Tensor) \
+                                else torch.from_numpy(np.asarray(pv))
+                    except Exception as e:
+                        logger.warning(
+                            "_render_task_walker: top-down kpt __getitem__ failed at idx %d — %s",
+                            idx, e,
+                        )
+                elif transforms is not None:
+                    try:
+                        # Bottom-up: KeypointTransform expects {"boxes","keypoints"}.
+                        td = {
+                            "boxes": np.asarray(raw_item.get("targets",
+                                np.zeros((0, 5), dtype=np.float32))),
+                            "keypoints": np.asarray(raw_item.get("keypoints",
+                                np.zeros((0, 0, 3), dtype=np.float32))),
+                        }
+                        out = transforms(raw_bgr, td)
                         if isinstance(out, tuple) and len(out) == 2:
                             post_tensor, post_target = out
                     except Exception as e:
@@ -847,6 +969,7 @@ def _render_task_walker(
                     _extract_target_for_panel(post_target, "keypoint")
                     if post_target is not None else None,
                     transforms, mean_list, std_list,
+                    is_topdown=is_topdown_kpt,
                 )
             else:
                 continue
@@ -892,8 +1015,8 @@ def _render_task_walker(
                              family="monospace")
         axes[r, 0].set_ylabel(
             f"[{r + 1:02d}] {step_name}",
-            rotation=0, ha="right", va="center", labelpad=70,
-            fontsize=12, fontweight="bold",
+            rotation=0, ha="right", va="center", labelpad=12,
+            fontsize=11, fontweight="bold",
         )
 
     feature = data_config.get("dataset_name") or "unknown"
@@ -1142,8 +1265,8 @@ def _render_detection_walker(
         # Row label on col 0 only.
         axes[r, 0].set_ylabel(
             f"[{r + 1:02d}] {step_name}",
-            rotation=0, ha="right", va="center", labelpad=60,
-            fontsize=15, fontweight="bold",
+            rotation=0, ha="right", va="center", labelpad=14,
+            fontsize=13, fontweight="bold",
         )
 
     # Class headers above row 0 — fig.text avoids collision with per-cell

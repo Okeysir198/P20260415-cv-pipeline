@@ -248,7 +248,7 @@ def _analyze_segmentation(
     if annotated:
         rgb_imgs = [cv2.cvtColor(im, cv2.COLOR_BGR2RGB) for im in annotated]
         out_path = out_dir / LQ_FILENAMES["confident_disagreement_gallery"]
-        save_image_grid(rgb_imgs, out_path, cols=min(2, len(rgb_imgs)),
+        save_image_grid(rgb_imgs, out_path, cols=min(4, len(rgb_imgs)),
                         header=f"Suspected mislabels — {len(annotated)} samples")
         artifacts["confident_disagreement_gallery"] = out_path
 
@@ -367,7 +367,7 @@ def _analyze_classification(
     if annotated:
         rgb_imgs = [cv2.cvtColor(im, cv2.COLOR_BGR2RGB) for im in annotated]
         out_path = out_dir / LQ_FILENAMES["confident_disagreement_gallery"]
-        save_image_grid(rgb_imgs, out_path, cols=min(2, len(rgb_imgs)),
+        save_image_grid(rgb_imgs, out_path, cols=min(4, len(rgb_imgs)),
                         header=f"Suspected mislabels — {len(annotated)} samples")
         artifacts["confident_disagreement_gallery"] = out_path
 
@@ -539,7 +539,7 @@ def _analyze_detection(
     if annotated:
         rgb_imgs = [cv2.cvtColor(im, cv2.COLOR_BGR2RGB) for im in annotated]
         gallery_path = out_dir / LQ_FILENAMES["confident_disagreement_gallery"]
-        save_image_grid(rgb_imgs, gallery_path, cols=min(2, len(rgb_imgs)),
+        save_image_grid(rgb_imgs, gallery_path, cols=min(4, len(rgb_imgs)),
                         header=f"Suspected mislabels — {len(annotated)} samples")
         artifacts["confident_disagreement_gallery"] = gallery_path
 

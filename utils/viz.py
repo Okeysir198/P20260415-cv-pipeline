@@ -287,20 +287,43 @@ def classification_banner(
     on top of the image in-place (no height change).
     """
     style = _default_style(style)
+    # Upscale tiny thumbnails (e.g. EuroSAT 64x64) before drawing the banner
+    # so the fixed banner_height does not swallow most of the image and so
+    # text fits — banner stays a sensible ~15% of total height.
+    _MIN_BANNER_WIDTH = 192
+    if image.shape[1] < _MIN_BANNER_WIDTH:
+        scale = _MIN_BANNER_WIDTH / float(image.shape[1])
+        new_w = _MIN_BANNER_WIDTH
+        new_h = max(1, int(round(image.shape[0] * scale)))
+        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
     h, w = image.shape[:2]
     bh = int(style.banner_height)
     bg = bg_color_rgb if bg_color_rgb is not None else style.banner_bg_rgb
     fg = text_color_rgb if text_color_rgb is not None else style.banner_text_rgb
 
+    # Auto-shrink the text scale so the rendered string fits within the image
+    # width minus a 6 px left+right margin. Min floor 0.30 to keep readable.
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    text_scale = float(style.banner_text_scale)
+    max_text_w = max(8, w - 12)
+    while text_scale > 0.30:
+        (tw, _), _ = cv2.getTextSize(text, font, text_scale, 1)
+        if tw <= max_text_w:
+            break
+        text_scale *= 0.9
+    # If even the floor does not fit, ellipsize to fit instead of clipping.
+    (tw, _), _ = cv2.getTextSize(text, font, text_scale, 1)
+    while tw > max_text_w and len(text) > 4:
+        text = text[:-2] + "…"
+        (tw, _), _ = cv2.getTextSize(text, font, text_scale, 1)
+
     banner = np.full((bh, w, 3), bg, dtype=np.uint8)
-    # Text is drawn in RGB; cv2.putText treats triples opaquely, so passing
-    # RGB in and reading RGB out is consistent (no cvtColor needed).
     cv2.putText(
         banner,
         text,
-        (6, int(bh * 0.7)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        style.banner_text_scale,
+        (6, int(bh * 0.72)),
+        font,
+        text_scale,
         tuple(int(x) for x in fg),
         1,
         cv2.LINE_AA,

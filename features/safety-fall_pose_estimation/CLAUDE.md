@@ -4,7 +4,7 @@
 
 ## Overview
 
-Estimates human pose keypoints tuned for detecting dangerous fall angles in industrial settings. Shared pose backend with `safety-poketenashi`. RTMPose-S/M are the target architectures but require `mmpose` installation.
+Estimates human pose keypoints tuned for detecting dangerous fall angles in industrial settings. Shared pose backend with `safety-poketenashi`. **Verified path**: `hf_keypoint` arch (top-down ViTPose-base) — see `notebooks/vitpose_finetune_reference/our_vitpose_base/` for the working recipe + COCO AP smoke. RTMPose-S/M remain a future option but require `mmpose` (not in main venv).
 
 ## Dataset
 

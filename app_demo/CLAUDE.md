@@ -158,7 +158,7 @@ summary = processor.process_video(video_path, output_path)
 
 ```bash
 # Install dependencies (first time)
-uv sync --extra demo --extra face --extra train
+uv sync   # bare sync installs the full pipeline; only `--extra analysis` is opt-in
 
 # Launch demo on default port 7861
 uv run app_demo/run.py
@@ -252,7 +252,7 @@ Key sections:
 
 ```bash
 # Install dependencies
-uv sync --extra demo --extra face --extra train
+uv sync   # bare sync installs the full pipeline; only `--extra analysis` is opt-in
 
 # Launch demo
 uv run app_demo/run.py

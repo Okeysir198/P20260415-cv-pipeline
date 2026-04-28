@@ -362,8 +362,8 @@ def _sample_image_meta(
     }
 
 
-def _chart_caption(ax, text: str, *, fontsize: float = 7.5,
-                   color: str = "#444", y_offset: float = -0.30) -> None:
+def _chart_caption(ax, text: str, *, fontsize: float = 9.0,
+                   color: str = "#444", y_offset: float = -0.32) -> None:
     """One-line italic caption immediately below a subplot.
 
     Anchored in axes-fraction coords so it follows the subplot on resize.
@@ -374,6 +374,26 @@ def _chart_caption(ax, text: str, *, fontsize: float = 7.5,
         transform=ax.transAxes, ha="center", va="top",
         fontsize=fontsize, fontstyle="italic", color=color,
     )
+
+
+def _smart_class_xticks(ax, labels: list[str]) -> None:
+    """Auto-rotate + size class tick labels based on count.
+
+    Switches to a vertical 90 rotation and shrinks font size when the class
+    count crosses common readability thresholds (>12 names jam horizontally
+    even at 45). Truncates very long names to 18 chars; one place to tune.
+    """
+    n = len(labels)
+    if n <= 8:
+        rot, fs, ha, trim = 0, 9, "center", 18
+    elif n <= 12:
+        rot, fs, ha, trim = 30, 8, "right", 18
+    elif n <= 30:
+        rot, fs, ha, trim = 90, 7, "right", 22
+    else:
+        rot, fs, ha, trim = 90, 6, "right", 20
+    short = [(s if len(s) <= trim else s[: trim - 1] + "…") for s in labels]
+    ax.set_xticklabels(short, rotation=rot, ha=ha, fontsize=fs)
 
 
 def _panel_resolution_scatter(ax, stats_by_split: dict, split_list: list[str],
@@ -630,10 +650,7 @@ def _stats_detection(
     ax1.set_xlabel("class")
     ax1.set_ylabel("# instances")
     ax1.set_xticks(x)
-    ax1.set_xticklabels(
-        [truncate_label(class_names.get(cid, str(cid)), 14) for cid in all_class_ids],
-        rotation=45, ha="right", fontsize=8,
-    )
+    _smart_class_xticks(ax1, [class_names.get(cid, str(cid)) for cid in all_class_ids])
     ax1.legend(fontsize=8, loc="upper right", framealpha=0.9)
     # Headroom so the legend at upper-right does not overlap the tallest bar.
     y_max = ax1.get_ylim()[1]
@@ -649,9 +666,9 @@ def _stats_detection(
             rgb = tuple(c / 255 for c in _LABEL_PALETTE[cid % len(_LABEL_PALETTE)][::-1])
             ax2.barh(sp, pct, left=left, color=rgb,
                      label=class_names.get(cid, str(cid)) if i == 0 else "")
-            if pct > 4:
+            if pct >= 8:
                 ax2.text(
-                    left + pct / 2, i, f"{pct:.1f}%",
+                    left + pct / 2, i, f"{pct:.0f}%",
                     ha="center", va="center", fontsize=8,
                     color="white", fontweight="bold",
                 )
@@ -1102,8 +1119,8 @@ def _stats_classification(
     ax1.set_xlabel("class")
     ax1.set_ylabel("# images")
     ax1.set_xticks(x)
-    labels_x = [truncate_label(class_names.get(cid, str(cid)), 14) for cid in all_class_ids]
-    ax1.set_xticklabels(labels_x, rotation=45, ha="right", fontsize=8)
+    labels_x = [class_names.get(cid, str(cid)) for cid in all_class_ids]
+    _smart_class_xticks(ax1, labels_x)
     ax1.legend(fontsize=8, loc="upper right", framealpha=0.9)
     y_max = ax1.get_ylim()[1] or 1
     ax1.set_ylim(top=y_max * 1.18)
@@ -1128,8 +1145,10 @@ def _stats_classification(
             pct = stats[sp]["class_counts"].get(cid, 0) / total * 100
             ax2.barh(sp, pct, left=left, color=_palette_rgb(cid),
                      label=class_names.get(cid, str(cid)) if i == 0 else "")
-            if pct > 4:
-                ax2.text(left + pct / 2, i, f"{pct:.1f}%",
+            # Only annotate when the segment is wide enough that the label
+            # (~3 chars + "%") will not visibly overflow into the neighbour.
+            if pct >= 8:
+                ax2.text(left + pct / 2, i, f"{pct:.0f}%",
                          ha="center", va="center", fontsize=8, color="white", fontweight="bold")
             left += pct
     ax2.set_title("Class Balance %", fontsize=11, fontweight="bold")
@@ -1420,7 +1439,7 @@ def _stats_segmentation(
     ax1.set_ylabel("# pixels (across all masks)")
     ax1.set_xticks(x)
     labels_x = [class_names.get(cid, str(cid)) for cid in all_class_ids]
-    ax1.set_xticklabels(labels_x, rotation=60, ha="right", fontsize=7)
+    _smart_class_xticks(ax1, labels_x)
     ax1.legend(fontsize=8, loc="upper right", framealpha=0.9)
 
     # [1,0] Mask coverage (non-bg %) distribution per split
@@ -1446,8 +1465,7 @@ def _stats_segmentation(
         colors = [_palette_rgb(c) for c in cids_sorted]
         ax3.bar(range(len(cids_sorted)), medians, color=colors)
         ax3.set_xticks(range(len(cids_sorted)))
-        ax3.set_xticklabels([class_names.get(c, str(c)) for c in cids_sorted],
-                            rotation=60, ha="right", fontsize=7)
+        _smart_class_xticks(ax3, [class_names.get(c, str(c)) for c in cids_sorted])
         ax3.set_title("Median # Components / Image", fontsize=11, fontweight="bold")
         ax3.set_ylabel("median components")
 
@@ -1463,8 +1481,7 @@ def _stats_segmentation(
         ax4.bar(range(len(cids_sorted)), medians, color=colors)
         ax4.set_yscale("log")
         ax4.set_xticks(range(len(cids_sorted)))
-        ax4.set_xticklabels([class_names.get(c, str(c)) for c in cids_sorted],
-                            rotation=60, ha="right", fontsize=7)
+        _smart_class_xticks(ax4, [class_names.get(c, str(c)) for c in cids_sorted])
         ax4.set_title("Median Component Area (px, log)", fontsize=11, fontweight="bold")
         ax4.set_ylabel("pixels")
 
@@ -1794,7 +1811,7 @@ def _stats_keypoint(
             # Fallback: boxplot on degenerate input
             ax4.boxplot(data, labels=labels_e)
         ax4.set_xticks(range(1, len(labels_e) + 1))
-        ax4.set_xticklabels(labels_e, rotation=60, ha="right", fontsize=7)
+        _smart_class_xticks(ax4, labels_e)
         ax4.set_title("Skeleton Edge Length Distribution (all edges)",
                       fontsize=11, fontweight="bold")
         ax4.set_ylabel("normalized length")

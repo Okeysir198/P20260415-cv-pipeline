@@ -505,8 +505,15 @@ def _draw_header_banner(combined: np.ndarray, banner: dict | str, style: "VizSty
     font = cv2.FONT_HERSHEY_SIMPLEX
     fg = tuple(int(c) for c in style.banner_text_rgb)
     text = title if not subtitle else f"{title}  |  {subtitle}"
-    scale = style.banner_text_scale
+    scale = float(style.banner_text_scale)
+    max_w = max(8, w - 8)
     (tw, _), _ = cv2.getTextSize(text, font, scale, 1)
+    while tw > max_w and scale > 0.30:
+        scale *= 0.9
+        (tw, _), _ = cv2.getTextSize(text, font, scale, 1)
+    while tw > max_w and len(text) > 4:
+        text = text[:-2] + "…"
+        (tw, _), _ = cv2.getTextSize(text, font, scale, 1)
     x = max(4, (w - tw) // 2)
     cv2.putText(strip, text, (x, int(bh * 0.7)), font, scale, fg, 1, cv2.LINE_AA)
     return np.vstack([strip, combined])
