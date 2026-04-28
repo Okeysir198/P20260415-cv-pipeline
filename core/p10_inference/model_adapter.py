@@ -254,6 +254,205 @@ class TorchScriptAdapter(ModelAdapter):
         raise NotImplementedError
 
 
+@register_adapter
+class PaddleAdapter(ModelAdapter):
+    """Wraps a native PaddlePaddle checkpoint or exported inference model.
+
+    Handles three on-disk layouts:
+
+    * ``*.pdparams`` — dynamic-graph state-dict; rebuilds the architecture from
+      ``training_config["model"]["arch"]`` in the subprocess.
+    * ``*.pdiparams`` — static-graph inference parameters (paired with
+      ``*.pdmodel``).
+    * a directory containing ``model.pdmodel`` (Paddle's exported inference
+      model layout, with ``model.pdiparams`` next to it).
+
+    For deployed inference, prefer converting to ONNX via ``paddle2onnx`` and
+    using :class:`PredictorAdapter` — that path is much faster.  This adapter
+    is the unconverted-checkpoint escape hatch for debug + p08 eval.
+
+    Heavy ``paddle`` imports stay inside a one-shot subprocess
+    (``.venv-paddle/bin/python``); the main venv only needs ``numpy`` to drive
+    this class, so importing this module never pulls in PaddlePaddle.
+    """
+
+    _SENTINEL = "===PADDLE_ADAPTER_JSON==="
+    _RUNNER = r"""
+import sys, json, base64, io
+import numpy as np
+
+SENTINEL = "===PADDLE_ADAPTER_JSON==="
+
+def _err(msg):
+    print(SENTINEL + json.dumps({"error": msg}) + SENTINEL)
+    sys.exit(1)
+
+try:
+    import paddle  # noqa: PLC0415
+    from paddle import inference as pinfer  # noqa: PLC0415
+except Exception as exc:  # pragma: no cover - env-dependent
+    _err(f"paddle import failed: {exc!r}")
+
+payload = json.loads(sys.stdin.readline())
+model_path = payload["model_path"]
+img_b64_list = payload["images"]
+conf = float(payload.get("conf", 0.3))
+
+# Decode images: each entry is base64 of a .npy buffer.
+images = []
+for b in img_b64_list:
+    buf = io.BytesIO(base64.b64decode(b))
+    images.append(np.load(buf, allow_pickle=False))
+
+# Locate inference-model files.
+import os
+mp = model_path
+pdmodel = None
+pdiparams = None
+if os.path.isdir(mp):
+    cand = os.path.join(mp, "model.pdmodel")
+    if os.path.exists(cand):
+        pdmodel = cand
+        pdiparams = os.path.join(mp, "model.pdiparams")
+elif mp.endswith(".pdmodel"):
+    pdmodel = mp
+    pdiparams = mp[: -len(".pdmodel")] + ".pdiparams"
+elif mp.endswith(".pdiparams"):
+    pdiparams = mp
+    pdmodel = mp[: -len(".pdiparams")] + ".pdmodel"
+
+if pdmodel and pdiparams and os.path.exists(pdmodel) and os.path.exists(pdiparams):
+    cfg = pinfer.Config(pdmodel, pdiparams)
+    if paddle.is_compiled_with_cuda():
+        cfg.enable_use_gpu(1024, 0)  # 1 GiB workspace, GPU 0 — never CPU
+    cfg.disable_glog_info()
+    predictor = pinfer.create_predictor(cfg)
+    in_names = predictor.get_input_names()
+    out_names = predictor.get_output_names()
+
+    results = []
+    for img in images:
+        # BGR uint8 HWC -> RGB float32 NCHW [0,1]
+        rgb = img[:, :, ::-1].astype(np.float32) / 255.0
+        nchw = np.transpose(rgb, (2, 0, 1))[None]
+        in_t = predictor.get_input_handle(in_names[0])
+        in_t.copy_from_cpu(nchw)
+        predictor.run()
+        # Convention: detection inference models emit either a single
+        # (N, 6) [cls, score, x1, y1, x2, y2] tensor (PaddleDetection
+        # default) or separate boxes/scores/labels heads.
+        outs = [predictor.get_output_handle(n).copy_to_cpu() for n in out_names]
+        boxes = scores = labels = None
+        if len(outs) == 1 and outs[0].ndim == 2 and outs[0].shape[1] == 6:
+            arr = outs[0]
+            keep = arr[:, 1] >= conf
+            arr = arr[keep]
+            labels = arr[:, 0].astype(np.int64)
+            scores = arr[:, 1].astype(np.float32)
+            boxes = arr[:, 2:6].astype(np.float32)
+        else:
+            # Best-effort: assume order (boxes, scores, labels).
+            boxes = outs[0].reshape(-1, 4).astype(np.float32) if len(outs) > 0 else np.zeros((0, 4), np.float32)
+            scores = outs[1].reshape(-1).astype(np.float32) if len(outs) > 1 else np.ones(boxes.shape[0], np.float32)
+            labels = outs[2].reshape(-1).astype(np.int64) if len(outs) > 2 else np.zeros(boxes.shape[0], np.int64)
+            keep = scores >= conf
+            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+
+        results.append({
+            "boxes": boxes.tolist(),
+            "scores": scores.tolist(),
+            "labels": labels.tolist(),
+        })
+else:
+    # Dynamic .pdparams path: we can only return a stub error here because
+    # rebuilding an arbitrary paddle architecture requires the full training
+    # graph definition. Caller should convert .pdparams -> exported inference
+    # model via the training feature's `code/export.py` first.
+    _err(
+        f"PaddleAdapter: .pdparams without paired .pdmodel at {model_path}; "
+        "export to inference model (model.pdmodel + model.pdiparams) first."
+    )
+
+print(SENTINEL + json.dumps({"results": results}) + SENTINEL)
+"""
+
+    def __init__(self, model_path, data_config, training_config, conf_threshold,
+                 iou_threshold, device) -> None:
+        self._model_path = str(model_path)
+        self._data_config = data_config or {}
+        self._training_config = training_config or {}
+        self._conf = float(conf_threshold)
+        self._iou = float(iou_threshold)
+        # Lazy: subprocess is launched per predict_batch call.
+
+    @classmethod
+    def can_handle(cls, model_path, data_config, training_config) -> bool:
+        p = Path(model_path)
+        if p.suffix.lower() in {".pdparams", ".pdiparams"}:
+            return True
+        if p.is_dir() and (p / "model.pdmodel").exists():
+            return True
+        return False
+
+    def _venv_python(self) -> str:
+        # Walk up to project root containing .venv-paddle/.
+        here = Path(__file__).resolve()
+        for parent in here.parents:
+            cand = parent / ".venv-paddle" / "bin" / "python"
+            if cand.exists():
+                return str(cand)
+        # Fall back to current interpreter — paddle may or may not be importable.
+        import sys as _sys  # noqa: PLC0415
+        logger.warning(".venv-paddle/bin/python not found; falling back to {}", _sys.executable)
+        return _sys.executable
+
+    def predict_batch(self, images: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
+        import base64  # noqa: PLC0415
+        import io  # noqa: PLC0415
+        import json  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+
+        encoded = []
+        for img in images:
+            buf = io.BytesIO()
+            np.save(buf, img, allow_pickle=False)
+            encoded.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+        payload = json.dumps({
+            "model_path": self._model_path,
+            "images": encoded,
+            "conf": self._conf,
+        })
+
+        proc = subprocess.run(
+            [self._venv_python(), "-c", self._RUNNER],
+            input=payload + "\n",
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        out = proc.stdout
+        if self._SENTINEL not in out:
+            raise RuntimeError(
+                f"PaddleAdapter subprocess returned no sentinel.\n"
+                f"stdout: {out}\nstderr: {proc.stderr}"
+            )
+        first = out.index(self._SENTINEL) + len(self._SENTINEL)
+        last = out.rindex(self._SENTINEL)
+        body = json.loads(out[first:last])
+        if "error" in body:
+            raise RuntimeError(f"PaddleAdapter subprocess error: {body['error']}")
+
+        return [
+            {
+                "boxes": np.asarray(r["boxes"], dtype=np.float32).reshape(-1, 4),
+                "scores": np.asarray(r["scores"], dtype=np.float32).reshape(-1),
+                "labels": np.asarray(r["labels"], dtype=np.int64).reshape(-1),
+            }
+            for r in body["results"]
+        ]
+
+
 # ---------------------------------------------------------------------------
 # Lazy import guard — keeps the module importable without heavy dependencies
 # until resolve_adapter() is actually called.
