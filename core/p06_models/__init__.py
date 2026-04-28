@@ -37,11 +37,13 @@ with contextlib.suppress(ImportError):
     import core.p06_models.hf_segmentation_variants  # noqa: F401
     import core.p06_models.rtdetr  # noqa: F401
 
-# PaddleDetection backend (PicoDet, PP-YOLOE) — registry registration is
-# numpy/torch only, so this should always succeed even when paddle itself
-# is not installed (paddle imports are deferred to first build).
+# Paddle backends — registry registration is torch-only; heavy paddle imports
+# are deferred to builder bodies, so these soft-imports are paddle-free at
+# main-venv load time. See core/p06_models/CLAUDE.md for the lazy-import contract.
 with contextlib.suppress(ImportError):
-    import core.p06_models.paddle_model  # noqa: F401
+    import core.p06_models.paddle_model  # noqa: F401  (PicoDet, PP-YOLOE)
+with contextlib.suppress(ImportError):
+    import core.p06_models.paddle_segmentation  # noqa: F401  (PP-LiteSeg, PP-MobileSeg)
 
 # Import timm model module to trigger registration (optional dep)
 with contextlib.suppress(ImportError):
