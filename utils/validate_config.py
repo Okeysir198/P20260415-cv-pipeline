@@ -167,9 +167,10 @@ def _validate_training(config: dict, config_path: Path) -> tuple[list[str], list
         errors.append("'training.lr' must be a positive number")
 
     backend = config.get("training", {}).get("backend")
-    if backend is not None and backend not in ("pytorch", "hf", "custom"):
+    if backend is not None and backend not in ("pytorch", "hf", "custom", "paddle"):
         errors.append(
-            f"'training.backend' must be one of ['pytorch', 'hf', 'custom'], got '{backend}'"
+            f"'training.backend' must be one of ['pytorch', 'hf', 'custom', 'paddle'], "
+            f"got '{backend}'"
         )
 
     # Warn if a local pretrained path doesn't exist (HF model ids contain '/' without leading './')
