@@ -60,6 +60,30 @@ def has_cuda() -> bool:
         return False
 
 
+def gpu_compute_capability() -> tuple[int, int] | None:
+    """Return (major, minor) compute capability of CUDA device 0, or None."""
+    try:
+        import torch  # noqa: WPS433
+
+        if not torch.cuda.is_available():
+            return None
+        return torch.cuda.get_device_capability(0)
+    except Exception:
+        return None
+
+
+def paddle_supports_gpu() -> bool:
+    """paddlepaddle-gpu 3.3.x ships sm_90 max — Blackwell (sm_120, RTX 50xx)
+    isn't supported yet upstream. Loss kernels fail with malformed shapes.
+    Update this guard when paddle ships sm_120 wheels.
+    """
+    cc = gpu_compute_capability()
+    if cc is None:
+        return False
+    major, _ = cc
+    return major <= 9
+
+
 def dataset_present(name: str) -> bool:
     """Return True if `dataset_store/<name>/` looks usable (has images)."""
     base = ROOT / "dataset_store" / name
@@ -105,6 +129,11 @@ def test_paddle_det_full_chain():
     if not has_cuda():
         print("SKIP: no CUDA GPU available — Paddle backend requires GPU")
         return
+    if not paddle_supports_gpu():
+        cc = gpu_compute_capability()
+        print(f"SKIP: paddle 3.3.x doesn't support compute capability {cc} "
+              f"(Blackwell / RTX 50xx). Awaiting upstream paddle release.")
+        return
     if not dataset_present("test_fire_100"):
         print("SKIP: dataset_store/test_fire_100 not materialised "
               "(DVC pull required)")
@@ -117,51 +146,48 @@ def test_paddle_det_full_chain():
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     INFER_DIR.mkdir(parents=True, exist_ok=True)
 
-    py = sys.executable  # main venv: train.py imports torch; paddle dispatcher subprocess-hops into .venv-paddle/
+    paddle_py = str(PADDLE_VENV)  # paddle code lives in .venv-paddle/
     env = {**os.environ, "WANDB_MODE": "disabled", "CUDA_VISIBLE_DEVICES": "0"}
 
-    # 2. Train 1 epoch
+    # 2. Train 1 epoch — runs in .venv-paddle/, paddle-native trainer
     train_cmd = [
-        py, str(ROOT / "core" / "p06_training" / "train.py"),
+        paddle_py, str(ROOT / "core" / "p06_paddle" / "train.py"),
         "--config", str(TRAIN_CFG),
-        "--override",
-        "training.epochs=1",
-        "data.subset.train=0.1",
-        "data.subset.val=0.1",
+        "--override", "training.epochs=1",
         f"logging.save_dir={OUT_DIR}",
     ]
     r = run_cli(train_cmd, env=env)
-    assert r.returncode == 0, f"train.py exited {r.returncode}"
+    assert r.returncode == 0, f"core/p06_paddle/train.py exited {r.returncode}"
 
     ckpt = find_best_checkpoint(OUT_DIR)
     assert ckpt is not None, f"no best checkpoint in {OUT_DIR}"
     print(f"    checkpoint: {ckpt.name} ({ckpt.stat().st_size/1e6:.1f} MB)")
 
-    # 3. Eval
+    # 3. Export ONNX — runs in .venv-paddle/, then everything downstream goes
+    #    through the standard main-venv ORT path.
+    onnx_path = EXPORT_DIR / "model.onnx"
+    export_cmd = [
+        paddle_py, str(ROOT / "core" / "p06_paddle" / "export.py"),
+        "--config", str(TRAIN_CFG),
+        "--checkpoint", str(ckpt),
+        "--out", str(onnx_path),
+    ]
+    r = run_cli(export_cmd, env=env)
+    assert r.returncode == 0, f"core/p06_paddle/export.py exited {r.returncode}"
+    assert onnx_path.exists(), f"no .onnx file at {onnx_path}"
+    print(f"    onnx: {onnx_path.name} ({onnx_path.stat().st_size/1e6:.1f} MB)")
+
+    # 4. Eval the ONNX from main venv (this is the canonical post-export path)
     eval_cmd = [
-        py, str(ROOT / "core" / "p08_evaluation" / "evaluate.py"),
-        "--model", str(ckpt),
+        sys.executable, str(ROOT / "core" / "p08_evaluation" / "evaluate.py"),
+        "--model", str(onnx_path),
         "--config", str(DATA_CFG),
         "--output-dir", str(EVAL_DIR),
     ]
     r = run_cli(eval_cmd, env=env)
-    assert r.returncode == 0, f"evaluate.py exited {r.returncode}"
+    assert r.returncode == 0, f"evaluate.py (ONNX) exited {r.returncode}"
     metrics_json = EVAL_DIR / "metrics.json"
     assert metrics_json.exists(), f"missing {metrics_json}"
-
-    # 4. Export ONNX (skip optimum optimization; fp32 is enough for smoke)
-    export_cmd = [
-        py, str(ROOT / "core" / "p09_export" / "export.py"),
-        "--model", str(ckpt),
-        "--training-config", str(TRAIN_CFG),
-        "--output-dir", str(EXPORT_DIR),
-        "--skip-optimize",
-    ]
-    r = run_cli(export_cmd, env=env)
-    assert r.returncode == 0, f"export.py exited {r.returncode}"
-    onnx_path = next(EXPORT_DIR.glob("*.onnx"), None)
-    assert onnx_path is not None, f"no .onnx file in {EXPORT_DIR}"
-    print(f"    onnx: {onnx_path.name} ({onnx_path.stat().st_size/1e6:.1f} MB)")
 
     # 5. Inference on one fixture image
     from core.p10_inference.predictor import DetectionPredictor  # noqa: WPS433

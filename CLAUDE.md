@@ -45,9 +45,15 @@ uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml \
   --override training.lr=0.005 training.epochs=100
-# Paddle backend (PicoDet/PP-YOLOE/PP-LCNet/PP-LiteSeg/PP-TinyPose) — runs in sibling .venv-paddle/
-.venv-paddle/bin/python core/p06_training/train.py \
+# Paddle backend (detection: PicoDet/PP-YOLOE) — separate world, sibling .venv-paddle/
+# Train in paddle venv → export to ONNX → all downstream phases use main-venv ORT path.
+bash scripts/setup-paddle-venv.sh                                    # one-time
+.venv-paddle/bin/python core/p06_paddle/train.py \
   --config features/safety-fire_detection/configs/06_training_picodet.yaml
+.venv-paddle/bin/python core/p06_paddle/export.py \
+  --config <same.yaml> --checkpoint <run>/best.pdparams --out <run>/model.onnx
+# Then eval/infer/demo use the .onnx via the standard main-venv path:
+uv run core/p08_evaluation/evaluate.py --model <run>/model.onnx --config <05_data>.yaml
 
 # Evaluate
 uv run core/p08_evaluation/evaluate.py \

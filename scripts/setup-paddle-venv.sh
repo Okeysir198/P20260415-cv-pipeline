@@ -87,6 +87,17 @@ uv pip install --python "$PYTHON" \
 echo "Installing repo as editable so core/ + utils/ are importable..."
 uv pip install --python "$PYTHON" -e "$REPO_ROOT" --no-deps
 
+# PaddleDetection's pip wheel strips the configs/ + tools/ directories, so we
+# clone the repo into the venv root for `core/p06_paddle/{train,export}.py` to
+# find the upstream base configs and `tools/export_model.py`.
+PPDET_SRC="$VENV_DIR/PaddleDetection"
+if [ ! -d "$PPDET_SRC" ]; then
+  echo "Cloning PaddleDetection (configs + tools) into $PPDET_SRC..."
+  git clone --depth=1 https://github.com/PaddlePaddle/PaddleDetection.git "$PPDET_SRC"
+else
+  echo "PaddleDetection clone already present at $PPDET_SRC, skipping."
+fi
+
 echo
 echo "Done. Test with:"
 echo "  $PYTHON -c 'import paddle; print(paddle.__version__); paddle.utils.run_check()'"

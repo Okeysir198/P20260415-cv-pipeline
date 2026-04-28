@@ -13,27 +13,22 @@ Example::
 
 import contextlib
 
-# Import model modules to trigger registration. All architecture modules are
-# soft-imported so paddle-only venvs (which lack torch) and minimal venvs
-# (.venv-yolox-official/, etc.) can still use whatever subset they have.
+# Import model modules to trigger registration. yolox + base/face/pose are always
+# available in the main venv (torch-required). HF/timm/paddle modules are
+# soft-imported so minimal venvs that omit those deps still get a usable registry.
+import core.p06_models.yolox  # noqa: F401
+from core.p06_models.base import DetectionModel
+from core.p06_models.face_base import FaceDetector, FaceEmbedder
+from core.p06_models.face_registry import (
+    FACE_DETECTOR_REGISTRY,
+    FACE_EMBEDDER_REGISTRY,
+    build_face_detector,
+    build_face_embedder,
+)
+from core.p06_models.pose_base import PoseModel
+from core.p06_models.pose_registry import POSE_MODEL_REGISTRY, build_pose_model
 from core.p06_models.registry import MODEL_REGISTRY, build_model
 
-with contextlib.suppress(ImportError):
-    from core.p06_models.base import DetectionModel  # noqa: F401
-with contextlib.suppress(ImportError):
-    from core.p06_models.face_base import FaceDetector, FaceEmbedder  # noqa: F401
-    from core.p06_models.face_registry import (  # noqa: F401
-        FACE_DETECTOR_REGISTRY,
-        FACE_EMBEDDER_REGISTRY,
-        build_face_detector,
-        build_face_embedder,
-    )
-with contextlib.suppress(ImportError):
-    from core.p06_models.pose_base import PoseModel  # noqa: F401
-    from core.p06_models.pose_registry import POSE_MODEL_REGISTRY, build_pose_model  # noqa: F401
-
-with contextlib.suppress(ImportError):
-    import core.p06_models.yolox  # noqa: F401  (torch — main venv)
 with contextlib.suppress(ImportError):
     import core.p06_models.dfine  # noqa: F401
     import core.p06_models.hf_classification_variants  # noqa: F401
@@ -41,25 +36,10 @@ with contextlib.suppress(ImportError):
     import core.p06_models.hf_segmentation_variants  # noqa: F401
     import core.p06_models.rtdetr  # noqa: F401
 
-# Paddle backends — registry registration is torch-only; heavy paddle imports
-# are deferred to builder bodies, so these soft-imports are paddle-free at
-# main-venv load time. See core/p06_models/CLAUDE.md for the lazy-import contract.
-with contextlib.suppress(ImportError):
-    import core.p06_models.paddle_model  # noqa: F401  (PicoDet, PP-YOLOE)
-with contextlib.suppress(ImportError):
-    import core.p06_models.paddle_segmentation  # noqa: F401  (PP-LiteSeg, PP-MobileSeg)
-
 # Import timm model module to trigger registration (optional dep)
 with contextlib.suppress(ImportError):
     import core.p06_models.timm_model  # noqa: F401
     import core.p06_models.timm_variants  # noqa: F401
-
-# Import PaddleClas classification module to trigger registration. The module
-# itself defers heavy paddle imports to build-time, so this block only guards
-# against missing torch-side deps in unusually minimal venvs (mirrors Unit 4's
-# paddle_detection block).
-with contextlib.suppress(ImportError):
-    import core.p06_models.paddle_classification  # noqa: F401
 
 # Import pose model modules to trigger registration (optional deps)
 with contextlib.suppress(ImportError):
@@ -72,12 +52,6 @@ with contextlib.suppress(ImportError):
     import core.p06_models.scrfd  # noqa: F401
 with contextlib.suppress(ImportError):
     import core.p06_models.mobilefacenet  # noqa: F401
-
-# Import paddle-native model modules to trigger registration. Heavy paddle
-# imports are deferred to each module's builder — the module itself is
-# import-safe in the main venv (only the builders fail without paddle).
-with contextlib.suppress(ImportError):
-    import core.p06_models.paddle_keypoint  # noqa: F401
 
 __all__ = [
     "build_model",

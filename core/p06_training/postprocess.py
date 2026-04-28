@@ -99,9 +99,8 @@ def postprocess(
     """
     base_model = model.module if hasattr(model, "module") else model
     # Model-method-first dispatch — covers HF detection (DETR / RT-DETRv2 /
-    # D-FINE) and Paddle wrappers (PicoDet, PP-YOLOE, PP-Cls, PP-Seg,
-    # PP-TinyPose) that own their own decode. Falls through to the registry
-    # for raw-tensor archs (YOLOX).
+    # D-FINE) that owns its own decode. Falls through to the registry for
+    # raw-tensor archs (YOLOX).
     if base_model is not None and hasattr(base_model, "postprocess"):
         return base_model.postprocess(predictions, conf_threshold, target_sizes)
 

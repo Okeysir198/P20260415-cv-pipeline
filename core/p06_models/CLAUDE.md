@@ -16,20 +16,13 @@ Separate registries (see `core/CLAUDE.md` for the full table):
 
 | Registry | File | Used by |
 |---|---|---|
-| `@register_model` | `registry.py` | yolox, timm, hf_detection, hf_classification, hf_segmentation, hf_keypoint, paddle (picodet, pp-yoloe, pp-lcnet, pp-hgnet, pp-mobilenetv3, pp-liteseg, pp-mobileseg, pp-tinypose) |
+| `@register_model` | `registry.py` | yolox, timm, hf_detection, hf_classification, hf_segmentation, hf_keypoint |
 | `@register_pose_model` | `pose_registry.py` | rtmpose, mediapipe_pose |
 | `@register_face_detector` / `@register_face_embedder` | `face_registry.py` | scrfd, mobilefacenet |
 
-## Paddle archs — lazy imports
+## Paddle is not in this registry
 
-Paddle archs (`PicoDet`, `PPYOLOE`, `PPLCNet`, `PPLiteSeg`, `PPTinyPose`, …) live alongside torch/HF archs in this directory but **must not import `paddle` at module top**. The decorator must register a class whose `__init__` does `import paddle` (not the module body), so:
-
-- `core.p06_models` import-time on the main venv stays paddle-free — registries register the class object, no paddle wheel touched.
-- Only the training/inference subprocess running under `.venv-paddle/bin/python` actually imports paddle, when `build_model()` instantiates the class.
-
-Same pattern as the YOLOX-official adapter (`yolox.py::_OfficialYOLOXAdapter`) — gated behind a sibling venv, lazy import inside `__init__`.
-
-Checkpoints from paddle archs are paddle-native `.pdparams` + `.pdiparams` pairs; the model class exposes `.save(path)` / `.load(path)` that wrap paddle's I/O. Conversion to `.onnx` is done by `paddle2onnx` from `.venv-paddle/` so downstream `p09`/`p10` consumers stay framework-neutral.
+Paddle archs (PicoDet, PP-YOLOE, …) deliberately live outside this directory in `core/p06_paddle/`. They drive upstream `ppdet.engine.Trainer` directly inside `.venv-paddle/`; convergence with the rest of the pipeline happens at ONNX. There is no torch ↔ paddle tensor bridge.
 
 ## Pretrained weight sanity check
 

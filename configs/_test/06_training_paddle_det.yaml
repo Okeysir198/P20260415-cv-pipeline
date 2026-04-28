@@ -14,9 +14,12 @@
 
 model:
   arch: paddle-picodet-s
-  pretrained: null            # CI: train-from-scratch smoke; production uses pretrained URL
+  # Use upstream COCO-pretrained weights — train-from-scratch on 80 images
+  # produces malformed gradients on the first iteration (paddle reports as
+  # "Cannot allocate 4.5 PB" — really an integer underflow on shape).
+  pretrained: https://paddledet.bj.bcebos.com/models/picodet_s_416_coco_lcnet.pdparams
   num_classes: 2
-  input_size: [320, 320]      # PicoDet-S native input
+  input_size: [416, 416]      # match the upstream picodet_s_416 config
 
 data:
   dataset_config: 05_data.yaml   # test_fire_100, 2 classes

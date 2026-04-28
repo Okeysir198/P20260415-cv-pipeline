@@ -78,16 +78,7 @@ def build_loss(config: dict) -> nn.Module:
 
     if loss_type is None:
         arch = config.get("model", {}).get("arch", "yolox-m").lower()
-        loss_type = _ARCH_LOSS_MAP.get(arch)
-        if loss_type is None:
-            # Pattern-match Paddle archs (picodet-*, ppyoloe-*, ppclas-*,
-            # ppseg-*, pp-tinypose-*) to the paddle passthrough loss — Paddle
-            # models compute their own loss internally, mirroring HF detection.
-            paddle_prefixes = ("picodet-", "ppyoloe-", "ppclas-", "ppseg-", "pp-tinypose-")
-            if arch.startswith(paddle_prefixes):
-                loss_type = "paddle-passthrough"
-            else:
-                loss_type = "yolox"
+        loss_type = _ARCH_LOSS_MAP.get(arch, "yolox")
 
     if loss_type not in LOSS_REGISTRY:
         available = sorted(LOSS_REGISTRY.keys())
@@ -808,33 +799,3 @@ for _alias in ("hf-segformer", "hf-mask2former", "hf-dinov2-seg"):
     _ARCH_LOSS_MAP[_alias] = "segmentation"
 
 
-# ---------------------------------------------------------------------------
-# Paddle passthrough loss (never called — Paddle models compute loss internally)
-# ---------------------------------------------------------------------------
-
-
-class _PaddlePassthroughLoss(DetectionLoss):
-    """Passthrough loss for Paddle-family models (PicoDet, PP-YOLOE, PP-Cls,
-    PP-Seg, PP-TinyPose).
-
-    Never called during training because the trainer uses ``forward_with_loss()``
-    when available — Paddle wrappers compute their own loss internally,
-    mirroring how HF detection works via ``detr-passthrough``. Registered
-    so :func:`build_loss` doesn't error when a config specifies a Paddle arch.
-    """
-
-    def forward(self, predictions, targets, grids=None):
-        raise RuntimeError(
-            "Paddle passthrough loss should never be called. "
-            "Ensure the model provides forward_with_loss()."
-        )
-
-
-def _build_paddle_loss(config: dict) -> _PaddlePassthroughLoss:
-    return _PaddlePassthroughLoss()
-
-
-LOSS_REGISTRY["paddle-passthrough"] = _build_paddle_loss
-# Arch dispatch is pattern-matched in build_loss() (paddle prefixes:
-# picodet-, ppyoloe-, ppclas-, ppseg-, pp-tinypose-) rather than enumerated
-# here, so new variants pick up the passthrough automatically.

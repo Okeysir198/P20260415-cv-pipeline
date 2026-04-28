@@ -166,15 +166,15 @@ def main() -> None:
             logger.info("Training complete (HF Trainer).")
             logger.info("  Total epochs: %d", summary.get("total_epochs", 0))
         elif backend == "paddle":
-            from core.p06_training.paddle_trainer import train_with_paddle
-
-            summary = train_with_paddle(
-                config_path=str(config_path),
-                overrides=overrides_or_none,
-                resume_from=args.resume,
+            logger.error(
+                "backend='paddle' is not handled by core/p06_training/train.py.\n"
+                "PaddlePaddle has its own entry point — runs in .venv-paddle/, not the main venv.\n"
+                "Train with:\n"
+                "  .venv-paddle/bin/python core/p06_paddle/train.py --config %s\n"
+                "Setup the sibling venv first: bash scripts/setup-paddle-venv.sh",
+                config_path,
             )
-            logger.info("Training complete (PaddlePaddle).")
-            logger.info("  Total epochs: %d", summary.get("total_epochs", 0))
+            sys.exit(2)
         elif backend == "custom":
             custom_class_path = training_cfg.get("custom_trainer_class")
             if not custom_class_path:
@@ -199,16 +199,6 @@ def main() -> None:
             logger.info("Training complete (pytorch).")
             logger.info("  Best metric: %.4f at epoch %d", summary["best_metric"] or 0.0, summary["best_epoch"])
             logger.info("  Total epochs: %d", summary["total_epochs"])
-        elif backend == "paddle":
-            from core.p06_training.paddle_trainer import train_with_paddle
-
-            summary = train_with_paddle(
-                config_path=str(config_path),
-                overrides=overrides_or_none,
-                resume_from=args.resume,
-            )
-            logger.info("Training complete (paddle).")
-            logger.info("  Total epochs: %d", summary.get("total_epochs", 0))
         else:
             logger.error(
                 "Unknown training backend: '%s'. Valid values: pytorch, hf, paddle, custom",

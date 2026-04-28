@@ -207,7 +207,7 @@ The dispatch happens in `train.py::main` keyed on `training.backend`. To add a f
 3. Reuse `post_train.run_post_train_artifacts` so the `data_preview/` + `val_predictions/error_analysis/` tree comes out identical. The runner is backend-agnostic — it takes a `model` with a `__call__(image)` interface and a dataset.
 4. Document in this file's backend table (file path, venv, when-to-use) and in the root `CLAUDE.md` "Training Backends" bullet list.
 
-The paddle backend is the canonical reference for the sibling-venv + lazy-import pattern; see `core/p06_models/CLAUDE.md` for how `@register_model` keeps the main venv paddle-free.
+**Paddle is not a backend in this dispatcher** — the redesign moved paddle into its own package (`core/p06_paddle/`), running in `.venv-paddle/` and driving upstream `ppdet.engine.Trainer` directly. The dispatcher in `train.py` prints a redirect when `backend: paddle` is selected. Convergence with the unified pipeline happens at ONNX, not at `nn.Module`. See `core/p06_paddle/__init__.py` for the entry contract.
 
 ## Adding a new loss function
 
@@ -307,10 +307,9 @@ Gotchas
   `utils.checkpoint.strip_hf_prefix` before `load_state_dict(strict=False)`
   and warn on unexpected-key counts. The hazard above is specifically HF
   Trainer's in-process `_load_best_model`, which bypasses our reload sites.
-- **Paddle backend invocation** — never `uv run` paddle configs; paddle's bundled CUDA clashes with main `.venv/`'s CUDA 13 PyTorch wheels. Run as `.venv-paddle/bin/python core/p06_training/train.py --config features/<f>/configs/06_training_picodet.yaml`. The dispatcher in `train.py` raises a clear error if `training.backend: paddle` is selected but `import paddle` fails — the message points at `scripts/setup-paddle-venv.sh`.
-- **Paddle checkpoint format** — paddle saves `.pdparams` (weights) + `.pdiparams` (inference graph) pairs, not `.pt`. `post_train.run_post_train_artifacts` accepts both via the model wrapper; downstream `p08`/`p09`/`p10` go through ONNX after `paddle2onnx` conversion. Do not try to `torch.load` a paddle checkpoint.
-- **PP-TinyPose needs `KeypointTopDownDataset`** — same constraint as `hf_keypoint`. The bottom-up `KeypointDataset` returns `{boxes, keypoints}` full-frame and will silently produce zero training signal with PP-TinyPose's per-person heatmap targets. The dispatcher (`paddle_trainer._build_datasets`) branches on the arch name; new top-down paddle archs must be added to that allow-list.
-- **Paddle ONNX + ORT INT8** — PicoDet / PP-YOLOE (CNN backbones) generally hit real INT8 speedup on ORT CUDA EP. For any future transformer-y paddle arch, reuse the DETR-family exclusion list in `core/p09_export/quantize.py` (`LayerNormalization`/`Softmax`/`Gather` opt-out + `percentile` calibration default). `minmax` calibration is hard-blocked for DETR-family and should also be avoided for any transformer-paddle export.
+- **Paddle: separate package, not a backend in this dispatcher.** Train via `.venv-paddle/bin/python core/p06_paddle/train.py`; the unified dispatcher just prints a redirect when `backend: paddle` is selected. Paddle ships its own bundled CUDA incompatible with the main venv's CUDA 13 PyTorch wheels — sibling venv keeps them apart. Bootstrap: `bash scripts/setup-paddle-venv.sh`.
+- **Paddle ↔ pipeline convergence is ONNX.** `core/p06_paddle/export.py` writes `model.onnx`; from there the standard main-venv path handles eval, error analysis, inference, demo. No torch ↔ paddle tensor bridge. Don't try to `torch.load` a `.pdparams` file.
+- **Paddle ORT INT8** — PicoDet / PP-YOLOE (CNN) generally hit real INT8 speedup on ORT CUDA EP. For any future transformer-y paddle arch, reuse the DETR-family exclusion list in `core/p09_export/quantize.py` (`LayerNormalization`/`Softmax`/`Gather` opt-out + `percentile` calibration default).
 - **`self.save_dir` is an instance attribute** (set inside `_build_callbacks`)
   so `_finalize_training` and `_build_pytorch_training_config` can read it
   after the main loop. Do not convert it back to a local variable — it's the
