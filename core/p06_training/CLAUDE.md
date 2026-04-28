@@ -37,7 +37,7 @@ on features it doesn't implement yet. See `_validate_hf_backend_config`
 | `augmentation.library: albumentations` | ✓ | fast CPU aug backend with probability-gated transforms |
 | `checkpoint.metric: val/mAP50` | ✓ | auto-translated to HF's `eval_map_50` |
 | `checkpoint.save_best: true` | ✓ | uses HF's `load_best_model_at_end` |
-| Viz callbacks | ✓ native, **all CV tasks** | `hf_callbacks.py` — first-class `TrainerCallback` subclasses. `_build_callbacks` allows detection / classification / segmentation / keypoint via `task_from_output_format`. `HFDataLabelGridCallback` + `HFAugLabelGridCallback` + `HFNormalizedInputPreviewCallback` dispatch via `core.p06_training._common.build_dataset_for_viz` and route GT overlays through `_render_gt_panel` (per-task primitive: bbox / mask / banner / keypoints). `03_aug_labels_train.png` runs for every task via `_build_task_transforms` (detection→`build_transforms`, cls→`build_classification_transforms`, seg→`build_segmentation_transforms`, kpt→`build_keypoint_transforms`). `04_transform_pipeline.png` dispatches to `render_transform_pipeline` for detection (full per-step walker) and `render_transform_pipeline_task` for cls/seg/kpt (2-row raw↔denorm grid — the paired-box walker assumes YOLO targets). `05_normalized_input_preview.png` is a flat grid of `is_train=False` samples denormalized back to RGB with task-aware GT overlay. |
+| Viz callbacks | ✓ native, **all CV tasks** | `hf_callbacks.py` — first-class `TrainerCallback` subclasses. `_build_callbacks` allows detection / classification / segmentation / keypoint via `task_from_output_format`. `HFDataLabelGridCallback` + `HFAugLabelGridCallback` dispatch via `core.p06_training._common.build_dataset_for_viz` and route GT overlays through `_render_gt_panel` (per-task primitive: bbox / mask / banner / keypoints). `03_aug_labels_train.png` runs for every task via `_build_task_transforms` (detection→`build_transforms`, cls→`build_classification_transforms`, seg→`build_segmentation_transforms`, kpt→`build_keypoint_transforms`). `04_transform_pipeline.png` dispatches to `render_transform_pipeline` for detection (full per-step walker) and `render_transform_pipeline_task` for cls/seg/kpt (2-row raw↔denorm grid — the paired-box walker assumes YOLO targets). The 04 chart includes a `Denormalize(Normalize)` sanity-check column so a separate flat normalized-input grid is unnecessary (was previously emitted as `05_normalized_input_preview.png` — removed). |
 | Final test-set eval | ✓ auto | writes `<output_dir>/test_results.json` when a test split is present |
 
 If a task / config combo isn't supported, `_validate_hf_backend_config` fails
@@ -74,8 +74,7 @@ runs/<ts>/
 │   │                                              kpt→per-joint visibility + spatial heatmap + edge lengths
 │   ├── 02_data_labels_{train,val,test}.png      raw images with GT (boxes/masks/banners/keypoints by task)
 │   ├── 03_aug_labels_train.png                  CPU augmentation output
-│   ├── 04_transform_pipeline.png                step-by-step transform walk; last col = Denorm(Norm) sanity check
-│   └── 05_normalized_input_preview.png          exact tensor the model sees post-normalize (denormalized for viewing)
+│   └── 04_transform_pipeline.png                step-by-step transform walk; last col = Denorm(Norm) sanity check
 ├── val_predictions/
 │   ├── epochs/epoch_NNN.png    (per-epoch, ~2 s each — the only mid-run hook)
 │   ├── best.png                (on_train_end, best-checkpoint weights)
@@ -129,7 +128,6 @@ Opt out per block in YAML (all default true):
 training:
   data_viz:  { enabled: false }
   aug_viz:   { enabled: false }
-  norm_viz:  { enabled: false }
   val_viz:   { enabled: false }    # still leaves best_viz + error_analysis on
   best_viz:  { enabled: false }
   error_analysis: { enabled: false }

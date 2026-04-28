@@ -25,7 +25,7 @@ uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs
 #     <save_dir>/
 #       best.pt, test_results.json,
 #       data_preview/   00_dataset_info, 01_dataset_stats, 02_data_labels_{train,val,test},
-#                       03_aug_labels_train, 04_transform_pipeline, 05_normalized_input_preview
+#                       03_aug_labels_train, 04_transform_pipeline
 #       val_predictions/{epochs/, best.png, error_analysis/}
 #       test_predictions/{best.png, error_analysis/}
 #   error_analysis/ is flat-numbered 01..20 — every diagnostic at depth 0:

@@ -487,14 +487,12 @@ class DetectionTrainer:
         # rendering primitives (`_render_gt_panel`, `_extract_target_for_panel`,
         # `_tensor_to_denorm_bgr`). Reuse them via HFCallbackAdapter so the
         # pytorch backend produces the same flat data_preview/ filenames
-        # (02_data_labels_<split>.png, 03_aug_labels_train.png,
-        # 05_normalized_input_preview.png) for detection / classification /
-        # segmentation / keypoint.
+        # (02_data_labels_<split>.png, 03_aug_labels_train.png) for detection
+        # / classification / segmentation / keypoint.
         from core.p06_training.callbacks import HFCallbackAdapter
         from core.p06_training.hf_callbacks import (
             HFAugLabelGridCallback,
             HFDataLabelGridCallback,
-            HFNormalizedInputPreviewCallback,
         )
 
         task = _task_from_output(getattr(self._base_model, "output_format", None))
@@ -566,24 +564,6 @@ class DetectionTrainer:
                 )
             )
 
-        # 05_normalized_input_preview.png — val-pipeline samples denormalized
-        # back to RGB with task-aware GT overlay.
-        norm_viz_cfg = self._train_cfg.get("norm_viz", {})
-        if norm_viz_cfg.get("enabled", True):
-            callbacks.append(HFCallbackAdapter(HFNormalizedInputPreviewCallback(
-                save_dir=save_dir,
-                data_config=loaded_data_cfg,
-                training_config=self.config,
-                base_dir=base_dir,
-                input_size=input_size,
-                task=task,
-                subsets=subset_map,
-                num_samples=norm_viz_cfg.get("num_samples", 16),
-                grid_cols=norm_viz_cfg.get("grid_cols", 4),
-                thickness=norm_viz_cfg.get("thickness", 2),
-                text_scale=norm_viz_cfg.get("text_scale", 0.4),
-                dpi=norm_viz_cfg.get("dpi", 120),
-            )))
 
         return CallbackRunner(callbacks)
 

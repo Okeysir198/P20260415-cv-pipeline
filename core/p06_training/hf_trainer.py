@@ -45,7 +45,6 @@ from core.p06_training.hf_callbacks import (
     HFAugLabelGridCallback,
     HFDataLabelGridCallback,
     HFDatasetStatsCallback,
-    HFNormalizedInputPreviewCallback,
     HFValPredictionCallback,
 )
 
@@ -1218,27 +1217,6 @@ def _build_callbacks(
             class_names=class_names,
             max_samples=transform_viz.get("max_samples", 5),
             task=task,
-        ))
-
-    # Normalized-input preview — flat `data_preview/05_normalized_input_preview.png`.
-    # Renders a grid of N val-transform samples (post-normalize → denormalized
-    # back to RGB) with task-aware GT overlays. Confirms the post-normalize
-    # tensor round-trips correctly for every task.
-    norm_viz = train_cfg.get("norm_viz", {})
-    if norm_viz.get("enabled", True):
-        callbacks.append(HFNormalizedInputPreviewCallback(
-            save_dir=save_dir,
-            data_config=data_config,
-            training_config=config,
-            base_dir=base_dir or "",
-            input_size=input_size,
-            task=task,
-            subsets=subset_map,
-            num_samples=norm_viz.get("num_samples", 16),
-            grid_cols=norm_viz.get("grid_cols", 4),
-            thickness=norm_viz.get("thickness", 2),
-            text_scale=norm_viz.get("text_scale", 0.4),
-            dpi=norm_viz.get("dpi", 120),
         ))
 
     # train_viz would run the same viz on the train_dataloader — not wired
