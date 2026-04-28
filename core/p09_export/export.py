@@ -14,6 +14,8 @@ exported model, and prints model info (size, params).
 """
 
 import argparse
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -31,6 +33,141 @@ from utils.device import get_device
 
 logger.remove()
 logger.add(sys.stderr, level="INFO")
+
+
+# Shared with units 8 (training dispatch) and 11 (test fixtures). DETR-family
+# transformer attention ops degrade under INT8 ORT CUDA emulation; these
+# Paddle archs are CNN-ish (or small-heatmap CNN for pp-tinypose-) and INT8 is
+# fine — see `quantize._is_detr_family` for the corresponding skip logic.
+_PADDLE_ARCH_PREFIXES: tuple[str, ...] = (
+    "picodet-",
+    "ppyoloe-",
+    "ppclas-",
+    "ppseg-",
+    "pp-tinypose-",
+)
+
+
+def _is_paddle_arch(arch_name: str | None) -> bool:
+    """Return True if `arch_name` matches a known PaddlePaddle backend prefix."""
+    if not arch_name:
+        return False
+    return arch_name.lower().startswith(_PADDLE_ARCH_PREFIXES)
+
+
+def _is_paddle_checkpoint(checkpoint_path: str, training_config: dict) -> bool:
+    """Detect a Paddle checkpoint by file extension, sibling artifacts, or arch hint."""
+    p = Path(checkpoint_path)
+    if p.suffix == ".pdparams":
+        return True
+    if p.is_dir() and (p / "model.pdmodel").exists():
+        return True
+    if p.parent.is_dir() and (p.parent / "model.pdmodel").exists():
+        return True
+    return _is_paddle_arch(training_config.get("model", {}).get("arch"))
+
+
+def _paddle2onnx_export(
+    checkpoint_path: str,
+    save_dir: Path,
+    model_name: str,
+    opset_version: int = 17,
+) -> Path:
+    """Convert a Paddle inference model to ONNX via `.venv-paddle/bin/paddle2onnx`.
+
+    Resolves the inference-model directory (must contain `model.pdmodel` +
+    `model.pdiparams`) from `checkpoint_path`, then emits
+    `<save_dir>/<model_name>.onnx` so the optimize/quantize chain can treat it
+    like any torch-exported ONNX file.
+    """
+    p = Path(checkpoint_path)
+    if p.is_dir() and (p / "model.pdmodel").exists():
+        model_dir = p
+    elif p.parent.is_dir() and (p.parent / "model.pdmodel").exists():
+        model_dir = p.parent
+    else:
+        raise FileNotFoundError(
+            f"Paddle inference model files (model.pdmodel + model.pdiparams) not found "
+            f"near {checkpoint_path}. Export the training checkpoint to inference format first."
+        )
+
+    project_root = Path(__file__).resolve().parent.parent.parent
+    paddle2onnx_bin = project_root / ".venv-paddle" / "bin" / "paddle2onnx"
+    if not paddle2onnx_bin.exists():
+        which = shutil.which("paddle2onnx")
+        if which is None:
+            raise FileNotFoundError(
+                "paddle2onnx not found. Run `bash scripts/setup-paddle-venv.sh` to "
+                "create .venv-paddle/, or install paddle2onnx into PATH."
+            )
+        paddle2onnx_bin = Path(which)
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    onnx_path = save_dir / f"{model_name}.onnx"
+    cmd = [
+        str(paddle2onnx_bin),
+        "--model_dir", str(model_dir),
+        "--model_filename", "model.pdmodel",
+        "--params_filename", "model.pdiparams",
+        "--save_file", str(onnx_path),
+        "--opset_version", str(opset_version),
+    ]
+    logger.info("Running paddle2onnx: %s", " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"paddle2onnx export failed (exit {result.returncode}):\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+    if not onnx_path.exists():
+        raise RuntimeError(f"paddle2onnx reported success but {onnx_path} is missing")
+
+    import onnx  # noqa: PLC0415
+    onnx.checker.check_model(onnx.load(str(onnx_path)))
+    logger.info("paddle2onnx export OK: %s (opset=%d)", onnx_path, opset_version)
+    return onnx_path
+
+
+def _run_optimize_quantize(
+    onnx_path: str,
+    args: argparse.Namespace,
+    export_config: dict,
+    training_config: dict,
+    arch: str,
+) -> tuple[str, str | None, str | None, str | None]:
+    """Run optional graph optimization + quantization. Returns (final_onnx, optimized, quant, mode)."""
+    optimized_path: str | None = None
+    optimize_level = args.optimize or export_config.get("optimization_level")
+    if optimize_level and not args.skip_optimize:
+        optimized_path = ModelQuantizer(onnx_path).optimize(level=optimize_level)
+        logger.info("Optimized ONNX model: %s", optimized_path)
+        onnx_path = optimized_path
+
+    quant_path: str | None = None
+    quant_mode = args.quantize
+    quant_config = export_config.get("quantization", {})
+    if quant_mode is None and quant_config.get("enabled", False):
+        quant_mode = quant_config.get("mode", "dynamic")
+
+    if quant_mode:
+        quantizer = ModelQuantizer(onnx_path)
+        if quant_mode == "dynamic":
+            quant_path = quantizer.quantize_dynamic()
+        elif quant_mode == "static":
+            data_config_path = training_config.get("data", {}).get("config")
+            if data_config_path:
+                cal_loader = build_dataloader(load_config(data_config_path), split="val", batch_size=1)
+                quant_path = quantizer.quantize_static(
+                    cal_loader,
+                    calibration_method=args.calibration_method,
+                    arch_hint=arch,
+                )
+            else:
+                logger.warning("Static quantization requires data config. Falling back to dynamic.")
+                quant_path = quantizer.quantize_dynamic()
+        logger.info("Quantized model: %s", quant_path)
+
+    return onnx_path, optimized_path, quant_path, quant_mode
 
 
 def parse_args() -> argparse.Namespace:
@@ -257,16 +394,42 @@ def main():
     if args.skip_simplify:
         export_config["simplify"] = False
 
-    # Determine device
+    # Determine model name from training config
+    model_cfg = training_config.get("model", {})
+    arch = model_cfg.get("arch", "yolox-m")
+
+    # Paddle branch: shell out to paddle2onnx, then reuse the optimize/quantize chain.
+    if _is_paddle_checkpoint(args.model, training_config):
+        run_name = training_config.get("logging", {}).get("run_name", "model")
+        model_name = run_name.split("_")[0] if "_" in run_name else run_name
+        onnx_path = str(_paddle2onnx_export(args.model, Path(export_config["output_dir"]), model_name))
+        onnx_path, optimized_path, quant_path, quant_mode = _run_optimize_quantize(
+            onnx_path, args, export_config, training_config, arch
+        )
+
+        onnx_size_mb = Path(onnx_path).stat().st_size / (1024 * 1024)
+        print("\n" + "=" * 60)
+        print("  Export Summary (paddle2onnx)")
+        print("=" * 60)
+        print(f"  Model name     : {model_name}")
+        print(f"  Architecture   : {arch}")
+        print(f"  ONNX size      : {onnx_size_mb:.2f} MB")
+        print(f"  ONNX path      : {onnx_path}")
+        if optimized_path:
+            print(f"  Optimized      : {optimized_path}")
+        if quant_path:
+            quant_size_mb = Path(quant_path).stat().st_size / (1024 * 1024)
+            print(f"  Quantized      : {quant_path} ({quant_size_mb:.2f} MB, mode={quant_mode})")
+        print(f"  Version        : v{args.version}")
+        print("=" * 60)
+        return onnx_path
+
+    # PyTorch / HF branch
     device = get_device(args.device)
     logger.info("Using device: %s", device)
 
     # Load model
     model = _load_model_from_checkpoint(args.model, training_config, device)
-
-    # Determine model name from training config
-    model_cfg = training_config.get("model", {})
-    arch = model_cfg.get("arch", "yolox-m")
     # Derive model name from training config run_name or logging section
     logging_cfg = training_config.get("logging", {})
     run_name = logging_cfg.get("run_name", "model")
@@ -301,43 +464,9 @@ def main():
     else:
         logger.info("Skipping ONNX validation (--skip-validation)")
 
-    # Graph optimization (if requested)
-    optimized_path = None
-    optimize_level = args.optimize or export_config.get("optimization_level")
-    if optimize_level and not args.skip_optimize:
-        quantizer = ModelQuantizer(onnx_path)
-        optimized_path = quantizer.optimize(level=optimize_level)
-        logger.info("Optimized ONNX model: %s", optimized_path)
-        # Use optimized model as input for quantization
-        onnx_path = optimized_path
-
-    # Quantization (if requested)
-    quant_path = None
-    quant_mode = args.quantize
-    quant_config = export_config.get("quantization", {})
-    if quant_mode is None and quant_config.get("enabled", False):
-        quant_mode = quant_config.get("mode", "dynamic")
-
-    if quant_mode:
-        quantizer = ModelQuantizer(onnx_path)
-
-        if quant_mode == "dynamic":
-            quant_path = quantizer.quantize_dynamic()
-        elif quant_mode == "static":
-            data_config_path = training_config.get("data", {}).get("config")
-            if data_config_path:
-                data_config = load_config(data_config_path)
-                cal_loader = build_dataloader(data_config, split="val", batch_size=1)
-                quant_path = quantizer.quantize_static(
-                    cal_loader,
-                    calibration_method=args.calibration_method,
-                    arch_hint=arch,
-                )
-            else:
-                logger.warning("Static quantization requires data config. Falling back to dynamic.")
-                quant_path = quantizer.quantize_dynamic()
-
-        logger.info("Quantized model: %s", quant_path)
+    onnx_path, optimized_path, quant_path, quant_mode = _run_optimize_quantize(
+        onnx_path, args, export_config, training_config, arch
+    )
 
     # Model info
     info = exporter.get_model_info()

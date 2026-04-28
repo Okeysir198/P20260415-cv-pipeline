@@ -40,8 +40,38 @@ _DETR_OPS_EXCLUDE_TYPES: list[str] = [
 ]
 
 
+# Paddle CNN-ish architectures known safe for INT8 ORT CUDA (no transformer
+# attention emulation, real INT8 kernels available). Listed here so the
+# DETR-family substring matcher below doesn't accidentally flag them.
+_PADDLE_INT8_SAFE_PREFIXES: tuple[str, ...] = (
+    "picodet-",
+    "ppyoloe-",
+    "ppclas-",
+    "ppseg-",
+    "pp-tinypose-",
+)
+
+
+def _is_paddle_arch(arch_hint: str | None) -> bool:
+    """Return True for known PaddlePaddle CNN architectures.
+
+    Mirrors `core.p09_export.export._is_paddle_arch` — duplicated to avoid a
+    circular import between export.py (which imports ModelQuantizer from here)
+    and quantize.py.
+    """
+    if not arch_hint:
+        return False
+    return arch_hint.lower().startswith(_PADDLE_INT8_SAFE_PREFIXES)
+
+
 def _is_detr_family(arch_hint: str | None, onnx_path: str) -> bool:
-    """Detect DETR-family from an explicit arch string or the ONNX filename."""
+    """Detect DETR-family from an explicit arch string or the ONNX filename.
+
+    Paddle archs (picodet/ppyoloe/ppclas/ppseg/pp-tinypose) are explicitly
+    excluded — they are CNN-ish and INT8 emulation is fine on ORT CUDA.
+    """
+    if _is_paddle_arch(arch_hint):
+        return False
     candidates = []
     if arch_hint:
         candidates.append(arch_hint.lower())
