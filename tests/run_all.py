@@ -51,6 +51,11 @@ CORE_TESTS = [
     "test_p06_segmentation_metrics.py",
     "test_p06_segmentation_training.py",
     "test_p06_val_prediction_logger.py",
+    # Paddle backend — full-chain per task (skip-with-reason if .venv-paddle absent)
+    "test_p06_training_paddle_det.py",
+    "test_p06_training_paddle_cls.py",
+    "test_p06_training_paddle_seg.py",
+    "test_p06_training_paddle_kpt.py",
     # p07: HPO
     "test_p07_hpo.py",
     # p08: Evaluation (depends on p06 checkpoint)

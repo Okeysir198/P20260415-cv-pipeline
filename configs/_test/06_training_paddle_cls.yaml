@@ -1,0 +1,51 @@
+# Training config — PaddleClas PP-LCNet (test fixture)
+#
+# Mirrors `06_training_paddle_det.yaml` but for classification via the
+# `backend: paddle` path. PP-LCNet is Baidu's mobile-class CNN — fast smoke
+# fit. Reuses 05_data_fall.yaml (test_fall_detection_100) as a folder-tree
+# proxy when `image_format: folder` is added by the cls dataset wrapper.
+#
+# When the upstream paddle units / .venv-paddle/ are missing the matching
+# test skips-with-reason; this config still documents the schema.
+
+model:
+  arch: paddle-pplcnet
+  variant: PPLCNet_x1_0          # Baidu naming: x0_25, x0_5, x0_75, x1_0, x1_5, x2_0, x2_5
+  pretrained: null
+  num_classes: 2
+  input_size: [224, 224]
+
+data:
+  dataset_config: 05_data_fall.yaml
+  batch_size: 4
+  num_workers: 2
+  pin_memory: true
+
+training:
+  backend: paddle
+  epochs: 1
+  optimizer: sgd
+  lr: 0.01
+  weight_decay: 0.00004
+  warmup_epochs: 0
+  scheduler: cosine
+  patience: 0
+  amp: false
+  grad_clip: 1.0
+  ema: false
+  val_viz: {enabled: false}
+  train_viz: {enabled: false}
+  aug_viz: {enabled: false}
+  data_viz: {enabled: false}
+
+logging:
+  wandb_project: null
+  save_dir: ../../tests/outputs/08_training_paddle_cls
+
+checkpoint:
+  save_best: true
+  metric: val/accuracy
+  mode: max
+  save_interval: 1
+
+seed: 42

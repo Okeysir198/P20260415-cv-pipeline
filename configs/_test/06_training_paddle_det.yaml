@@ -1,0 +1,64 @@
+# Training config — PaddleDetection PicoDet-S (test fixture, fire 100)
+#
+# This config drives the `backend: paddle` training path (added in unit 1 of
+# the parallel Paddle work). The full chain is exercised by
+# tests/test_p06_training_paddle_det.py:
+#   1. bash scripts/setup-paddle-venv.sh   (idempotent)
+#   2. core/p06_training/train.py          (1 epoch, 10% subset)
+#   3. core/p08_evaluation/evaluate.py
+#   4. core/p09_export/export.py --skip-optimize
+#   5. DetectionPredictor on one fixture image
+#
+# When `.venv-paddle/` is unavailable the test skips-with-reason — this
+# config is still useful as the canonical schema reference.
+
+model:
+  arch: paddle-picodet-s
+  pretrained: null            # CI: train-from-scratch smoke; production uses pretrained URL
+  num_classes: 2
+  input_size: [320, 320]      # PicoDet-S native input
+
+data:
+  dataset_config: 05_data.yaml   # test_fire_100, 2 classes
+  batch_size: 4
+  num_workers: 2
+  pin_memory: true
+
+augmentation:
+  mosaic: false                  # PaddleDetection's PicoDet recipe uses RandomCrop/Resize, not mosaic
+  fliplr: 0.5
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+
+training:
+  backend: paddle
+  epochs: 1
+  optimizer: sgd                 # PicoDet default
+  lr: 0.001
+  weight_decay: 0.00004
+  warmup_epochs: 0
+  scheduler: cosine
+  patience: 0
+  amp: false
+  grad_clip: 35.0
+  ema: false
+  val_viz: {enabled: false}
+  train_viz: {enabled: false}
+  aug_viz: {enabled: false}
+  data_viz: {enabled: false}
+
+loss:
+  type: paddle-passthrough       # PaddleDetection models compute their own loss internally
+
+logging:
+  wandb_project: null
+  save_dir: ../../tests/outputs/08_training_paddle_det
+
+checkpoint:
+  save_best: true
+  metric: val/mAP50
+  mode: max
+  save_interval: 1
+
+seed: 42

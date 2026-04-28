@@ -1,0 +1,49 @@
+# Training config — PaddleSeg PP-LiteSeg-B1 (test fixture)
+#
+# Drives the `backend: paddle` segmentation path. PP-LiteSeg-B1 is the
+# Baidu real-time semantic segmentation model — STDC2 backbone + UAFM
+# (Unified Attention Fusion Module) + SimpleTC head. Pairs with the
+# existing 05_data_segmentation.yaml fixture (test_segmentation, 3 classes).
+#
+# Skip-with-reason when `.venv-paddle/` is unavailable.
+
+model:
+  arch: paddle-ppliteseg-b1
+  pretrained: null
+  num_classes: 3
+  input_size: [128, 128]
+
+data:
+  dataset_config: 05_data_segmentation.yaml
+  batch_size: 4
+  num_workers: 0
+  pin_memory: false
+
+training:
+  backend: paddle
+  epochs: 1
+  optimizer: sgd
+  lr: 0.01
+  weight_decay: 0.0005
+  warmup_epochs: 0
+  scheduler: poly               # PaddleSeg default for PP-LiteSeg
+  patience: 0
+  amp: false
+  grad_clip: 1.0
+  ema: false
+  val_viz: {enabled: false}
+  train_viz: {enabled: false}
+  aug_viz: {enabled: false}
+  data_viz: {enabled: false}
+
+logging:
+  wandb_project: null
+  save_dir: ../../tests/outputs/08_training_paddle_seg
+
+checkpoint:
+  save_best: true
+  metric: val/mIoU
+  mode: max
+  save_interval: 1
+
+seed: 42
