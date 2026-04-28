@@ -87,8 +87,9 @@ training:
   heatmap:
     stride: 4                             # input/4 → 64x48 for 256x192
     sigma: 2.0
-  metric_for_best_model: AP
-  greater_is_better: true
+  # Pair with `checkpoint.metric: loss` above. HF Trainer prepends `eval_`.
+  metric_for_best_model: loss
+  greater_is_better: false
 
   # Same observability tree as detection/seg/cls — keypoint viz routes
   # through utils/viz.py::draw_keypoints (skeleton + dots).
@@ -125,9 +126,13 @@ logging:
   report_to: none
 
 checkpoint:
+  # Use eval_loss (weighted heatmap MSE) for in-loop best-checkpoint
+  # selection. Switch to `AP` once an OKS-AP metric module lands in
+  # `core/p08_evaluation/` and is registered with HF Trainer's
+  # `compute_metrics` for the keypoint task.
   save_best: true
-  metric: AP
-  mode: max
+  metric: loss
+  mode: min
   save_interval: 1
 
 evaluation:

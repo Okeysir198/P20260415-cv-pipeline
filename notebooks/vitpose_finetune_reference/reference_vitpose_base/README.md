@@ -48,10 +48,34 @@ caps at N persons; `--subset 0` triggers the full non-streaming load.
 
 | Run | train_loss | eval_loss | wall |
 |---|---|---|---|
-| `--subset 30 --epochs 1 --batch-size 8` | 0.00205 | 0.00240 | ~3 s train + ~10 s data + ~10 s save |
+| `--subset 30 --epochs 1 --batch-size 8` | 0.00205 | 0.00240 | ~30 s end-to-end |
 
-Headline OKS-AP numbers from the full 30-epoch run: **pending first
-full run** (will be filled in here once it completes).
+### 10% learning-ability run (verified 2026-04-28)
+
+`--subset 15000 --epochs 15 --batch-size 32 --bf16`, GPU 1 (5090), 20 min total wall.
+
+```
+ep 1   eval_loss = 0.001286
+ep 4   eval_loss = 0.001201    -7.3% vs ep1   warmup ends
+ep 6   eval_loss = 0.001133    -12%
+ep 9   eval_loss = 0.001084
+ep11   eval_loss = 0.001078    ★ MIN  -16.2% vs ep1
+ep15   eval_loss = 0.001091    slight upward drift = mild overfitting
+final  train_loss = 0.000488   (3.7x reduction from ep0)
+```
+
+Read: model genuinely fits (train loss drops 3.7×, eval loss bottoms
+at ep11 then plateaus + drifts up). On a 10% slice, **11 epochs is
+the sweet spot** — beyond that gains are zero or slightly negative.
+For full-data runs expect 15–20 epochs to be the right horizon, which
+matches the qubvel-style guidance that the canonical 30 ep over-trains
+on a single seed. No training instability — gradient norms 0.0007–0.005
+throughout. Best ckpt under `runs/learn10pct_seed42/best/`.
+
+### Headline OKS-AP from a full 30-epoch run
+
+**Pending** — requires the offline pycocotools wrapper (~150 LOC; see
+`inference.py` stub). Will be filled in once that lands.
 
 ## Hyperparameter recipe (baked into `finetune.py`)
 

@@ -463,3 +463,112 @@ def build_hf_segmentation_model(config: dict) -> HFSegmentationModel:
     return _build_hf_generic_model(
         config, AutoModelForSemanticSegmentation, HFSegmentationModel, "segmentation",
     )
+
+
+class HFKeypointModel(DetectionModel):
+    """Thin adapter around HF top-down keypoint estimators (ViTPose family).
+
+    HF's ``VitPoseForPoseEstimation.forward`` returns heatmaps with no
+    built-in loss, so this wrapper computes weighted heatmap MSE when
+    ``target_heatmap`` + ``target_weight`` are passed alongside
+    ``pixel_values`` (HF Trainer convention for custom losses).
+    """
+
+    _keys_to_ignore_on_save = None
+
+    def __init__(self, hf_model: torch.nn.Module, processor: Any) -> None:
+        super().__init__()
+        self.hf_model = hf_model
+        self.processor = processor
+        cfg = hf_model.config
+        # ViTPose's `num_labels` == number of keypoints.
+        self.num_keypoints = getattr(cfg, "num_labels", None) or getattr(
+            cfg, "num_keypoints", 17
+        )
+
+    @property
+    def output_format(self) -> str:
+        return "keypoint"
+
+    def forward(
+        self,
+        pixel_values: torch.Tensor,
+        target_heatmap: torch.Tensor | None = None,
+        target_weight: torch.Tensor | None = None,
+        labels: Any = None,  # noqa: ARG002 — HF Trainer may inject this; ignored
+        **kwargs,
+    ):
+        """Two callers:
+
+        - **HF Trainer** with targets supplied (training/eval): compute
+          weighted heatmap MSE and return ``SimpleNamespace(loss, heatmaps)``
+          so ``Trainer.compute_loss`` finds ``.loss``.
+        - **Inference** (no targets): return raw HF ``ModelOutput`` so
+          callers can use ``processor.post_process_pose_estimation``.
+        """
+        outputs = self.hf_model(pixel_values=pixel_values, **kwargs)
+        heatmaps = outputs.heatmaps if hasattr(outputs, "heatmaps") else outputs.logits
+
+        if target_heatmap is None:
+            return outputs
+
+        weight = target_weight[:, :, None, None] if target_weight is not None else 1.0
+        loss = ((heatmaps - target_heatmap) ** 2 * weight).mean()
+        # HF Trainer expects either ModelOutput or a dict supporting
+        # `outputs["loss"]`. SimpleNamespace fails that subscript.
+        return {"loss": loss, "heatmaps": heatmaps}
+
+    def forward_with_loss(
+        self, images: torch.Tensor, targets: list,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+        """Pytorch-backend hook (kept for parity with HFDetectionModel).
+
+        ``targets`` is a list of ``(target_heatmap, target_weight)`` tuples;
+        the keypoint collator (HF path) stacks these instead.
+        """
+        target_hm = torch.stack([t[0] for t in targets]).to(images.device)
+        target_wt = torch.stack([t[1] for t in targets]).to(images.device)
+        out = self.forward(
+            pixel_values=images, target_heatmap=target_hm, target_weight=target_wt,
+        )
+        loss = out["loss"]
+        heatmaps = out["heatmaps"]
+        return loss, {"kpt_loss": loss.detach()}, heatmaps
+
+
+@register_model("hf_keypoint")
+def build_hf_keypoint_model(config: dict) -> HFKeypointModel:
+    """Build any HF top-down keypoint estimator (ViTPose family) from config.
+
+    Config example::
+
+        model:
+          arch: hf_keypoint
+          pretrained: usyd-community/vitpose-base-simple
+          num_keypoints: 17
+          input_size: [256, 192]   # (H, W)
+          ignore_mismatched_sizes: true
+    """
+    from transformers import AutoImageProcessor, VitPoseForPoseEstimation
+
+    model_cfg = config.get("model", {})
+    pretrained = model_cfg.get("pretrained")
+    if not pretrained:
+        raise ValueError(
+            "config['model']['pretrained'] is required for HF keypoint models"
+        )
+
+    num_keypoints = int(model_cfg.get("num_keypoints", 17))
+    ignore_mm = bool(model_cfg.get("ignore_mismatched_sizes", True))
+
+    logger.info(
+        "Building HF keypoint model: pretrained=%s, num_keypoints=%d",
+        pretrained, num_keypoints,
+    )
+    hf_model = VitPoseForPoseEstimation.from_pretrained(
+        pretrained,
+        num_labels=num_keypoints,
+        ignore_mismatched_sizes=ignore_mm,
+    )
+    processor = AutoImageProcessor.from_pretrained(pretrained)
+    return HFKeypointModel(hf_model, processor)

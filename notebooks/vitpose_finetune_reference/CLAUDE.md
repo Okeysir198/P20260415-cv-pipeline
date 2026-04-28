@@ -16,12 +16,8 @@ Upstream:
 
 | Side | State | Notes |
 |---|---|---|
-| `reference_vitpose_base/` | ✅ smoke-verified end-to-end | Tested with `.venv-notebook/` (`transformers 5.6.0.dev0`) — 30 persons × 1 epoch trains in ~3 s; inference grid renders correct GT/pred skeletons. |
-| `our_vitpose_base/` | 🟡 blocked | Configs scaffolded; needs `hf_keypoint` arch + builder in `core/p06_models/hf_model.py`, plus a keypoint loss path + OKS metric in `core/p06_training/` and `core/p08_evaluation/`. See `our_vitpose_base/README.md` for the explicit TODO list. |
-
-The `core/p05_data/keypoint_dataset.py` loader and the
-`task: keypoint` branches in `core/p06_training/{trainer,hf_trainer,_common}.py`
-already exist — only the model registry entry and metric/loss glue are missing.
+| `reference_vitpose_base/` | ✅ verified end-to-end + 10% learning curve | Tested with `.venv-notebook/` (`transformers 5.6.0.dev0`). Smoke (30 persons × 1 ep): trains in ~30 s, inference grid renders correct skeletons. 10% learning run (15k persons × 15 ep, 20 min): eval_loss 0.001286 → 0.001078 (min @ ep11, −16.2%), train loss 3.7× reduction — model fits cleanly, ep11 is the sweet spot. |
+| `our_vitpose_base/` | ✅ smoke-verified end-to-end | `@register_model("hf_keypoint")` + `HFKeypointModel` in `core/p06_models/hf_model.py`, `KeypointTopDownDataset` in `core/p05_data/keypoint_dataset.py`, keypoint branch in `core/p06_training/hf_trainer.py::_build_datasets`, `dump_coco_keypoints.py` for YOLO-pose dump. Smoke (28 train images, 9 val): `train_loss=0.00210, eval_loss=0.00224`. Post-train viz callbacks still emit warnings and skip — they assume YOLO-pose targets, not top-down crops; tracked as a follow-up. |
 
 ## Layout
 

@@ -621,3 +621,281 @@ def build_keypoint_dataloader(
     )
 
     return loader
+
+
+# ---------------------------------------------------------------------------
+# Top-down (per-person crop) dataset for ViTPose-style HF keypoint models
+# ---------------------------------------------------------------------------
+
+def _expand_bbox_topdown(
+    cx: float, cy: float, w: float, h: float,
+    img_w: int, img_h: int,
+    aspect_hw: tuple[int, int] = (256, 192),
+    padding: float = 1.25,
+) -> list[float]:
+    """Expand a normalized YOLO cxcywh bbox to a model's H:W aspect + padding.
+
+    Returns ``[x, y, w, h]`` in absolute pixels, clamped to image extents.
+    """
+    bx_w = w * img_w
+    bx_h = h * img_h
+    aspect_wh = aspect_hw[1] / aspect_hw[0]  # W/H
+    if bx_w > aspect_wh * bx_h:
+        bx_h = bx_w / aspect_wh
+    else:
+        bx_w = aspect_wh * bx_h
+    bx_w *= padding
+    bx_h *= padding
+    pcx, pcy = cx * img_w, cy * img_h
+    x = max(0.0, pcx - bx_w / 2.0)
+    y = max(0.0, pcy - bx_h / 2.0)
+    bx_w = min(img_w - x, bx_w)
+    bx_h = min(img_h - y, bx_h)
+    return [x, y, bx_w, bx_h]
+
+
+def _encode_heatmap(
+    kpts_in_crop: np.ndarray,  # (K, 2) input-pixel coords
+    vis: np.ndarray,           # (K,) {0, 1, 2}
+    out_hw: tuple[int, int],   # (H/4, W/4)
+    sigma: float = 2.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-joint 2D Gaussian heatmap target + visibility weight."""
+    H, W = out_hw
+    K = kpts_in_crop.shape[0]
+    target = np.zeros((K, H, W), dtype=np.float32)
+    weight = (vis > 0).astype(np.float32)
+    stride = 4.0
+    for j in range(K):
+        if weight[j] == 0:
+            continue
+        mu_x = kpts_in_crop[j, 0] / stride
+        mu_y = kpts_in_crop[j, 1] / stride
+        if not (0 <= mu_x < W and 0 <= mu_y < H):
+            weight[j] = 0
+            continue
+        x = np.arange(W, dtype=np.float32)
+        y = np.arange(H, dtype=np.float32)[:, None]
+        target[j] = np.exp(-((x - mu_x) ** 2 + (y - mu_y) ** 2) / (2 * sigma ** 2))
+    return target, weight
+
+
+class KeypointTopDownDataset(BaseDataset):
+    """Top-down keypoint dataset — one sample per labeled person.
+
+    Reads YOLO-pose ``.txt`` labels (same disk format as ``KeypointDataset``)
+    but expands the dataset so each ``__getitem__`` yields a single
+    ``(pixel_values, target_heatmap, target_weight)`` triple ready for
+    HF top-down models like ViTPose.
+
+    Args:
+        data_config: Loaded ``05_data.yaml`` (must include ``num_keypoints``,
+            ``input_size``, ``mean``, ``std``).
+        split: ``"train"``, ``"val"``, or ``"test"``.
+        processor: HF ``VitPoseImageProcessor`` (or any processor with the
+            same ``__call__(images, boxes=, return_tensors=)`` API).
+        bbox_padding: Aspect-corrected bbox expansion factor.
+        heatmap_sigma: Gaussian sigma in heatmap (output-grid) pixels.
+        is_train: When True, applies a horizontal-flip augmentation that
+            swaps left/right keypoint indices via ``flip_indices``.
+        flip_prob: Horizontal flip probability when ``is_train``.
+        base_dir: Base directory for resolving ``data_config['path']``.
+    """
+
+    def __init__(
+        self,
+        data_config: dict,
+        split: str,
+        processor: Any,
+        bbox_padding: float = 1.25,
+        heatmap_sigma: float = 2.0,
+        is_train: bool = False,
+        flip_prob: float = 0.5,
+        base_dir: str | Path | None = None,
+    ) -> None:
+        # Resolve dataset root early so we can satisfy BaseDataset's required
+        # `data_dir`. BaseDataset will populate image_dir/label_dir from
+        # `<data_dir>/<split>/{images,labels}`; we still set our own
+        # `img_dir`/`label_dir` further down to support the legacy layout
+        # (split_subdir IS the images dir).
+        if data_config.get("path") and base_dir is not None:
+            _dataset_root = resolve_path(data_config["path"], base_dir)
+        else:
+            _dataset_root = Path(data_config.get("path", "."))
+        super().__init__(
+            data_dir=_dataset_root,
+            split=split,
+            input_size=tuple(data_config["input_size"]),
+            transform=None,
+        )
+        self.data_config = data_config
+        self.split = split
+        self.processor = processor
+        self.bbox_padding = float(bbox_padding)
+        self.heatmap_sigma = float(heatmap_sigma)
+        self.is_train = bool(is_train)
+        self.flip_prob = float(flip_prob)
+
+        self.input_hw = tuple(data_config["input_size"])  # (H, W)
+        self.heatmap_hw = (self.input_hw[0] // 4, self.input_hw[1] // 4)
+        nk = data_config.get("num_keypoints")
+        if nk is None:
+            kpt_shape = data_config.get("kpt_shape") or []
+            if isinstance(kpt_shape, (list, tuple)) and len(kpt_shape) >= 1:
+                nk = int(kpt_shape[0])
+        if not nk:
+            raise KeyError("data_config must define `num_keypoints` or `kpt_shape`")
+        self.num_keypoints = int(nk)
+
+        flip_idx = data_config.get("flip_indices")
+        if flip_idx is not None and len(flip_idx) != self.num_keypoints:
+            raise ValueError(
+                f"flip_indices length {len(flip_idx)} != num_keypoints {self.num_keypoints}"
+            )
+        self.flip_indices = (
+            np.asarray(flip_idx, dtype=np.int64) if flip_idx is not None else None
+        )
+
+        # Resolve image dir + label dir. Two supported layouts:
+        #   A) <root>/<split>/images + <root>/<split>/labels       (preferred)
+        #   B) <root>/<split_subdir>  + <root>/labels              (legacy)
+        dataset_root = _dataset_root
+        split_subdir = data_config.get(split, split)
+        self.img_dir = dataset_root / split_subdir / "images"
+        self.label_dir = dataset_root / split_subdir / "labels"
+        if not self.img_dir.exists():
+            self.img_dir = dataset_root / split_subdir
+            self.label_dir = self.img_dir.parent / "labels"
+        if not self.img_dir.exists():
+            raise FileNotFoundError(f"Image directory not found: {self.img_dir}")
+
+        # Build per-annotation index: list of (img_path, ann_row).
+        self._index: list[tuple[Path, np.ndarray]] = []
+        expected_cols = 5 + self.num_keypoints * 3
+        for img_path in sorted(
+            p for p in self.img_dir.iterdir() if p.suffix.lower() in _IMG_EXTENSIONS
+        ):
+            label_path = self.label_dir / (img_path.stem + ".txt")
+            if not label_path.exists():
+                continue
+            try:
+                rows = np.loadtxt(label_path, dtype=np.float32, ndmin=2)
+            except ValueError:
+                continue
+            if rows.size == 0:
+                continue
+            for row in rows:
+                if len(row) != expected_cols:
+                    continue
+                kpt_flat = row[5:]
+                kpts = kpt_flat.reshape(self.num_keypoints, 3)
+                if (kpts[:, 2] > 0).sum() == 0:
+                    continue  # no visible keypoints — skip
+                self._index.append((img_path, row.astype(np.float32)))
+
+        if not self._index:
+            raise FileNotFoundError(
+                f"No labeled person crops found under {self.img_dir} / "
+                f"{self.label_dir}. Did you run the data dumper?"
+            )
+
+        # BaseDataset abstract methods need img_paths (used by some viz hooks).
+        self.img_paths = [p for p, _ in self._index]
+
+    # BaseDataset abstract method stubs (top-down doesn't fit YOLO targets).
+    def load_target(self, label_path: Path) -> dict[str, np.ndarray]:  # noqa: ARG002
+        return {"boxes": np.zeros((0, 5), dtype=np.float32)}
+
+    def format_target(self, raw_target, image_size):  # noqa: ARG002
+        return raw_target
+
+    def __len__(self) -> int:
+        return len(self._index)
+
+    def get_raw_item(self, idx: int) -> dict[str, Any]:
+        """Return the raw image + the single annotation row for `idx`.
+
+        Used by viz callbacks that need GT to draw on top of the original
+        image (skeleton on full frame, not on the cropped tensor).
+        """
+        img_path, row = self._index[idx]
+        image = cv2.imread(str(img_path))
+        if image is None:
+            image = np.full(
+                (self.input_hw[0], self.input_hw[1], 3), 114, dtype=np.uint8
+            )
+        ih, iw = image.shape[:2]
+        cls_id = int(row[0])
+        cx, cy, w, h = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+        kpts = row[5:].reshape(self.num_keypoints, 3).copy()
+        # Convert normalized kpts to pixel coords for viz.
+        kpts_px = kpts.copy()
+        kpts_px[:, 0] *= iw
+        kpts_px[:, 1] *= ih
+        return {
+            "image": image,
+            "targets": np.array([[cls_id, cx, cy, w, h]], dtype=np.float32),
+            "keypoints": kpts_px[None],  # (1, K, 3) for viz parity
+        }
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        img_path, row = self._index[idx]
+        image_bgr = cv2.imread(str(img_path))
+        if image_bgr is None:
+            raise FileNotFoundError(f"Cannot read image: {img_path}")
+        ih, iw = image_bgr.shape[:2]
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+        cx, cy, w, h = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+        kpts = row[5:].reshape(self.num_keypoints, 3).copy()  # normalized
+
+        # Random horizontal flip (train only).
+        flipped = False
+        if self.is_train and self.flip_indices is not None and random.random() < self.flip_prob:
+            image_rgb = image_rgb[:, ::-1].copy()
+            cx = 1.0 - cx
+            kpts[:, 0] = 1.0 - kpts[:, 0]
+            kpts = kpts[self.flip_indices]
+            flipped = True
+        del flipped  # silence unused-warning; useful as a debug breakpoint
+
+        # Expand bbox to model's aspect ratio + padding.
+        bbox = _expand_bbox_topdown(
+            cx, cy, w, h, iw, ih, aspect_hw=self.input_hw, padding=self.bbox_padding,
+        )
+
+        from PIL import Image as _PIL_Image
+        pil_img = _PIL_Image.fromarray(image_rgb)
+        proc_out = self.processor(images=pil_img, boxes=[[bbox]], return_tensors="np")
+        pixel_values = proc_out["pixel_values"][0].astype(np.float32)  # (3, H, W)
+
+        # Map keypoints into crop space (input-pixel coords).
+        bx, by, bw, bh = bbox
+        sx = self.input_hw[1] / max(bw, 1e-6)
+        sy = self.input_hw[0] / max(bh, 1e-6)
+        kpts_px_full = kpts.copy()
+        kpts_px_full[:, 0] *= iw
+        kpts_px_full[:, 1] *= ih
+        kpts_in_crop = np.zeros((self.num_keypoints, 2), dtype=np.float32)
+        kpts_in_crop[:, 0] = (kpts_px_full[:, 0] - bx) * sx
+        kpts_in_crop[:, 1] = (kpts_px_full[:, 1] - by) * sy
+        vis = kpts[:, 2].astype(np.int64)
+
+        target_hm, target_w = _encode_heatmap(
+            kpts_in_crop, vis, out_hw=self.heatmap_hw, sigma=self.heatmap_sigma,
+        )
+
+        return {
+            "pixel_values": torch.from_numpy(pixel_values),
+            "target_heatmap": torch.from_numpy(target_hm),
+            "target_weight": torch.from_numpy(target_w),
+        }
+
+
+def keypoint_topdown_collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+    """Stack top-down samples into batched tensors for HF Trainer."""
+    return {
+        "pixel_values": torch.stack([b["pixel_values"] for b in batch]),
+        "target_heatmap": torch.stack([b["target_heatmap"] for b in batch]),
+        "target_weight": torch.stack([b["target_weight"] for b in batch]),
+    }

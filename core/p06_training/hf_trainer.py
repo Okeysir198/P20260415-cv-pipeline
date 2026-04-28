@@ -488,7 +488,9 @@ def train_with_hf(
     _vtp(config, backend="hf", processor=getattr(model, "processor", None))
 
     # Build datasets based on task type
-    _ip = model.processor if output_format == "detr" else None
+    _ip = (
+        model.processor if output_format in {"detr", "keypoint"} else None
+    )
     train_dataset, eval_dataset, data_collator = _build_datasets(
         data_config, config, output_format, base_dir,
         image_processor=_ip,
@@ -628,7 +630,7 @@ def train_with_hf(
     return summary
 
 
-_SUPPORTED_HF_TASKS = {"detr", "classification", "segmentation"}
+_SUPPORTED_HF_TASKS = {"detr", "classification", "segmentation", "keypoint"}
 
 
 def _validate_hf_backend_config(config: dict, output_format: str) -> None:
@@ -768,6 +770,35 @@ def _build_datasets(
             return {"pixel_values": result["images"], "labels": labels}
 
         return train_dataset, eval_dataset, hf_cls_collate
+
+    elif output_format == "keypoint":
+        from core.p05_data.keypoint_dataset import (
+            KeypointTopDownDataset,
+            keypoint_topdown_collate_fn,
+        )
+        model_cfg = training_config.get("model", {})
+        bbox_padding = float(model_cfg.get("bbox_padding", 1.25))
+        heatmap_cfg = training_config.get("training", {}).get("heatmap", {}) or {}
+        sigma = float(heatmap_cfg.get("sigma", 2.0))
+
+        train_dataset = KeypointTopDownDataset(
+            data_config=data_config, split="train",
+            processor=image_processor,
+            bbox_padding=bbox_padding, heatmap_sigma=sigma,
+            is_train=True, base_dir=base_dir,
+        )
+        eval_dataset = KeypointTopDownDataset(
+            data_config=data_config, split="val",
+            processor=image_processor,
+            bbox_padding=bbox_padding, heatmap_sigma=sigma,
+            is_train=False, base_dir=base_dir,
+        )
+
+        subset_cfg = training_config.get("data", {}).get("subset", {}) or {}
+        seed = int(training_config.get("seed", 42))
+        train_dataset = _maybe_subset(train_dataset, subset_cfg.get("train"), seed)
+        eval_dataset = _maybe_subset(eval_dataset, subset_cfg.get("val"), seed)
+        return train_dataset, eval_dataset, keypoint_topdown_collate_fn
 
     elif output_format == "segmentation":
         from core.p05_data.segmentation_dataset import (
@@ -936,6 +967,13 @@ def _config_to_training_args(
     # it to build a backbone vs head AdamW param-group split (official D-FINE
     # recipe: backbone 2.5e-5, head 2.5e-4). Unset → falls back to HF default.
     training_args.backbone_lr = train_cfg.get("lr_backbone")
+
+    # Keypoint task: tell HF Trainer to treat target_heatmap/target_weight as
+    # labels so prediction_step recognises them (without this, eval_loss is
+    # never computed because has_labels=False).
+    if output_format == "keypoint":
+        training_args.label_names = ["target_heatmap", "target_weight"]
+
     return training_args
 
 
@@ -984,6 +1022,12 @@ def _build_compute_metrics(output_format: str, config: dict):
             return {"mean_iou": float(np.mean(iou[union > 0])) if (union > 0).any() else 0.0}
 
         return compute_metrics
+
+    elif output_format == "keypoint":
+        # In-loop selection uses eval_loss (weighted heatmap MSE). Real OKS-AP
+        # is computed offline via pycocotools. Returning None lets HF Trainer
+        # report only the loss + runtime metrics.
+        return None
 
     else:
         logger.warning(
