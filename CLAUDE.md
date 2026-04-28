@@ -95,6 +95,13 @@ features/              Self-contained per-use-case folders (see features/README.
                        configs/, code/, samples/, notebooks/, tests/, runs/,
                        eval/, export/, predict/, release/
   _TEMPLATE/           Copy via scripts/new_feature.sh to scaffold new features
+notebooks/             Reference fine-tune ports — runnable upstream baselines for
+                       diff-against-our-pipeline debugging. Each holds a `reference_<arch>/`
+                       (HF cookbook/docs as `.py`) + `our_<arch>/` (same recipe through
+                       core/p06_training/). Currently: detr_finetune_reference/,
+                       segformer_finetune_reference/, image_classification_finetune_reference/,
+                       vitpose_finetune_reference/. Run via `.venv-notebook/bin/python`,
+                       NOT `uv run`. See per-folder CLAUDE.md.
 configs/_shared/       Shared pipeline templates (non-authoritative)
 configs/_test/         CI test fixtures
 services/              Microservices: SAM3, Flux, auto-label, QA (see services/CLAUDE.md)

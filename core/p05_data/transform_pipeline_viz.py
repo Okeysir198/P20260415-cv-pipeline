@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -271,7 +271,650 @@ def _pick_one_per_class(
 
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Task-overlay registry (paired walker — non-detection tasks)
+# ---------------------------------------------------------------------------
+
+
+def _pick_first_n(samples: Any, n: int) -> list[int]:
+    """Return ordered indices ``[0, 1, ..., min(len, n)-1]``."""
+    total = len(samples) if hasattr(samples, "__len__") else 0
+    return list(range(min(int(n), total)))
+
+
+def _overlay_detection(
+    ax, image_rgb: np.ndarray, target: Any, *,
+    class_names: dict[int, str], style: VizStyle, **_kw,
+) -> None:
+    if image_rgb is None:
+        return
+    if target is None:
+        ax.imshow(image_rgb)
+        return
+    if isinstance(target, dict) and "boxes" in target:
+        xyxy, cls = _boxes_to_xyxy(target)
+    elif isinstance(target, tuple) and len(target) == 2:
+        xyxy, cls = target
+    else:
+        ax.imshow(image_rgb)
+        return
+    if len(xyxy) == 0:
+        ax.imshow(image_rgb)
+        return
+    annotated = _draw_boxes_rgb(image_rgb, xyxy, cls, class_names, style)
+    ax.imshow(annotated)
+
+
+def _overlay_classification(
+    ax, image_rgb: np.ndarray, target: Any, *,
+    class_names: dict[int, str], style: VizStyle, **_kw,
+) -> None:
+    import matplotlib.patches as mpatches
+
+    if image_rgb is None:
+        return
+    ax.imshow(image_rgb)
+    if target is None:
+        return
+    try:
+        cid = int(target)
+    except (TypeError, ValueError):
+        return
+    label = class_names.get(cid, f"class_{cid}")
+    h, w = image_rgb.shape[:2]
+    color_rgb = getattr(style, "gt_color_rgb", (0, 200, 0))
+    color = tuple(c / 255.0 for c in color_rgb)
+    border = mpatches.Rectangle(
+        (0, 0), w - 1, h - 1, linewidth=4, edgecolor=color, facecolor="none",
+    )
+    ax.add_patch(border)
+    ax.text(
+        w / 2, 8, f"Label: {label}",
+        ha="center", va="top", fontsize=10, fontweight="bold",
+        color="white",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor=color, edgecolor="none"),
+    )
+
+
+def _overlay_segmentation(
+    ax, image_rgb: np.ndarray, target: Any, *,
+    class_names: dict[int, str], style: VizStyle, **_kw,
+) -> None:
+    if image_rgb is None:
+        return
+    ax.imshow(image_rgb)
+    if target is None:
+        return
+    mask = np.asarray(target)
+    if mask.ndim != 2 or mask.size == 0:
+        return
+    h, w = image_rgb.shape[:2]
+    if mask.shape != (h, w):
+        try:
+            mask = cv2.resize(mask.astype(np.uint8), (w, h),
+                              interpolation=cv2.INTER_NEAREST)
+        except Exception:
+            return
+    fg = mask > 0
+    if not fg.any():
+        return
+    color_rgb = getattr(style, "gt_color_rgb", (0, 200, 0))
+    rgba = np.zeros((h, w, 4), dtype=np.float32)
+    rgba[fg, 0] = color_rgb[0] / 255.0
+    rgba[fg, 1] = color_rgb[1] / 255.0
+    rgba[fg, 2] = color_rgb[2] / 255.0
+    rgba[fg, 3] = 0.4
+    ax.imshow(rgba)
+    try:
+        bin_mask = (fg.astype(np.uint8)) * 255
+        contours, _ = cv2.findContours(bin_mask, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        edge_color = tuple(c / 255.0 for c in color_rgb)
+        for cnt in contours:
+            if len(cnt) < 2:
+                continue
+            pts = cnt.squeeze(1)
+            if pts.ndim != 2:
+                continue
+            ax.plot(pts[:, 0], pts[:, 1], color=edge_color, linewidth=1.5)
+    except Exception:
+        pass
+
+
+def _default_skeleton() -> list[tuple[int, int]]:
+    try:
+        from utils.viz import COCO_17_SKELETON  # type: ignore[attr-defined]
+        return list(COCO_17_SKELETON)
+    except Exception:
+        return []
+
+
+def _overlay_keypoint(
+    ax, image_rgb: np.ndarray, target: Any, *,
+    class_names: dict[int, str], style: VizStyle, **kw,
+) -> None:
+    if image_rgb is None:
+        return
+    ax.imshow(image_rgb)
+    if target is None:
+        return
+    kpts = np.asarray(target, dtype=np.float32)
+    if kpts.ndim != 2 or kpts.shape[0] == 0:
+        return
+    has_vis = kpts.shape[1] >= 3
+    xs, ys = kpts[:, 0], kpts[:, 1]
+    vis = kpts[:, 2] if has_vis else np.ones(len(kpts), dtype=np.float32)
+    skeleton = kw.get("skeleton") or _default_skeleton()
+    color_rgb = getattr(style, "gt_color_rgb", (0, 200, 0))
+    main_color = tuple(c / 255.0 for c in color_rgb)
+    for a, b in skeleton:
+        if a >= len(kpts) or b >= len(kpts):
+            continue
+        va, vb = float(vis[a]), float(vis[b])
+        if va <= 0 and vb <= 0:
+            continue
+        edge_color = main_color if (va > 0 and vb > 0) else (0.6, 0.6, 0.6)
+        ax.plot([xs[a], xs[b]], [ys[a], ys[b]],
+                color=edge_color, linewidth=1.8, alpha=0.85)
+    visible = vis > 0
+    if visible.any():
+        ax.scatter(xs[visible], ys[visible], s=18, c=[main_color],
+                   edgecolors="white", linewidths=0.6, zorder=3)
+    if (~visible).any():
+        ax.scatter(xs[~visible], ys[~visible], s=12, c=[(0.6, 0.6, 0.6)],
+                   edgecolors="white", linewidths=0.4, zorder=3)
+
+
+_OVERLAYS: dict[str, Callable] = {
+    "detection": _overlay_detection,
+    "classification": _overlay_classification,
+    "segmentation": _overlay_segmentation,
+    "keypoint": _overlay_keypoint,
+}
+
+
+# ---------------------------------------------------------------------------
+# Unified paired walker — public entry points are thin wrappers below
+# ---------------------------------------------------------------------------
+
+
+def _render_paired_walker(
+    out_path: Path,
+    *,
+    task: str,
+    data_config: dict,
+    training_config: dict,
+    base_dir: str,
+    class_names: dict[int, str],
+    max_samples: int = 5,
+    style: VizStyle | None = None,
+) -> Path | None:
+    """Single shared paired-walker entry point.
+
+    Detection routes through ``_render_detection_walker`` (the original
+    detection-specific renderer) to preserve bit-for-bit parity. Cls /
+    seg / kpt route through ``_render_task_walker`` which uses the
+    overlay registry above.
+    """
+    if task == "detection":
+        return _render_detection_walker(
+            out_path,
+            data_config=data_config,
+            training_config=training_config,
+            base_dir=base_dir,
+            class_names=class_names,
+            max_samples=max_samples,
+            style=style,
+        )
+    return _render_task_walker(
+        out_path,
+        task=task,
+        data_config=data_config,
+        training_config=training_config,
+        base_dir=base_dir,
+        class_names=class_names,
+        max_samples=max_samples,
+        style=style,
+    )
+
+
+def _short_args(t: Any) -> str:
+    """Compact one-liner of the transform's most-relevant kwargs."""
+    cn = type(t).__name__
+    bits: list[str] = []
+    for attr in ("size", "p", "scale", "ratio", "degrees", "brightness",
+                 "contrast", "saturation", "hue", "mean", "std",
+                 "interpolation"):
+        if hasattr(t, attr):
+            v = getattr(t, attr)
+            try:
+                if isinstance(v, (list, tuple)) and len(v) > 4:
+                    continue
+                if isinstance(v, float):
+                    bits.append(f"{attr}={v:.2g}")
+                else:
+                    bits.append(f"{attr}={v}")
+            except Exception:
+                continue
+        if len(bits) >= 3:
+            break
+    return f"{cn}({', '.join(bits)})" if bits else cn
+
+
+def _is_normalize(t: Any) -> bool:
+    return isinstance(t, v2.Normalize) or type(t).__name__ == "Normalize"
+
+
+def _tensor_chw_to_uint8_rgb(t: torch.Tensor) -> np.ndarray:
+    """CHW float/uint8 tensor (assumed RGB) → HWC uint8 RGB."""
+    x = t.detach().cpu()
+    if x.dtype == torch.uint8:
+        return x.permute(1, 2, 0).contiguous().numpy()
+    x = x.float()
+    mx = float(x.abs().max()) if x.numel() else 0.0
+    if mx > 1.5:
+        x = x.clamp(0, 255) / 255.0
+    return (x.clamp(0, 1) * 255).byte().permute(1, 2, 0).contiguous().numpy()
+
+
+def _pil_or_tensor_to_rgb(x: Any) -> np.ndarray:
+    """Coerce a classification-pipeline intermediate (PIL or CHW tensor) to HWC uint8 RGB."""
+    if isinstance(x, torch.Tensor):
+        if x.ndim == 3 and x.shape[0] in (1, 3):
+            return _tensor_chw_to_uint8_rgb(x)
+        return tensor_to_uint8_rgb(x)
+    try:
+        from PIL import Image as _PILImage
+        if isinstance(x, _PILImage.Image):
+            return np.asarray(x.convert("RGB"))
+    except Exception:
+        pass
+    return tensor_to_uint8_rgb(x)
+
+
+def _walk_classification(
+    raw_bgr: np.ndarray,
+    target_int: int,
+    transform_obj: Any,
+    mean: list[float],
+    std: list[float],
+) -> list[dict]:
+    """Step through a classification pipeline (legacy torchvision Compose).
+
+    Target (int class id) is invariant — same on every step.
+    """
+    from PIL import Image as _PILImage
+
+    rgb = cv2.cvtColor(raw_bgr, cv2.COLOR_BGR2RGB)
+    cells: list[dict] = [{
+        "image": rgb, "target": target_int,
+        "step_name": "Raw", "meta": _cell_meta(rgb), "is_normalize": False,
+    }]
+    if transform_obj is None:
+        return cells
+
+    inner = getattr(transform_obj, "transform", None)
+    steps = getattr(inner, "transforms", None) if inner is not None else None
+    if not steps:
+        return cells
+
+    x: Any = _PILImage.fromarray(rgb)
+    post_norm: torch.Tensor | None = None
+    for t in steps:
+        try:
+            x = t(x)
+        except Exception as e:  # pragma: no cover
+            logger.warning("classification walker: %s failed: %s",
+                           type(t).__name__, e)
+            continue
+        is_norm = _is_normalize(t)
+        meta = _cell_meta(x)
+        if is_norm and isinstance(x, torch.Tensor):
+            post_norm = x.clone()
+            disp = false_color_normalize(x)
+        else:
+            disp = _pil_or_tensor_to_rgb(x)
+        cells.append({
+            "image": disp, "target": target_int,
+            "step_name": _short_args(t), "meta": meta, "is_normalize": is_norm,
+        })
+
+    if post_norm is not None:
+        denorm = denormalize_chw(post_norm, mean, std)
+        cells.append({
+            "image": denorm, "target": target_int,
+            "step_name": "Denormalize(Normalize)",
+            "meta": _cell_meta(denorm), "is_normalize": False,
+        })
+    return cells
+
+
+def _seg_sample_to_rgb_and_mask(sample: dict) -> tuple[np.ndarray, np.ndarray]:
+    img = sample["image"]
+    mask = sample["mask"]
+    if isinstance(img, torch.Tensor):
+        rgb = _tensor_chw_to_uint8_rgb(img)
+    else:
+        rgb = np.asarray(img)
+    if isinstance(mask, torch.Tensor):
+        m = mask.detach().cpu().numpy()
+    else:
+        m = np.asarray(mask)
+    return rgb, m.astype(np.uint8)
+
+
+def _walk_segmentation(
+    raw_bgr: np.ndarray,
+    raw_mask: np.ndarray,
+    transform_obj: Any,
+    mean: list[float],
+    std: list[float],
+) -> list[dict]:
+    """Step through a v2-Compose seg pipeline using a tv_tensors sample dict."""
+    rgb_raw = cv2.cvtColor(raw_bgr, cv2.COLOR_BGR2RGB)
+    cells: list[dict] = [{
+        "image": rgb_raw, "target": raw_mask.astype(np.uint8),
+        "step_name": "Raw", "meta": _cell_meta(rgb_raw), "is_normalize": False,
+    }]
+    if transform_obj is None:
+        return cells
+
+    inner = getattr(transform_obj, "transform", None)
+    steps = getattr(inner, "transforms", None) if inner is not None else None
+    if not steps:
+        return cells
+
+    image_chw = np.ascontiguousarray(rgb_raw.transpose(2, 0, 1))
+    sample = {
+        "image": tv_tensors.Image(torch.from_numpy(image_chw)),
+        "mask": tv_tensors.Mask(torch.from_numpy(raw_mask.astype(np.int64))),
+    }
+    post_norm: torch.Tensor | None = None
+    for t in steps:
+        try:
+            sample = t(sample)
+        except Exception as e:  # pragma: no cover
+            logger.warning("segmentation walker: %s failed: %s",
+                           type(t).__name__, e)
+            continue
+        rgb_step, mask_step = _seg_sample_to_rgb_and_mask(sample)
+        is_norm = _is_normalize(t)
+        meta = _cell_meta(sample["image"])
+        if is_norm and isinstance(sample["image"], torch.Tensor):
+            post_norm = sample["image"].clone()
+            disp = false_color_normalize(sample["image"])
+        else:
+            disp = rgb_step
+        cells.append({
+            "image": disp, "target": mask_step,
+            "step_name": _short_args(t), "meta": meta, "is_normalize": is_norm,
+        })
+
+    if post_norm is not None:
+        denorm = denormalize_chw(post_norm, mean, std)
+        _, final_mask = _seg_sample_to_rgb_and_mask(sample)
+        cells.append({
+            "image": denorm, "target": final_mask,
+            "step_name": "Denormalize(Normalize)",
+            "meta": _cell_meta(denorm), "is_normalize": False,
+        })
+    return cells
+
+
+def _walk_keypoint(
+    raw_bgr: np.ndarray,
+    raw_target_dict: Any,
+    post_tensor: torch.Tensor | None,
+    post_target: Any,
+    transform_obj: Any,
+    mean: list[float],
+    std: list[float],
+) -> list[dict]:
+    """KeypointTransform is monolithic — step it as one opaque block.
+
+    Cells: Raw → KeypointTransform(opaque) → Denormalize(Normalize).
+    `raw_target_dict` is the dataset's raw targets dict; the keypoint overlay
+    expects an (N, K, 3) array, so unpack ``keypoints`` denormalized to pixel
+    coords for the raw row.
+    """
+    rgb_raw = cv2.cvtColor(raw_bgr, cv2.COLOR_BGR2RGB)
+    h_raw, w_raw = rgb_raw.shape[:2]
+    raw_kpts_arr = None
+    if isinstance(raw_target_dict, dict):
+        kp = raw_target_dict.get("keypoints")
+        if kp is not None:
+            arr = np.asarray(kp, dtype=np.float32)
+            if arr.ndim == 3 and arr.shape[0] > 0:
+                # Normalized 0–1 → pixel coords; flatten across instances.
+                arr = arr.reshape(-1, arr.shape[-1]).copy()
+                arr[:, 0] *= w_raw
+                arr[:, 1] *= h_raw
+                raw_kpts_arr = arr
+
+    cells: list[dict] = [{
+        "image": rgb_raw, "target": raw_kpts_arr,
+        "step_name": "Raw", "meta": _cell_meta(rgb_raw), "is_normalize": False,
+    }]
+    if transform_obj is None or post_tensor is None:
+        return cells
+
+    # Opaque step: raw → fully transformed (post-normalize tensor).
+    name = type(transform_obj).__name__
+    is_norm = bool(getattr(transform_obj, "mean", None) is not None)
+    disp = false_color_normalize(post_tensor) if is_norm else _tensor_chw_to_uint8_rgb(post_tensor)
+
+    # Convert post target to pixel keypoints for the post row.
+    post_kpts_arr = None
+    h_p, w_p = post_tensor.shape[-2], post_tensor.shape[-1]
+    if isinstance(post_target, np.ndarray):
+        kp = post_target
+    elif isinstance(post_target, dict):
+        kp = post_target.get("keypoints")
+    else:
+        kp = None
+    if kp is not None:
+        arr = np.asarray(kp, dtype=np.float32)
+        if arr.ndim == 3 and arr.shape[0] > 0:
+            arr = arr.reshape(-1, arr.shape[-1]).copy()
+            arr[:, 0] *= w_p
+            arr[:, 1] *= h_p
+            post_kpts_arr = arr
+
+    cells.append({
+        "image": disp, "target": post_kpts_arr,
+        "step_name": f"{name} (opaque: flip+jitter+resize+normalize)",
+        "meta": _cell_meta(post_tensor), "is_normalize": is_norm,
+    })
+
+    if is_norm:
+        denorm = denormalize_chw(post_tensor, mean, std)
+        cells.append({
+            "image": denorm, "target": post_kpts_arr,
+            "step_name": "Denormalize(Normalize)",
+            "meta": _cell_meta(denorm), "is_normalize": False,
+        })
+    return cells
+
+
+def _render_task_walker(
+    out_path: Path,
+    *,
+    task: str,
+    data_config: dict,
+    training_config: dict,
+    base_dir: str,
+    class_names: dict[int, str],
+    max_samples: int = 5,
+    style: VizStyle | None = None,
+) -> Path | None:
+    """Per-step paired walker for classification / segmentation / keypoint.
+
+    For each task-specific transform pipeline we step through it one
+    transform at a time when the pipeline is v2-/Compose-decomposable
+    (cls + seg). Keypoint's ``KeypointTransform`` is monolithic — it gets
+    rendered as a single opaque step. Final row is always
+    ``Denormalize(Normalize)`` when a normalize op was present. Each cell
+    carries the same overlay routing as the post-only fallback used to.
+    """
+    import matplotlib.pyplot as plt
+
+    from core.p06_training._common import build_dataset_for_viz
+    from core.p06_training.hf_callbacks import (
+        _build_task_transforms,
+        _extract_target_for_panel,
+    )
+    from utils.viz import wrap_suptitle
+
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+
+    style = style or VizStyle()
+    try:
+        VizStyle.apply_plot_style()
+    except Exception:
+        pass
+
+    aug_cfg = dict(training_config.get("augmentation", {}) or {})
+    aug_cfg["mosaic"] = False
+    aug_cfg["mixup"] = False
+    aug_cfg["copypaste"] = False
+    input_size = tuple(data_config.get("input_size") or (640, 640))
+    mean_list = list(data_config.get("mean") or IMAGENET_MEAN)
+    std_list = list(data_config.get("std") or IMAGENET_STD)
+
+    overlay = _OVERLAYS.get(task)
+    if overlay is None:
+        logger.warning("_render_task_walker: no overlay for task=%s", task)
+        return None
+
+    try:
+        raw_ds = build_dataset_for_viz(
+            task, "train", data_config, base_dir, transforms=None,
+        )
+    except Exception as e:
+        logger.warning("_render_task_walker: raw ds build failed — %s", e)
+        return None
+
+    try:
+        transforms = _build_task_transforms(
+            task=task, is_train=True, aug_config=aug_cfg,
+            input_size=input_size, mean=mean_list, std=std_list,
+        )
+    except Exception as e:
+        logger.warning("_render_task_walker: transforms build failed — %s", e)
+        transforms = None
+
+    n = min(max_samples, len(raw_ds))
+    if n == 0:
+        return None
+    indices = _pick_first_n(raw_ds, n)
+
+    # Per-column step-walks. Each column = one sample, list of step cells.
+    columns: list[list[dict]] = []
+    for idx in indices:
+        try:
+            raw_item = raw_ds.get_raw_item(idx)
+            raw_bgr = raw_item["image"]
+            raw_target = raw_item.get("targets")
+
+            if task == "classification":
+                cells = _walk_classification(
+                    raw_bgr, int(raw_target) if raw_target is not None else 0,
+                    transforms, mean_list, std_list,
+                )
+            elif task == "segmentation":
+                mask = np.asarray(raw_target).astype(np.uint8) if raw_target is not None \
+                    else np.zeros(raw_bgr.shape[:2], dtype=np.uint8)
+                cells = _walk_segmentation(
+                    raw_bgr, mask, transforms, mean_list, std_list,
+                )
+            elif task == "keypoint":
+                # Run the monolithic transform once to get post-tensor + post-target.
+                post_tensor: torch.Tensor | None = None
+                post_target: Any = None
+                if transforms is not None:
+                    try:
+                        out = transforms(raw_bgr, raw_item)
+                        if isinstance(out, tuple) and len(out) == 2:
+                            post_tensor, post_target = out
+                    except Exception as e:
+                        logger.warning(
+                            "_render_task_walker: kpt transform failed at idx %d — %s",
+                            idx, e,
+                        )
+                cells = _walk_keypoint(
+                    raw_bgr, raw_item, post_tensor,
+                    _extract_target_for_panel(post_target, "keypoint")
+                    if post_target is not None else None,
+                    transforms, mean_list, std_list,
+                )
+            else:
+                continue
+            if cells:
+                columns.append(cells)
+        except Exception as e:
+            logger.warning("_render_task_walker: idx %d failed — %s", idx, e)
+            continue
+
+    if not columns:
+        return None
+
+    n_rows = max(len(col) for col in columns)
+    n_cols = len(columns)
+    ref = columns[0]
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(3.2 * n_cols + 1.2, 2.6 * n_rows + 1.0),
+        dpi=150,
+        squeeze=False,
+    )
+    fig.subplots_adjust(wspace=0.04, hspace=0.30)
+
+    for r in range(n_rows):
+        step_name = ref[r]["step_name"] if r < len(ref) else f"step_{r}"
+        for c, cells in enumerate(columns):
+            ax = axes[r, c]
+            ax.set_xticks([]); ax.set_yticks([])
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+            if r < len(cells):
+                cell = cells[r]
+                # Use overlay only on non-normalize cells (false-colour
+                # normalize image is not in pixel space, overlays would
+                # be misleading); just imshow it.
+                if cell["is_normalize"]:
+                    ax.imshow(cell["image"])
+                else:
+                    overlay(ax, cell["image"], cell["target"],
+                            class_names=class_names, style=style)
+                ax.set_title(cell["meta"], fontsize=10, pad=4,
+                             family="monospace")
+        axes[r, 0].set_ylabel(
+            f"[{r + 1:02d}] {step_name}",
+            rotation=0, ha="right", va="center", labelpad=70,
+            fontsize=12, fontweight="bold",
+        )
+
+    feature = data_config.get("dataset_name") or "unknown"
+    fig.suptitle(
+        wrap_suptitle(
+            f"Transform pipeline (task={task}) — {feature} · "
+            f"input {input_size[0]}×{input_size[1]}"
+        ),
+        y=0.998, fontsize=14, fontweight="bold",
+    )
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(out_path), bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.info("_render_task_walker: saved %s (%d rows × %d cols)",
+                out_path, n_rows, n_cols)
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Public entry points (thin wrappers — preserve names + signatures)
 # ---------------------------------------------------------------------------
 
 
@@ -288,124 +931,23 @@ def render_transform_pipeline_task(
 ) -> Path | None:
     """Classification / segmentation / keypoint variant of the pipeline viz.
 
-    Picks up to ``max_samples`` samples from the train split and renders a
-    2-row grid: (top) raw image with task-aware GT overlay, (bottom) the
-    post-transform tensor denormalized back to RGB with the same GT overlay.
-    Catches the same rescale/normalize footguns without the per-step walk,
-    which would require a box-aware paired pipeline we don't have for these
-    tasks.
+    Thin wrapper over :func:`_render_paired_walker` — the unified shared
+    paired-walker dispatcher routes non-detection tasks to
+    :func:`_render_task_walker` which uses the :data:`_OVERLAYS` registry.
     """
-    import matplotlib.pyplot as plt
-
-    from core.p06_training._common import build_dataset_for_viz
-    from core.p06_training.hf_callbacks import (
-        _build_task_transforms,
-        _extract_target_for_panel,
-        _render_gt_panel,
-        _tensor_to_denorm_bgr,
+    return _render_paired_walker(
+        out_path,
+        task=task,
+        data_config=data_config,
+        training_config=training_config,
+        base_dir=base_dir,
+        class_names=class_names,
+        max_samples=max_samples,
+        style=style,
     )
 
-    random.seed(42)
-    np.random.seed(42)
-    torch.manual_seed(42)
 
-    style = style or VizStyle()
-    aug_cfg = dict(training_config.get("augmentation", {}) or {})
-    aug_cfg["mosaic"] = False
-    aug_cfg["mixup"] = False
-    aug_cfg["copypaste"] = False
-    input_size = tuple(data_config.get("input_size") or (640, 640))
-    mean_list = data_config.get("mean") or IMAGENET_MEAN
-    std_list = data_config.get("std") or IMAGENET_STD
-    mean_arr = np.asarray(mean_list, dtype=np.float32).reshape(1, 1, 3)
-    std_arr = np.asarray(std_list, dtype=np.float32).reshape(1, 1, 3)
-    normalize_applied = bool(aug_cfg.get("normalize", True))
-
-    try:
-        raw_ds = build_dataset_for_viz(
-            task, "train", data_config, base_dir, transforms=None,
-        )
-    except Exception as e:
-        logger.warning("render_transform_pipeline_task: raw ds build failed — %s", e)
-        return None
-
-    try:
-        transforms = _build_task_transforms(
-            task=task, is_train=True, aug_config=aug_cfg,
-            input_size=input_size, mean=mean_list, std=std_list,
-        )
-        post_ds = build_dataset_for_viz(
-            task, "train", data_config, base_dir, transforms=transforms,
-        )
-    except Exception as e:
-        logger.warning("render_transform_pipeline_task: post ds build failed — %s", e)
-        return None
-
-    n = min(max_samples, len(raw_ds))
-    if n == 0:
-        return None
-    indices = sorted(random.sample(range(len(raw_ds)), n))
-
-    raw_panels: list[np.ndarray] = []
-    post_panels: list[np.ndarray] = []
-    for idx in indices:
-        try:
-            raw_item = raw_ds.get_raw_item(idx)
-            raw_bgr = raw_item["image"]
-            raw_target = raw_item.get("targets")
-            raw_panels.append(
-                _render_gt_panel(raw_bgr, raw_target, task, class_names, 2, 0.4)
-            )
-            post = post_ds[idx]
-            img_tensor, tgt = post[0], post[1]
-            post_bgr = _tensor_to_denorm_bgr(
-                img_tensor, mean_arr, std_arr, normalize_applied=normalize_applied,
-            )
-            post_target = _extract_target_for_panel(tgt, task)
-            post_panels.append(
-                _render_gt_panel(post_bgr, post_target, task, class_names, 2, 0.4)
-            )
-        except Exception as e:
-            logger.warning("render_transform_pipeline_task: idx %d failed — %s",
-                           idx, e)
-            continue
-
-    if not raw_panels:
-        return None
-
-    n_cols = len(raw_panels)
-    fig, axes = plt.subplots(
-        2, n_cols, figsize=(3.2 * n_cols + 1.2, 6.4), dpi=110, squeeze=False,
-    )
-    fig.subplots_adjust(wspace=0.04, hspace=0.2)
-    row_labels = ["[01] Raw", "[02] Transformed (Denorm)"]
-    for r, panels in enumerate([raw_panels, post_panels]):
-        for c, panel in enumerate(panels):
-            ax = axes[r, c]
-            ax.set_xticks([]); ax.set_yticks([])
-            for sp in ax.spines.values():
-                sp.set_visible(False)
-            rgb = cv2.cvtColor(panel, cv2.COLOR_BGR2RGB)
-            ax.imshow(rgb)
-        axes[r, 0].set_ylabel(
-            row_labels[r], rotation=0, ha="right", va="center",
-            labelpad=60, fontsize=13, fontweight="bold",
-        )
-    feature = data_config.get("dataset_name") or "unknown"
-    fig.suptitle(
-        f"Transform pipeline (task={task}) — {feature} · "
-        f"input {input_size[0]}×{input_size[1]}",
-        y=0.995, fontsize=14, fontweight="bold",
-    )
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(str(out_path), bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    logger.info("render_transform_pipeline_task: saved %s", out_path)
-    return out_path
-
-
-def render_transform_pipeline(
+def _render_detection_walker(
     out_path: Path,
     *,
     data_config: dict,
@@ -642,3 +1184,32 @@ def render_transform_pipeline(
     logger.info("render_transform_pipeline: saved %s (%d rows × %d cols)",
                 out_path, n_rows, n_cols)
     return out_path
+
+
+def render_transform_pipeline(
+    out_path: Path,
+    *,
+    data_config: dict,
+    training_config: dict,
+    base_dir: str,
+    class_names: dict[int, str],
+    max_samples: int = 5,
+    style: VizStyle | None = None,
+) -> Path | None:
+    """Render ``04_transform_pipeline.png`` for detection runs.
+
+    Thin wrapper over :func:`_render_paired_walker`. Detection routes to
+    :func:`_render_detection_walker` (the original per-step paired-box
+    walker) — output is bit-for-bit identical to the pre-refactor
+    implementation.
+    """
+    return _render_paired_walker(
+        out_path,
+        task="detection",
+        data_config=data_config,
+        training_config=training_config,
+        base_dir=base_dir,
+        class_names=class_names,
+        max_samples=max_samples,
+        style=style,
+    )

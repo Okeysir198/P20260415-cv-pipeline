@@ -25,6 +25,7 @@ Output lands in a timestamped run dir:
 import argparse
 import datetime
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -39,7 +40,15 @@ from core.p05_data.detection_dataset import YOLOXDataset
 from core.p05_data.transforms import build_transforms
 from utils.config import feature_name_from_config_path, generate_run_dir, load_config
 from loguru import logger
-from utils.viz import VizStyle, annotate_detections, apply_plot_style, save_image_grid
+from utils.viz import (
+    VizStyle,
+    annotate_detections,
+    apply_plot_style,
+    safe_colorbar,
+    save_image_grid,
+    truncate_label,
+    wrap_suptitle,
+)
 
 # Unified matplotlib rcParams for all statistical panels in this module.
 apply_plot_style()
@@ -213,8 +222,10 @@ def generate_dataset_stats(
     class_names: dict,
     splits: list[str],
     out_dir: Path,
-    dpi: int = 120,
+    dpi: int = 150,
     subset_indices: dict[str, list[int]] | None = None,
+    subset_active: bool = False,
+    subset_pct: float | None = None,
 ) -> None:
     """Task-aware dataset stats → ``01_dataset_stats.{png,json}``.
 
@@ -228,12 +239,251 @@ def generate_dataset_stats(
     """
     task = _normalize_task(data_cfg.get("task"))
     if task == "classification":
-        return _stats_classification(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices)
+        return _stats_classification(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices, subset_active, subset_pct)
     if task == "segmentation":
-        return _stats_segmentation(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices)
+        return _stats_segmentation(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices, subset_active, subset_pct)
     if task == "keypoint":
-        return _stats_keypoint(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices)
-    return _stats_detection(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices)
+        return _stats_keypoint(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices, subset_active, subset_pct)
+    return _stats_detection(data_cfg, base_dir, class_names, splits, out_dir, dpi, subset_indices, subset_active, subset_pct)
+
+
+# ---------------------------------------------------------------------------
+# Shared per-image samplers (resolution + pixel mean/std)
+# ---------------------------------------------------------------------------
+
+
+def _sample_image_meta(
+    img_paths: list,
+    sample_cap: int | None = 2048,
+    pixel_downscale: int = 64,
+    seed: int = 0,
+    full_resolution: bool = True,
+    wh_cache: dict[str, tuple[int, int]] | None = None,
+) -> dict:
+    """Per-image sample for resolution scatter + per-channel mean/std.
+
+    Resolution is read from EVERY image by default (PIL header-only —
+    cheap, ~0.1 ms/image). Pixel mean/std reads are heavier (full image
+    decode + downscale to ``pixel_downscale``) so they are sampled —
+    capped at ``sample_cap`` (set to ``None`` for full).
+
+    Returns:
+        widths/heights: full per-image lists if ``full_resolution`` else
+            sampled. Always at least the pixel-sample subset.
+        scatter: same list capped at 4096 entries for chart use.
+        mean_rgb / std_rgb: in [0, 1].
+        pixel_sample_n: actual #images used for mean/std.
+        resolution_full: whether resolution covers full split.
+    """
+    try:
+        from PIL import Image as _PILImage
+    except Exception:
+        _PILImage = None
+
+    n = len(img_paths)
+    if n == 0:
+        return {
+            "widths": [], "heights": [], "scatter": [],
+            "mean_rgb": [0.0, 0.0, 0.0], "std_rgb": [0.0, 0.0, 0.0],
+            "pixel_sample_n": 0,
+            "resolution_full": True, "resolution_n": 0, "n_images": 0,
+        }
+    rng = random.Random(seed)
+    cap = n if sample_cap is None else min(sample_cap, n)
+    pixel_idx = set(rng.sample(range(n), cap))
+
+    widths: list[int] = []
+    heights: list[int] = []
+    ch_sum = np.zeros(3, dtype=np.float64)
+    ch_sumsq = np.zeros(3, dtype=np.float64)
+    n_pix = 0
+
+    for i, p in enumerate(img_paths):
+        in_pixel_sample = i in pixel_idx
+        # Resolution pass — PIL header for every image (full) when enabled,
+        # else only the pixel-sample subset.
+        if full_resolution or in_pixel_sample:
+            W = H = 0
+            cached = wh_cache.get(str(p)) if wh_cache else None
+            if cached is not None:
+                W, H = cached
+            else:
+                if _PILImage is not None:
+                    try:
+                        with _PILImage.open(str(p)) as im:
+                            W, H = im.size
+                    except Exception:
+                        W = H = 0
+                if W <= 0 or H <= 0:
+                    try:
+                        im = cv2.imread(str(p))
+                        if im is not None:
+                            H, W = im.shape[:2]
+                    except Exception:
+                        pass
+            if W > 0 and H > 0:
+                widths.append(int(W))
+                heights.append(int(H))
+        # Pixel stats — sampled subset only.
+        if not in_pixel_sample:
+            continue
+        try:
+            im = cv2.imread(str(p))
+            if im is None:
+                continue
+            if pixel_downscale and (im.shape[0] > pixel_downscale or im.shape[1] > pixel_downscale):
+                im = cv2.resize(im, (pixel_downscale, pixel_downscale),
+                                interpolation=cv2.INTER_AREA)
+            rgb = cv2.cvtColor(im, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+            flat = rgb.reshape(-1, 3)
+            ch_sum += flat.sum(axis=0)
+            ch_sumsq += (flat ** 2).sum(axis=0)
+            n_pix += flat.shape[0]
+        except Exception:
+            continue
+
+    if n_pix > 0:
+        mean = ch_sum / n_pix
+        var = ch_sumsq / n_pix - mean ** 2
+        std = np.sqrt(np.clip(var, 0, None))
+    else:
+        mean = np.zeros(3); std = np.zeros(3)
+
+    return {
+        "widths": widths,
+        "heights": heights,
+        "scatter": list(zip(widths, heights, strict=False))[:4096],
+        "mean_rgb": [float(x) for x in mean],
+        "std_rgb": [float(x) for x in std],
+        "pixel_sample_n": cap,
+        "resolution_full": full_resolution,
+        "resolution_n": len(widths),
+        "n_images": n,
+    }
+
+
+def _chart_caption(ax, text: str, *, fontsize: float = 7.5,
+                   color: str = "#444", y_offset: float = -0.30) -> None:
+    """One-line italic caption immediately below a subplot.
+
+    Anchored in axes-fraction coords so it follows the subplot on resize.
+    Uses a negative y-offset large enough to clear the x-axis label.
+    """
+    ax.text(
+        0.5, y_offset, text,
+        transform=ax.transAxes, ha="center", va="top",
+        fontsize=fontsize, fontstyle="italic", color=color,
+    )
+
+
+def _panel_resolution_scatter(ax, stats_by_split: dict, split_list: list[str],
+                              input_size=None) -> None:
+    any_data = False
+    for sp in split_list:
+        meta = stats_by_split[sp].get("_img_meta", {})
+        w = meta.get("widths", []); h = meta.get("heights", [])
+        if w and h:
+            any_data = True
+            ax.scatter(w, h, s=8, alpha=0.4, label=sp,
+                       color=_SPLIT_COLORS.get(sp, "#888"))
+    if not any_data:
+        ax.text(0.5, 0.5, "(no resolution data)", ha="center", va="center",
+                transform=ax.transAxes, fontsize=10, color="#888")
+        ax.axis("off")
+        return
+    if input_size is not None:
+        try:
+            ih, iw = int(input_size[0]), int(input_size[1])
+            ax.axvline(iw, color="#c00", linestyle="--", linewidth=0.8, alpha=0.6)
+            ax.axhline(ih, color="#c00", linestyle="--", linewidth=0.8, alpha=0.6)
+        except Exception:
+            pass
+    # Title reflects whether we covered full split or only sampled, with N.
+    metas = [stats_by_split[sp].get("_img_meta", {}) for sp in split_list]
+    res_n = sum(int(m.get("resolution_n", 0)) for m in metas)
+    img_n = sum(int(m.get("n_images", 0)) for m in metas) or sum(
+        int(stats_by_split[sp].get("n_images", 0)) for sp in split_list
+    )
+    full = all(m.get("resolution_full", True) for m in metas)
+    if full or (res_n and res_n >= img_n):
+        title = f"Image Resolution (full, n={res_n:,})"
+    else:
+        title = f"Image Resolution (sampled, n={res_n:,}/{img_n:,})"
+    ax.set_title(title, fontsize=11, fontweight="bold")
+    ax.set_xlabel("width (px)")
+    ax.set_ylabel("height (px)")
+    ax.legend(fontsize=8, framealpha=0.9)
+
+
+def _panel_pixel_stats(ax, stats_by_split: dict, split_list: list[str]) -> None:
+    """Per-channel R/G/B mean bars with std whiskers, grouped per split."""
+    if not split_list:
+        ax.axis("off")
+        return
+    channels = ["R", "G", "B"]
+    chan_colors = ["#d62728", "#2ca02c", "#1f77b4"]
+    n_split = len(split_list)
+    width = 0.8 / max(n_split, 1)
+    x = np.arange(3)
+    for i, sp in enumerate(split_list):
+        meta = stats_by_split[sp].get("_img_meta", {})
+        m = meta.get("mean_rgb", [0, 0, 0])
+        s = meta.get("std_rgb", [0, 0, 0])
+        offset = (i - n_split / 2 + 0.5) * width
+        ax.bar(x + offset, m, width, yerr=s, capsize=3,
+               color=[c if n_split == 1 else _SPLIT_COLORS.get(sp, "#888")
+                      for c in chan_colors] if n_split == 1 else None,
+               label=sp if n_split > 1 else None,
+               alpha=0.85,
+               edgecolor="#222", linewidth=0.4,
+               ecolor="#444")
+    ax.set_xticks(x)
+    ax.set_xticklabels(channels)
+    ax.set_ylim(0, 1.05)
+    metas = [stats_by_split[sp].get("_img_meta", {}) for sp in split_list]
+    pix_n = sum(int(m.get("pixel_sample_n", 0)) for m in metas)
+    img_n = sum(int(m.get("n_images", 0)) for m in metas) or sum(
+        int(stats_by_split[sp].get("n_images", 0)) for sp in split_list
+    )
+    if pix_n and pix_n >= img_n:
+        suffix = f"(full, n={pix_n:,})"
+    else:
+        suffix = f"(sampled, n={pix_n:,}/{img_n:,})"
+    ax.set_title(f"Per-Channel Mean ± Std (RGB, [0,1]) {suffix}",
+                 fontsize=11, fontweight="bold")
+    ax.set_ylabel("normalized value")
+    if n_split > 1:
+        ax.legend(fontsize=8, framealpha=0.9)
+
+
+def _panel_empty_labels(ax, empty_by_split: dict[str, int],
+                        n_by_split: dict[str, int],
+                        title: str = "Empty / Degenerate Labels") -> None:
+    splits = list(empty_by_split.keys())
+    if not splits:
+        ax.axis("off")
+        return
+    n_empty = [empty_by_split[s] for s in splits]
+    n_total = [n_by_split.get(s, 0) for s in splits]
+    pct = [(e / max(t, 1)) * 100 for e, t in zip(n_empty, n_total, strict=True)]
+    colors = [_SPLIT_COLORS.get(s, "#888") for s in splits]
+    bars = ax.bar(splits, n_empty, color=colors, alpha=0.85)
+    for b, e, p in zip(bars, n_empty, pct, strict=True):
+        ax.text(b.get_x() + b.get_width() / 2,
+                b.get_height() + max(n_empty + [1]) * 0.02,
+                f"{e} ({p:.1f}%)",
+                ha="center", va="bottom", fontsize=9)
+    ax.set_title(title, fontsize=11, fontweight="bold")
+    ax.set_ylabel("# images")
+    mx = max(n_empty + [1])
+    ax.set_ylim(0, mx * 1.25)
+
+
+def _format_suptitle(dataset_name: str, subset_active: bool, subset_pct: float | None) -> str:
+    base = f"{dataset_name} — 01_dataset_stats"
+    if subset_active and subset_pct is not None:
+        base += f" (subset {subset_pct:.0f}%)"
+    return wrap_suptitle(base, 80)
 
 
 def _stats_detection(
@@ -244,6 +494,8 @@ def _stats_detection(
     out_dir: Path,
     dpi: int = 120,
     subset_indices: dict[str, list[int]] | None = None,
+    subset_active: bool = False,
+    subset_pct: float | None = None,
 ) -> None:
     """Detection stats — split sizes, class distribution, bbox area tiers.
 
@@ -267,9 +519,17 @@ def _stats_detection(
         img_paths = ds.img_paths if idx_list is None else [ds.img_paths[i] for i in idx_list]
 
         class_counts: dict = {}
-        bbox_areas: list[float] = []
+        bbox_areas_px: list[float] = []  # px² (w_norm*W * h_norm*H per box)
+        bbox_aspects: list[float] = []   # w_px / h_px per box
+        bbox_centers: list[tuple[float, float]] = []  # (cx_norm, cy_norm) per box
         labels_per_image: list[int] = []
         n_empty = 0
+
+        # Fast header-only read for image dims via PIL.
+        try:
+            from PIL import Image as _PILImage
+        except Exception:
+            _PILImage = None
 
         for img_path in img_paths:
             labels = ds._load_label(img_path)
@@ -277,18 +537,37 @@ def _stats_detection(
             labels_per_image.append(n)
             if n == 0:
                 n_empty += 1
+            if n == 0 or _PILImage is None:
+                W = H = 0
+            else:
+                try:
+                    with _PILImage.open(str(img_path)) as _im:
+                        W, H = _im.size
+                except Exception:
+                    W = H = 0
             for row in labels:
                 cid = int(row[0])
                 class_counts[cid] = class_counts.get(cid, 0) + 1
-                bbox_areas.append(float(row[3]) * float(row[4]) * 100.0)  # % of image area
+                cx_n = float(row[1]); cy_n = float(row[2])
+                w_n = float(row[3]); h_n = float(row[4])
+                bbox_centers.append((cx_n, cy_n))
+                if W > 0 and H > 0:
+                    bbox_areas_px.append(w_n * W * h_n * H)
+                    if h_n > 0:
+                        bbox_aspects.append((w_n * W) / (h_n * H))
+                elif h_n > 0:
+                    bbox_aspects.append(w_n / h_n)
 
         stats[split] = {
             "n_images": len(img_paths),
             "class_counts": class_counts,
-            "bbox_areas": bbox_areas,
+            "bbox_areas_px": bbox_areas_px,
+            "bbox_aspects": bbox_aspects,
+            "bbox_centers": bbox_centers,
             "labels_per_image": labels_per_image,
             "n_empty": n_empty,
             "n_annotations": sum(class_counts.values()),
+            "_img_meta": _sample_image_meta(img_paths),
         }
 
     if not stats:
@@ -306,18 +585,25 @@ def _stats_detection(
         f"{sp.capitalize()}: {stats[sp]['n_images']:,}" for sp in split_list
     )
 
-    fig = plt.figure(figsize=(18, 10))
+    dataset_name = data_cfg.get("dataset_name") or data_cfg.get("name") or "dataset"
+    fig = plt.figure(figsize=(20, 20))
     fig.suptitle(
-        f"{split_summary}  |  Total: {total_images:,} images  |  {total_ann:,} annotations",
-        fontsize=12, fontweight="bold", y=0.99,
+        _format_suptitle(dataset_name, subset_active, subset_pct)
+        + f"\n{split_summary}  |  Total: {total_images:,} images  |  {total_ann:,} annotations",
+        fontsize=12, fontweight="bold", y=0.995,
     )
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.48, wspace=0.38)
+    gs = gridspec.GridSpec(4, 3, figure=fig, hspace=0.85, wspace=0.40)
     ax0 = fig.add_subplot(gs[0, 0])
     ax1 = fig.add_subplot(gs[0, 1])
     ax2 = fig.add_subplot(gs[0, 2])
     ax3 = fig.add_subplot(gs[1, 0])
     ax4 = fig.add_subplot(gs[1, 1])
     ax5 = fig.add_subplot(gs[1, 2])
+    ax6 = fig.add_subplot(gs[2, 0])  # resolution scatter
+    ax7 = fig.add_subplot(gs[2, 1])  # pixel mean/std
+    ax8 = fig.add_subplot(gs[2, 2])  # empty-label panel
+    ax9 = fig.add_subplot(gs[3, 0])  # bbox aspect-ratio histogram
+    ax10 = fig.add_subplot(gs[3, 1])  # bbox center 2D heatmap
 
     # --- [0,0] Images per split ---
     n_imgs = [stats[s]["n_images"] for s in split_list]
@@ -344,7 +630,10 @@ def _stats_detection(
     ax1.set_xlabel("class")
     ax1.set_ylabel("# instances")
     ax1.set_xticks(x)
-    ax1.set_xticklabels([class_names.get(cid, str(cid)) for cid in all_class_ids], rotation=15)
+    ax1.set_xticklabels(
+        [truncate_label(class_names.get(cid, str(cid)), 14) for cid in all_class_ids],
+        rotation=45, ha="right", fontsize=8,
+    )
     ax1.legend(fontsize=8, loc="upper right", framealpha=0.9)
     # Headroom so the legend at upper-right does not overlap the tallest bar.
     y_max = ax1.get_ylim()[1]
@@ -379,56 +668,44 @@ def _stats_detection(
                fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
                framealpha=1.0)
 
-    # --- [1,0] BBox area distribution (histogram + KDE, log x-axis) ---
-    from scipy.stats import gaussian_kde
-    all_areas = [a for s in split_list for a in stats[s]["bbox_areas"]]
+    # --- [1,0] BBox area distribution in px² (adaptive log-scale bins) ---
+    all_areas = [a for s in split_list for a in stats[s]["bbox_areas_px"]]
     if all_areas:
-        lo = max(min(all_areas), 1e-4)
-        hi = max(all_areas)
-        bins = np.logspace(np.log10(lo), np.log10(hi), 45)
-        x_log = np.linspace(np.log10(lo), np.log10(hi), 300)
-        x_lin = 10 ** x_log
+        lo = max(min(all_areas), 1.0)
+        hi = max(max(all_areas), lo * 10.0)
+        bins = np.logspace(np.log10(lo), np.log10(hi), 30)
 
-        # Shaded tier regions (drawn first, behind everything)
-        tier_regions = [
-            (lo,   1.0,  "tiny\n(<1%)",    "#ffcccc"),
-            (1.0,  5.0,  "small\n(1–5%)",  "#fff0b3"),
-            (5.0,  15.0, "medium\n(5–15%)","#c8f0c8"),
-            (15.0, hi,   "large\n(>15%)",  "#c8d8f8"),
+        # COCO-style reference bands in px² (small <32², medium <96²) for context.
+        ref_bands = [
+            (lo, 32 * 32, "small\n(<32²)", "#ffcccc"),
+            (32 * 32, 96 * 96, "medium\n(32²-96²)", "#fff0b3"),
+            (96 * 96, hi, "large\n(>96²)", "#c8d8f8"),
         ]
-        for x0, x1, lbl, color in tier_regions:
+        for x0, x1, lbl, color in ref_bands:
             x0c, x1c = max(x0, lo), min(x1, hi)
             if x0c >= x1c:
                 continue
             ax3.axvspan(x0c, x1c, alpha=0.18, color=color, zorder=0)
-            # Label centred at geometric midpoint of the region
             mid = 10 ** ((np.log10(x0c) + np.log10(x1c)) / 2)
             ax3.text(mid, 0.97, lbl, transform=ax3.get_xaxis_transform(),
                      fontsize=6.5, color="#555", ha="center", va="top")
 
-        # Thin boundary lines between tiers
-        for x_val in (1.0, 5.0, 15.0):
-            ax3.axvline(x_val, color="#999", linestyle="--", linewidth=0.7, alpha=0.7, zorder=1)
-
-        # Histogram + KDE per split
         for sp in split_list:
-            areas = stats[sp]["bbox_areas"]
+            areas = stats[sp]["bbox_areas_px"]
             if not areas:
                 continue
             color = split_colors.get(sp, "#888")
-            ax3.hist(areas, bins=bins, alpha=0.15, color=color, density=True, zorder=2)
-            try:
-                kde = gaussian_kde(np.log10(areas), bw_method="scott")
-                kde_vals = kde(x_log) / (x_lin * np.log(10))
-                ax3.plot(x_lin, kde_vals, color=color, linewidth=1.8, label=sp, zorder=3)
-            except Exception:
-                pass
+            ax3.hist(areas, bins=bins, alpha=0.55, color=color, label=sp, zorder=2)
 
         ax3.set_xscale("log")
-        ax3.set_title("BBox Area (% of image)", fontsize=11, fontweight="bold")
-        ax3.set_xlabel("area %  [log scale]")
-        ax3.set_ylabel("density")
+        ax3.set_title("BBox Area (px², log scale)", fontsize=11, fontweight="bold")
+        ax3.set_xlabel("area (px²)")
+        ax3.set_ylabel("# boxes")
         ax3.legend(fontsize=8, loc="upper right", framealpha=0.9)
+    else:
+        ax3.text(0.5, 0.5, "(no bbox area data)", ha="center", va="center",
+                 transform=ax3.transAxes, fontsize=10, color="#888")
+        ax3.axis("off")
 
     # --- [1,1] Labels per image — box plot per split ---
     lpi_data = [stats[sp]["labels_per_image"] for sp in split_list if stats[sp].get("labels_per_image")]
@@ -457,44 +734,111 @@ def _stats_detection(
     ax4.set_ylim(top=_y_max_4 * 1.18)
 
     # --- [1,2] Summary text panel ---
+    # Keep this terse: per-class counts already appear in Class Instances
+    # and Class Balance %. Repeating them here overflows the cell on
+    # datasets with many classes / splits.
     ax5.axis("off")
-    lines = ["Key Statistics\n"]
+    small_t = 32 * 32
+    med_t = 96 * 96
+    lines = ["Key Statistics", ""]
+    lines.append(f"{'split':<6}{'imgs':>8}{'anns':>8}{'lbls/img':>10}{'empty':>8}")
+    lines.append("-" * 40)
     for sp in split_list:
         s = stats[sp]
         lpi = s["labels_per_image"]
-        areas = s["bbox_areas"]
         avg_lpi = float(np.mean(lpi)) if lpi else 0.0
         empty_pct = s["n_empty"] / s["n_images"] * 100 if s["n_images"] else 0.0
-        avg_area = float(np.mean(areas)) if areas else 0.0
-        tiny_pct = sum(1 for a in areas if a < 1.0) / max(len(areas), 1) * 100
-        small_pct = sum(1 for a in areas if 1.0 <= a < 5.0) / max(len(areas), 1) * 100
-        med_pct = sum(1 for a in areas if 5.0 <= a < 15.0) / max(len(areas), 1) * 100
-        large_pct = sum(1 for a in areas if a >= 15.0) / max(len(areas), 1) * 100
-        lines.append(f"[{sp}]")
-        lines.append(f"  images         {s['n_images']:>7,}")
-        lines.append(f"  annotations    {s['n_annotations']:>7,}")
-        lines.append(f"  avg labels/img {avg_lpi:>7.2f}")
-        lines.append(f"  empty images   {s['n_empty']:>5} ({empty_pct:.1f}%)")
-        lines.append("  bbox size tiers:")
-        lines.append(f"    tiny  (<1%)  {tiny_pct:>6.1f}%")
-        lines.append(f"    small (1-5%) {small_pct:>6.1f}%")
-        lines.append(f"    med  (5-15%) {med_pct:>6.1f}%")
-        lines.append(f"    large (>15%) {large_pct:>6.1f}%")
-        lines.append(f"  avg bbox area  {avg_area:.3f}%")
-        lines.append("  class counts:")
-        for cid in all_class_ids:
-            cnt = s["class_counts"].get(cid, 0)
-            pct = cnt / max(s["n_annotations"], 1) * 100
-            name = class_names.get(cid, str(cid))
-            lines.append(f"    {name:<12} {cnt:>6,} ({pct:.1f}%)")
-        lines.append("")
+        lines.append(
+            f"{sp:<6}{s['n_images']:>8,}{s['n_annotations']:>8,}"
+            f"{avg_lpi:>10.2f}{s['n_empty']:>5} ({empty_pct:.0f}%)"
+        )
+    lines.append("")
+    lines.append("BBox size mix (across all splits):")
+    all_areas = [a for sp in split_list for a in stats[sp]["bbox_areas_px"]]
+    if all_areas:
+        n_a = len(all_areas)
+        sm = sum(1 for a in all_areas if a < small_t) / n_a * 100
+        md = sum(1 for a in all_areas if small_t <= a < med_t) / n_a * 100
+        lg = 100 - sm - md
+        avg_a = float(np.mean(all_areas))
+        lines.append(f"  small <32²    {sm:>5.1f}%")
+        lines.append(f"  med 32²–96²   {md:>5.1f}%")
+        lines.append(f"  large >96²    {lg:>5.1f}%")
+        lines.append(f"  avg area      {avg_a:>7,.0f} px²")
 
     ax5.text(
-        0.04, 0.97, "\n".join(lines),
-        transform=ax5.transAxes, fontsize=8.5, va="top", ha="left",
+        0.02, 0.98, "\n".join(lines),
+        transform=ax5.transAxes, fontsize=9.0, va="top", ha="left",
         family="monospace",
         bbox=dict(boxstyle="round,pad=0.5", facecolor="whitesmoke", alpha=0.85),
     )
+
+    # --- [2,0] Resolution scatter ---
+    _panel_resolution_scatter(ax6, stats, split_list, input_size=data_cfg.get("input_size"))
+    # --- [2,1] Per-channel pixel mean/std ---
+    _panel_pixel_stats(ax7, stats, split_list)
+    # --- [2,2] Empty-label panel ---
+    _panel_empty_labels(
+        ax8,
+        {sp: stats[sp]["n_empty"] for sp in split_list},
+        {sp: stats[sp]["n_images"] for sp in split_list},
+        title="Empty Images (0 boxes)",
+    )
+
+    # --- [3,0] BBox aspect-ratio histogram (log-x, w/h) ---
+    all_aspects = [a for s in split_list for a in stats[s]["bbox_aspects"] if a > 0]
+    if all_aspects:
+        bins = np.logspace(np.log10(0.1), np.log10(10.0), 30)
+        for sp in split_list:
+            asp = [a for a in stats[sp]["bbox_aspects"] if a > 0]
+            if not asp:
+                continue
+            ax9.hist(np.clip(asp, 0.1, 10.0), bins=bins, alpha=0.55,
+                     color=split_colors.get(sp, "#888"), label=sp)
+        ax9.set_xscale("log")
+        ax9.axvline(1.0, color="#555", linestyle="--", linewidth=0.8, alpha=0.7)
+        ax9.set_title("BBox Aspect Ratio (w/h, log)", fontsize=11, fontweight="bold")
+        ax9.set_xlabel("aspect (w/h)")
+        ax9.set_ylabel("# boxes")
+        ax9.legend(fontsize=8, framealpha=0.9)
+    else:
+        ax9.text(0.5, 0.5, "(no aspect data)", ha="center", va="center",
+                 transform=ax9.transAxes, fontsize=10, color="#888")
+        ax9.axis("off")
+
+    # --- [3,1] BBox center-point 2D heatmap (cx_norm, cy_norm) ---
+    all_centers = [c for s in split_list for c in stats[s]["bbox_centers"]]
+    if all_centers:
+        cx = np.array([c[0] for c in all_centers])
+        cy = np.array([c[1] for c in all_centers])
+        H_heat, _, _ = np.histogram2d(
+            cx, cy, bins=50, range=[[0.0, 1.0], [0.0, 1.0]]
+        )
+        # Display with origin top-left (image convention): flip y.
+        im = ax10.imshow(
+            H_heat.T, origin="upper", extent=(0, 1, 1, 0),
+            cmap="viridis", aspect="equal", interpolation="nearest",
+        )
+        ax10.set_title("BBox Centers (normalized)", fontsize=11, fontweight="bold")
+        ax10.set_xlabel("cx (normalized)")
+        ax10.set_ylabel("cy (normalized)")
+        safe_colorbar(ax10, im, label="Box count")
+    else:
+        ax10.text(0.5, 0.5, "(no center data)", ha="center", va="center",
+                  transform=ax10.transAxes, fontsize=10, color="#888")
+        ax10.axis("off")
+
+    # Per-chart captions (replace centralized guide).
+    _chart_caption(ax0, "Total image count per split.")
+    _chart_caption(ax1, "Annotation count per class. Big gaps across splits cause train/val mAP divergence.")
+    _chart_caption(ax2, "Per-split class share. Compare bars across splits to spot stratification issues.")
+    _chart_caption(ax3, "Object size distribution. Bands = COCO small/medium/large. Heavy-small tail → raise input_size or tune anchors.")
+    _chart_caption(ax4, "Crowdedness. Long tails suggest mosaic / copy-paste augmentation.")
+    _chart_caption(ax6, "W×H of source images. Crosshair = model input_size; far-out points get heavily resized.")
+    _chart_caption(ax7, "Sampled RGB stats; should match mean/std in 05_data.yaml. Train↔val gap = lighting/sensor shift.")
+    _chart_caption(ax8, "0-box images per split. Nonzero = unlabeled images; fix labels or enable empty-image training.")
+    _chart_caption(ax9, "w/h distribution. Skew left = tall, right = wide objects. Use for anchor design.")
+    _chart_caption(ax10, "Where objects sit in frame. Strong center bias → random crops help generalization.")
 
     # --- JSON export ---
     json_out = {
@@ -502,14 +846,29 @@ def _stats_detection(
         "task": "detection",
         "total_images": total_images,
         "total_annotations": total_ann,
+        "empty_labels": {sp: stats[sp]["n_empty"] for sp in split_list},
+        "pixel_stats_rgb": {
+            sp: {
+                "mean": [round(v, 5) for v in stats[sp]["_img_meta"]["mean_rgb"]],
+                "std": [round(v, 5) for v in stats[sp]["_img_meta"]["std_rgb"]],
+                "range": "[0,1]",
+                "sample_n": stats[sp]["_img_meta"]["pixel_sample_n"],
+            } for sp in split_list
+        },
+        "resolution_scatter_sample": {
+            sp: [list(map(int, p)) for p in stats[sp]["_img_meta"]["scatter"]]
+            for sp in split_list
+        },
         "splits": {},
     }
     for sp in split_list:
         s = stats[sp]
         lpi = s["labels_per_image"]
-        areas = s["bbox_areas"]
+        areas = s["bbox_areas_px"]
         n_ann = s["n_annotations"]
         total_area = max(len(areas), 1)
+        small_t = 32 * 32
+        med_t = 96 * 96
         json_out["splits"][sp] = {
             "n_images": s["n_images"],
             "n_annotations": n_ann,
@@ -523,28 +882,24 @@ def _stats_detection(
                 "p25": round(float(np.percentile(lpi, 25)), 1) if lpi else 0.0,
                 "p75": round(float(np.percentile(lpi, 75)), 1) if lpi else 0.0,
             },
-            "bbox_area_pct": {
-                "mean": round(float(np.mean(areas)), 4) if areas else 0.0,
-                "median": round(float(np.median(areas)), 4) if areas else 0.0,
-                "p25": round(float(np.percentile(areas, 25)), 4) if areas else 0.0,
-                "p75": round(float(np.percentile(areas, 75)), 4) if areas else 0.0,
+            "bbox_area_px2": {
+                "mean": round(float(np.mean(areas)), 1) if areas else 0.0,
+                "median": round(float(np.median(areas)), 1) if areas else 0.0,
+                "p25": round(float(np.percentile(areas, 25)), 1) if areas else 0.0,
+                "p75": round(float(np.percentile(areas, 75)), 1) if areas else 0.0,
             } if areas else {},
-            "bbox_size_tiers": {
-                "tiny_lt1pct": {
-                    "count": sum(1 for a in areas if a < 1.0),
-                    "pct": round(sum(1 for a in areas if a < 1.0) / total_area * 100, 1),
+            "bbox_size_tiers_coco_px2": {
+                "small_lt32sq": {
+                    "count": sum(1 for a in areas if a < small_t),
+                    "pct": round(sum(1 for a in areas if a < small_t) / total_area * 100, 1),
                 },
-                "small_1to5pct": {
-                    "count": sum(1 for a in areas if 1.0 <= a < 5.0),
-                    "pct": round(sum(1 for a in areas if 1.0 <= a < 5.0) / total_area * 100, 1),
+                "medium_32_96sq": {
+                    "count": sum(1 for a in areas if small_t <= a < med_t),
+                    "pct": round(sum(1 for a in areas if small_t <= a < med_t) / total_area * 100, 1),
                 },
-                "medium_5to15pct": {
-                    "count": sum(1 for a in areas if 5.0 <= a < 15.0),
-                    "pct": round(sum(1 for a in areas if 5.0 <= a < 15.0) / total_area * 100, 1),
-                },
-                "large_gt15pct": {
-                    "count": sum(1 for a in areas if a >= 15.0),
-                    "pct": round(sum(1 for a in areas if a >= 15.0) / total_area * 100, 1),
+                "large_gt96sq": {
+                    "count": sum(1 for a in areas if a >= med_t),
+                    "pct": round(sum(1 for a in areas if a >= med_t) / total_area * 100, 1),
                 },
             },
             "class_counts": {
@@ -557,6 +912,24 @@ def _stats_detection(
                 )
                 for cid in all_class_ids
             },
+        }
+        # task-aware extras: aspect-ratio sample + center 2D heatmap
+        asp_pos = [a for a in s["bbox_aspects"] if a > 0]
+        asp_clipped = [round(float(a), 4) for a in np.clip(asp_pos[:500], 0.1, 10.0)] if asp_pos else []
+        cx_arr = np.array([c[0] for c in s["bbox_centers"]]) if s["bbox_centers"] else np.zeros(0)
+        cy_arr = np.array([c[1] for c in s["bbox_centers"]]) if s["bbox_centers"] else np.zeros(0)
+        if cx_arr.size > 0:
+            H_sp, _, _ = np.histogram2d(
+                cx_arr, cy_arr, bins=50, range=[[0.0, 1.0], [0.0, 1.0]]
+            )
+            heatmap_list = H_sp.astype(int).tolist()
+        else:
+            heatmap_list = []
+        json_out["splits"][sp]["task_specific"] = {
+            "detection": {
+                "aspect_ratios_sample": asp_clipped,
+                "center_heatmap": heatmap_list,
+            }
         }
     _save_stats(fig, json_out, out_dir, dpi)
 
@@ -586,6 +959,8 @@ def _stats_classification(
     data_cfg: dict, base_dir: str, class_names: dict,
     splits: list[str], out_dir: Path, dpi: int,
     subset_indices: dict[str, list[int]] | None,
+    subset_active: bool = False,
+    subset_pct: float | None = None,
 ) -> None:
     """Classification stats: split sizes + class histogram (+ imbalance ratio)
     + image-resolution (aspect) distribution + per-channel mean/std table.
@@ -601,7 +976,7 @@ def _stats_classification(
     from core.p05_data.classification_dataset import ClassificationDataset
 
     stats: dict[str, dict] = {}
-    PIXEL_SAMPLE_CAP = 256
+    PIXEL_SAMPLE_CAP = 2048
 
     for split in splits:
         try:
@@ -617,25 +992,38 @@ def _stats_classification(
         widths: list[int] = []
         heights: list[int] = []
         aspects: list[float] = []
-        # Random subset for pixel stats
+        # Pixel-stats sampled subset; resolution collected for ALL images
+        # via cheap PIL header read.
+        try:
+            from PIL import Image as _PILImage
+        except Exception:
+            _PILImage = None
         rng = random.Random(0)
         n = len(samples)
         pick_n = min(PIXEL_SAMPLE_CAP, n)
-        pick_idx = rng.sample(range(n), pick_n) if n else []
+        pick_idx = set(rng.sample(range(n), pick_n)) if n else set()
         ch_means = np.zeros(3, dtype=np.float64)
         ch_stds = np.zeros(3, dtype=np.float64)
         n_pix = 0
         for i, (path, cid) in enumerate(samples):
             class_counts[int(cid)] = class_counts.get(int(cid), 0) + 1
-            # Cheap header-only read avoided; fall back to cv2 imread on sampled set
+            # Resolution — full-coverage PIL header read.
+            W = H = 0
+            if _PILImage is not None:
+                try:
+                    with _PILImage.open(str(path)) as im:
+                        W, H = im.size
+                except Exception:
+                    pass
+            if W and H:
+                widths.append(int(W))
+                heights.append(int(H))
+                aspects.append(W / max(H, 1))
+            # Pixel stats — sampled subset only.
             if i in pick_idx:
                 img = cv2.imread(str(path))
                 if img is None:
                     continue
-                h, w = img.shape[:2]
-                widths.append(w)
-                heights.append(h)
-                aspects.append(w / max(h, 1))
                 rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
                 flat = rgb.reshape(-1, 3)
                 ch_means += flat.sum(axis=0)
@@ -648,6 +1036,10 @@ def _stats_classification(
         else:
             mean = np.zeros(3); std = np.zeros(3)
 
+        # Empty-label count for cls = images whose class id is not in class_names
+        valid_cids = set(int(k) for k in class_names.keys())
+        n_empty = sum(1 for _, cid in samples if int(cid) not in valid_cids) if valid_cids else 0
+
         stats[split] = {
             "n_images": n,
             "class_counts": class_counts,
@@ -657,6 +1049,15 @@ def _stats_classification(
             "pix_mean_rgb": mean.tolist(),
             "pix_std_rgb": std.tolist(),
             "pixel_sample_n": pick_n,
+            "n_empty": n_empty,
+            "_img_meta": {
+                "widths": widths,
+                "heights": heights,
+                "scatter": list(zip(widths, heights, strict=False))[:256],
+                "mean_rgb": mean.tolist(),
+                "std_rgb": std.tolist(),
+                "pixel_sample_n": pick_n,
+            },
         }
 
     if not stats:
@@ -668,18 +1069,23 @@ def _stats_classification(
     total_images = sum(stats[s]["n_images"] for s in split_list)
     split_summary = "  |  ".join(f"{sp.capitalize()}: {stats[sp]['n_images']:,}" for sp in split_list)
 
-    fig = plt.figure(figsize=(18, 10))
+    dataset_name = data_cfg.get("dataset_name") or data_cfg.get("name") or "dataset"
+    fig = plt.figure(figsize=(20, 16))
     fig.suptitle(
-        f"{split_summary}  |  Total: {total_images:,} images  |  Classification",
-        fontsize=12, fontweight="bold", y=0.99,
+        _format_suptitle(dataset_name, subset_active, subset_pct)
+        + f"\n{split_summary}  |  Total: {total_images:,} images  |  Classification",
+        fontsize=12, fontweight="bold", y=0.995,
     )
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.48, wspace=0.38)
+    gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.80, wspace=0.40)
     ax0 = fig.add_subplot(gs[0, 0])
     ax1 = fig.add_subplot(gs[0, 1])
     ax2 = fig.add_subplot(gs[0, 2])
     ax3 = fig.add_subplot(gs[1, 0])
     ax4 = fig.add_subplot(gs[1, 1])
     ax5 = fig.add_subplot(gs[1, 2])
+    ax6 = fig.add_subplot(gs[2, 0])  # pixel mean/std bar
+    ax7 = fig.add_subplot(gs[2, 1])  # empty-label panel
+    ax8 = fig.add_subplot(gs[2, 2])  # imbalance ratio bar
 
     # [0,0] Images per split
     _bar_images_per_split(ax0, split_list, [stats[s]["n_images"] for s in split_list])
@@ -696,7 +1102,8 @@ def _stats_classification(
     ax1.set_xlabel("class")
     ax1.set_ylabel("# images")
     ax1.set_xticks(x)
-    ax1.set_xticklabels([class_names.get(cid, str(cid)) for cid in all_class_ids], rotation=20)
+    labels_x = [truncate_label(class_names.get(cid, str(cid)), 14) for cid in all_class_ids]
+    ax1.set_xticklabels(labels_x, rotation=45, ha="right", fontsize=8)
     ax1.legend(fontsize=8, loc="upper right", framealpha=0.9)
     y_max = ax1.get_ylim()[1] or 1
     ax1.set_ylim(top=y_max * 1.18)
@@ -743,8 +1150,11 @@ def _stats_classification(
                 ax3.hist(a, bins=bins, alpha=0.45, label=sp,
                          color=_SPLIT_COLORS.get(sp, "#888"))
         ax3.axvline(1.0, color="#555", linestyle="--", linewidth=0.8, alpha=0.7)
-        ax3.set_title("Image Aspect Ratio (W/H)", fontsize=11, fontweight="bold")
-        ax3.set_xlabel("aspect ratio  [sampled]")
+        n_full = sum(len(stats[sp]["aspects"]) for sp in split_list)
+        n_total = sum(stats[sp]["n_images"] for sp in split_list)
+        suffix = f"(full, n={n_full:,})" if n_full >= n_total else f"(sampled, n={n_full:,}/{n_total:,})"
+        ax3.set_title(f"Image Aspect Ratio (W/H) {suffix}", fontsize=11, fontweight="bold")
+        ax3.set_xlabel("aspect ratio")
         ax3.set_ylabel("# images")
         ax3.legend(fontsize=8, framealpha=0.9)
 
@@ -754,39 +1164,85 @@ def _stats_classification(
         if w and h:
             ax4.scatter(w, h, s=6, alpha=0.35, label=sp,
                         color=_SPLIT_COLORS.get(sp, "#888"))
-    ax4.set_title("Resolution (sampled)", fontsize=11, fontweight="bold")
+    n_full = sum(len(stats[sp]["widths"]) for sp in split_list)
+    n_total = sum(stats[sp]["n_images"] for sp in split_list)
+    suffix = f"(full, n={n_full:,})" if n_full >= n_total else f"(sampled, n={n_full:,}/{n_total:,})"
+    ax4.set_title(f"Image Resolution {suffix}", fontsize=11, fontweight="bold")
     ax4.set_xlabel("width (px)")
     ax4.set_ylabel("height (px)")
     if any(stats[s]["widths"] for s in split_list):
         ax4.legend(fontsize=8, framealpha=0.9)
 
-    # [1,2] Per-channel mean/std table
+    # [1,2] Per-channel mean/std table — terse; class counts already
+    # appear in Class Instances + Class Balance % charts above.
     ax5.axis("off")
-    lines = ["Pixel statistics (RGB, [0,1])\n"]
+    lines = ["Pixel statistics (RGB, [0,1])", ""]
     for sp in split_list:
         m = stats[sp]["pix_mean_rgb"]; s = stats[sp]["pix_std_rgb"]
         n_s = stats[sp]["pixel_sample_n"]
-        lines.append(f"[{sp}]  (n={n_s} imgs sampled)")
-        lines.append(f"  mean  R={m[0]:.3f}  G={m[1]:.3f}  B={m[2]:.3f}")
-        lines.append(f"  std   R={s[0]:.3f}  G={s[1]:.3f}  B={s[2]:.3f}")
+        n_total = stats[sp]["n_images"]
+        tag = "full" if n_s >= n_total else "sampled"
+        lines.append(f"[{sp}]  ({tag}, n={n_s:,}/{n_total:,})")
+        lines.append(f"  mean R={m[0]:.3f} G={m[1]:.3f} B={m[2]:.3f}")
+        lines.append(f"  std  R={s[0]:.3f} G={s[1]:.3f} B={s[2]:.3f}")
         lines.append("")
-    lines.append("Class counts")
-    for sp in split_list:
-        lines.append(f"[{sp}]")
-        total = sum(stats[sp]["class_counts"].values()) or 1
-        for cid in all_class_ids:
-            cnt = stats[sp]["class_counts"].get(cid, 0)
-            name = class_names.get(cid, str(cid))
-            lines.append(f"  {name:<14} {cnt:>6,} ({cnt / total * 100:5.1f}%)")
-        lines.append("")
-    ax5.text(0.02, 0.97, "\n".join(lines), transform=ax5.transAxes,
-             fontsize=8.5, va="top", ha="left", family="monospace",
+    ax5.text(0.02, 0.98, "\n".join(lines), transform=ax5.transAxes,
+             fontsize=9.0, va="top", ha="left", family="monospace",
              bbox=dict(boxstyle="round,pad=0.5", facecolor="whitesmoke", alpha=0.85))
+
+    # [2,0] Per-channel pixel mean/std
+    _panel_pixel_stats(ax6, stats, split_list)
+    # [2,1] Empty-label panel (class id not in class_names)
+    _panel_empty_labels(
+        ax7,
+        {sp: stats[sp]["n_empty"] for sp in split_list},
+        {sp: stats[sp]["n_images"] for sp in split_list},
+        title="Unknown / Out-of-Vocabulary Class IDs",
+    )
+    # [2,2] Imbalance ratio bar
+    if imbalance_by_split:
+        sps = list(imbalance_by_split.keys())
+        ratios = [imbalance_by_split[sp] for sp in sps]
+        colors = [_SPLIT_COLORS.get(sp, "#888") for sp in sps]
+        bars = ax8.bar(sps, ratios, color=colors)
+        for b, r in zip(bars, ratios, strict=True):
+            ax8.text(b.get_x() + b.get_width() / 2,
+                     b.get_height() + max(ratios) * 0.02,
+                     f"{r:.2f}×", ha="center", va="bottom", fontsize=9)
+        ax8.set_title("Class Imbalance Ratio (max / min)",
+                      fontsize=11, fontweight="bold")
+        ax8.set_ylabel("ratio")
+        ax8.set_ylim(0, max(ratios) * 1.25)
+    else:
+        ax8.axis("off")
+
+    # Per-chart captions.
+    _chart_caption(ax0, "Total image count per split.")
+    _chart_caption(ax1, "Per-class image count per split. Sustained gaps across splits = class-weighted resampling.")
+    _chart_caption(ax2, "Per-split class share. Tells you if any split is missing a class.")
+    _chart_caption(ax3, "W/H of every image. Spike at 1.0 = uniform square images.")
+    _chart_caption(ax4, "W×H of every image. Single point = uniform resolution.")
+    _chart_caption(ax6, "Sampled RGB stats; should match mean/std in 05_data.yaml.")
+    _chart_caption(ax7, "Images whose class id ∉ class_names. Nonzero = label/config mismatch.")
+    _chart_caption(ax8, "Largest class count ÷ smallest. >2× → consider class weights or resampling.")
 
     json_out = {
         "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "task": "classification",
         "total_images": total_images,
+        "empty_labels": {sp: stats[sp]["n_empty"] for sp in split_list},
+        "pixel_stats_rgb": {
+            sp: {
+                "mean": [round(v, 5) for v in stats[sp]["_img_meta"]["mean_rgb"]],
+                "std": [round(v, 5) for v in stats[sp]["_img_meta"]["std_rgb"]],
+                "range": "[0,1]",
+                "sample_n": stats[sp]["_img_meta"]["pixel_sample_n"],
+            } for sp in split_list
+        },
+        "resolution_scatter_sample": {
+            sp: [list(map(int, p)) for p in stats[sp]["_img_meta"]["scatter"]]
+            for sp in split_list
+        },
         "splits": {
             sp: {
                 "n_images": stats[sp]["n_images"],
@@ -825,6 +1281,8 @@ def _stats_segmentation(
     data_cfg: dict, base_dir: str, class_names: dict,
     splits: list[str], out_dir: Path, dpi: int,
     subset_indices: dict[str, list[int]] | None,
+    subset_active: bool = False,
+    subset_pct: float | None = None,
 ) -> None:
     """Segmentation stats: pixel-class histogram + mask coverage + component counts.
 
@@ -839,6 +1297,7 @@ def _stats_segmentation(
 
     MASK_SAMPLE_CAP = 400
     num_classes = int(data_cfg.get("num_classes", 0))
+    ignore_index = int(data_cfg.get("ignore_index", 255))
 
     stats: dict[str, dict] = {}
     for split in splits:
@@ -857,9 +1316,10 @@ def _stats_segmentation(
         pick_idx = rng.sample(range(n), pick_n) if n else []
 
         pixel_counts = np.zeros(max(num_classes, 1), dtype=np.int64)
-        coverage: list[float] = []  # non-bg % per image
+        coverage: list[float] = []  # non-bg % per image (excl. ignore)
         comp_counts_per_class: dict[int, list[int]] = {}
         comp_areas_per_class: dict[int, list[int]] = {}
+        n_degenerate = 0  # foreground coverage <0.1%
 
         for i in pick_idx:
             img_path = img_paths[i]
@@ -869,15 +1329,20 @@ def _stats_segmentation(
             m = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
             if m is None:
                 continue
-            bc = np.bincount(m.ravel(), minlength=pixel_counts.shape[0])
-            # Extend if mask has id beyond declared num_classes
+            # Mask out ignore_index in counts
+            m_keep = m != ignore_index
+            bc = np.bincount(m[m_keep].ravel(), minlength=pixel_counts.shape[0]) if m_keep.any() \
+                else np.zeros(pixel_counts.shape[0], dtype=np.int64)
             if bc.shape[0] > pixel_counts.shape[0]:
                 extra = np.zeros(bc.shape[0] - pixel_counts.shape[0], dtype=np.int64)
                 pixel_counts = np.concatenate([pixel_counts, extra])
             pixel_counts[: bc.shape[0]] += bc
-            total_px = m.size
-            non_bg = int((m != 0).sum())
-            coverage.append(non_bg / total_px * 100.0)
+            total_keep = int(m_keep.sum())
+            non_bg = int(((m != 0) & m_keep).sum())
+            cov_pct = (non_bg / max(total_keep, 1)) * 100.0
+            coverage.append(cov_pct)
+            if cov_pct < 0.1:
+                n_degenerate += 1
 
             # Connected components per class (cheap loop over unique non-bg ids)
             uniq = np.unique(m)
@@ -901,6 +1366,8 @@ def _stats_segmentation(
             "coverage_pct": coverage,
             "comp_counts_per_class": comp_counts_per_class,
             "comp_areas_per_class": comp_areas_per_class,
+            "n_empty": n_degenerate,
+            "_img_meta": _sample_image_meta(img_paths),
         }
 
     if not stats:
@@ -918,17 +1385,22 @@ def _stats_segmentation(
     total_images = sum(stats[s]["n_images"] for s in split_list)
     split_summary = "  |  ".join(f"{sp.capitalize()}: {stats[sp]['n_images']:,}" for sp in split_list)
 
-    fig = plt.figure(figsize=(20, 11))
+    dataset_name = data_cfg.get("dataset_name") or data_cfg.get("name") or "dataset"
+    fig = plt.figure(figsize=(20, 16))
     fig.suptitle(
-        f"{split_summary}  |  Total: {total_images:,} images  |  Semantic Segmentation",
-        fontsize=12, fontweight="bold", y=0.99,
+        _format_suptitle(dataset_name, subset_active, subset_pct)
+        + f"\n{split_summary}  |  Total: {total_images:,} images  |  Semantic Segmentation",
+        fontsize=12, fontweight="bold", y=0.995,
     )
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.55, wspace=0.38)
+    gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.85, wspace=0.40)
     ax0 = fig.add_subplot(gs[0, 0])
     ax1 = fig.add_subplot(gs[0, 1:])
     ax2 = fig.add_subplot(gs[1, 0])
     ax3 = fig.add_subplot(gs[1, 1])
     ax4 = fig.add_subplot(gs[1, 2])
+    ax5 = fig.add_subplot(gs[2, 0])  # resolution scatter
+    ax6 = fig.add_subplot(gs[2, 1])  # pixel mean/std
+    ax7 = fig.add_subplot(gs[2, 2])  # empty/degenerate-label panel
 
     # [0,0] Images per split
     _bar_images_per_split(ax0, split_list, [stats[s]["n_images"] for s in split_list])
@@ -945,7 +1417,7 @@ def _stats_segmentation(
     ax1.set_yscale("log")
     ax1.set_title("Pixel Count per Class (log y)", fontsize=11, fontweight="bold")
     ax1.set_xlabel("class")
-    ax1.set_ylabel("# pixels (sampled)")
+    ax1.set_ylabel("# pixels (across all masks)")
     ax1.set_xticks(x)
     labels_x = [class_names.get(cid, str(cid)) for cid in all_class_ids]
     ax1.set_xticklabels(labels_x, rotation=60, ha="right", fontsize=7)
@@ -996,11 +1468,47 @@ def _stats_segmentation(
         ax4.set_title("Median Component Area (px, log)", fontsize=11, fontweight="bold")
         ax4.set_ylabel("pixels")
 
+    # [2,0] Resolution scatter
+    _panel_resolution_scatter(ax5, stats, split_list, input_size=data_cfg.get("input_size"))
+    # [2,1] Per-channel pixel mean/std
+    _panel_pixel_stats(ax6, stats, split_list)
+    # [2,2] Empty/degenerate-label panel (coverage <0.1%)
+    _panel_empty_labels(
+        ax7,
+        {sp: stats[sp]["n_empty"] for sp in split_list},
+        {sp: stats[sp]["sample_n"] for sp in split_list},
+        title="Degenerate Masks (FG <0.1%)",
+    )
+
+    # Per-chart captions.
+    _chart_caption(ax0, "Total image count per split.")
+    _chart_caption(ax1, "Total labeled pixels per class per split. Orders-of-magnitude gaps drive class-weighted loss decisions.")
+    _chart_caption(ax2, "% of pixels labeled per image (excluding ignore_index). Low % = sparse annotations.")
+    _chart_caption(ax3, "Connected-component count per class. High = fragmented; low = contiguous regions.")
+    _chart_caption(ax4, "Median component size per class. Tiny components may be lost at output stride.")
+    _chart_caption(ax5, "W×H of every image. Crosshair = model input_size.")
+    _chart_caption(ax6, "Sampled RGB stats; should match mean/std in 05_data.yaml.")
+    _chart_caption(ax7, "Masks with <0.1% foreground (excluding ignore_index). Usually annotation errors.")
+
     # JSON export
     json_out = {
         "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "task": "segmentation",
         "total_images": total_images,
+        "empty_labels": {sp: stats[sp]["n_empty"] for sp in split_list},
+        "pixel_stats_rgb": {
+            sp: {
+                "mean": [round(v, 5) for v in stats[sp]["_img_meta"]["mean_rgb"]],
+                "std": [round(v, 5) for v in stats[sp]["_img_meta"]["std_rgb"]],
+                "range": "[0,1]",
+                "sample_n": stats[sp]["_img_meta"]["pixel_sample_n"],
+            } for sp in split_list
+        },
+        "resolution_scatter_sample": {
+            sp: [list(map(int, p)) for p in stats[sp]["_img_meta"]["scatter"]]
+            for sp in split_list
+        },
+        "ignore_index": ignore_index,
         "splits": {
             sp: {
                 "n_images": stats[sp]["n_images"],
@@ -1043,6 +1551,8 @@ def _stats_keypoint(
     data_cfg: dict, base_dir: str, class_names: dict,
     splits: list[str], out_dir: Path, dpi: int,
     subset_indices: dict[str, list[int]] | None,
+    subset_active: bool = False,
+    subset_pct: float | None = None,
 ) -> None:
     """Keypoint stats: images/split, instances/split, per-joint visibility rate,
     spatial heatmap (normalized to bbox), inter-joint distance histogram.
@@ -1054,8 +1564,33 @@ def _stats_keypoint(
 
     from core.p05_data.keypoint_dataset import KeypointDataset
 
+    # `num_keypoints` may be set explicitly or derived from `kpt_shape: [K, 3]`
+    # (the convention used by every keypoint feature in this repo).
     num_keypoints = int(data_cfg.get("num_keypoints", 0))
-    skeleton = data_cfg.get("skeleton") or []  # list of [a, b] joint-index pairs
+    if num_keypoints <= 0:
+        kpt_shape = data_cfg.get("kpt_shape") or []
+        if isinstance(kpt_shape, (list, tuple)) and len(kpt_shape) >= 1:
+            try:
+                num_keypoints = int(kpt_shape[0])
+            except (TypeError, ValueError):
+                num_keypoints = 0
+    if num_keypoints <= 0:
+        logger.warning("Stats (keypoint): num_keypoints/kpt_shape missing in data_cfg; "
+                       "no panels will render.")
+        return
+    skeleton = data_cfg.get("skeleton") or []
+
+    # PIL header read for instance-size scatter — imported once.
+    try:
+        from PIL import Image as _PILImage
+    except Exception:
+        _PILImage = None
+
+    HEAT = 64
+    skeleton_pairs = np.asarray(
+        [(a, b) for a, b in skeleton if 0 <= a < num_keypoints and 0 <= b < num_keypoints],
+        dtype=np.int64,
+    ) if skeleton else np.zeros((0, 2), dtype=np.int64)
 
     stats: dict[str, dict] = {}
     for split in splits:
@@ -1070,56 +1605,105 @@ def _stats_keypoint(
         img_paths = ds.img_paths if idx_list is None else [ds.img_paths[i] for i in idx_list]
 
         n_instances = 0
-        vis_counts = np.zeros(num_keypoints, dtype=np.int64)   # visibility > 0
-        labeled_counts = np.zeros(num_keypoints, dtype=np.int64)  # total instances
-        # Spatial heatmap buffer (bbox-normalized keypoint locations)
-        HEAT = 64
+        n_empty = 0
+        vis_counts = np.zeros(num_keypoints, dtype=np.int64)
+        labeled_counts = np.zeros(num_keypoints, dtype=np.int64)
+        v_breakdown = np.zeros((num_keypoints, 3), dtype=np.int64)
         heat = np.zeros((HEAT, HEAT), dtype=np.float64)
         edge_lengths: dict[tuple[int, int], list[float]] = {}
+        inst_sizes_vs_vis: list[tuple[float, int]] = []
+        # Resolution cache so we don't header-read images twice
+        # (here + inside _sample_image_meta below).
+        wh_cache: dict[str, tuple[int, int]] = {}
 
         for img_path in img_paths:
             lbl = ds._load_label(img_path)
-            boxes = lbl["boxes"]           # (N, 5) normalized
+            boxes = lbl["boxes"]           # (N, 5) normalized: [cls, cx, cy, w, h]
             kpts = lbl["keypoints"]        # (N, K, 3) normalized image coords
             if len(boxes) == 0:
+                n_empty += 1
                 continue
+            vis_per_inst = (kpts[:, :, 2] > 0).sum(axis=1)  # (N,)
+            if int(vis_per_inst.sum()) == 0:
+                n_empty += 1
             n_instances += len(boxes)
             labeled_counts += len(boxes)
-            vis = (kpts[:, :, 2] > 0)
-            vis_counts += vis.sum(axis=0).astype(np.int64)
+            vis_counts += (kpts[:, :, 2] > 0).sum(axis=0).astype(np.int64)
+            v_levels = kpts[:, :, 2].astype(np.int64)
+            for v_lvl in (0, 1, 2):
+                v_breakdown[:, v_lvl] += (v_levels == v_lvl).sum(axis=0)
 
-            # Bbox-normalize keypoint positions (0..1 inside bbox)
-            for i in range(len(boxes)):
-                cx, cy, bw, bh = boxes[i, 1], boxes[i, 2], boxes[i, 3], boxes[i, 4]
-                if bw <= 0 or bh <= 0:
-                    continue
-                x0, y0 = cx - bw / 2, cy - bh / 2
-                labeled_mask = kpts[i, :, 2] > 0
-                if labeled_mask.any():
-                    kx = (kpts[i, labeled_mask, 0] - x0) / bw
-                    ky = (kpts[i, labeled_mask, 1] - y0) / bh
-                    kx = np.clip(kx, 0, 0.999)
-                    ky = np.clip(ky, 0, 0.999)
-                    hx = (kx * HEAT).astype(int)
-                    hy = (ky * HEAT).astype(int)
-                    np.add.at(heat, (hy, hx), 1.0)
-                # Skeleton edge lengths (in normalized image coords)
-                for (a, b) in skeleton:
-                    if a < num_keypoints and b < num_keypoints:
-                        if kpts[i, a, 2] > 0 and kpts[i, b, 2] > 0:
-                            dx = kpts[i, a, 0] - kpts[i, b, 0]
-                            dy = kpts[i, a, 1] - kpts[i, b, 1]
-                            edge_lengths.setdefault((int(a), int(b)), []).append(
-                                float(np.sqrt(dx * dx + dy * dy))
+            # Image dims for instance-size scatter (cached for `_sample_image_meta`).
+            W = H = 0
+            if _PILImage is not None:
+                try:
+                    with _PILImage.open(str(img_path)) as im:
+                        W, H = im.size
+                except Exception:
+                    W = H = 0
+            if W > 0 and H > 0:
+                wh_cache[str(img_path)] = (W, H)
+                bw_px = boxes[:, 3] * W
+                bh_px = boxes[:, 4] * H
+                valid = (bw_px > 0) & (bh_px > 0)
+                if valid.any():
+                    sizes = np.sqrt(bw_px[valid] * bh_px[valid])
+                    counts = vis_per_inst[valid]
+                    inst_sizes_vs_vis.extend(
+                        zip(sizes.astype(float).tolist(),
+                            counts.astype(int).tolist(), strict=True)
+                    )
+
+            # --- Vectorized bbox-normalized heatmap accumulation ---
+            cx = boxes[:, 1]; cy = boxes[:, 2]
+            bw = boxes[:, 3]; bh = boxes[:, 4]
+            valid_box = (bw > 0) & (bh > 0)
+            if valid_box.any():
+                x0 = (cx - bw / 2)[valid_box, None]   # (M,1)
+                y0 = (cy - bh / 2)[valid_box, None]
+                bwv = bw[valid_box, None]
+                bhv = bh[valid_box, None]
+                kp = kpts[valid_box]                   # (M, K, 3)
+                kv = kp[:, :, 2] > 0
+                # Normalize joint positions to bbox; clip to [0, 0.999].
+                kx = np.clip((kp[:, :, 0] - x0) / bwv, 0, 0.999)
+                ky = np.clip((kp[:, :, 1] - y0) / bhv, 0, 0.999)
+                hx = (kx * HEAT).astype(np.int64)
+                hy = (ky * HEAT).astype(np.int64)
+                # Mask out unlabeled joints, then scatter-add.
+                hx_v = hx[kv]; hy_v = hy[kv]
+                if hx_v.size:
+                    np.add.at(heat, (hy_v, hx_v), 1.0)
+
+                # --- Vectorized skeleton edge lengths (image-normalized) ---
+                if skeleton_pairs.size:
+                    a_idx = skeleton_pairs[:, 0]
+                    b_idx = skeleton_pairs[:, 1]
+                    # (M, E)
+                    both_vis = kv[:, a_idx] & kv[:, b_idx]
+                    dx = kp[:, a_idx, 0] - kp[:, b_idx, 0]
+                    dy = kp[:, a_idx, 1] - kp[:, b_idx, 1]
+                    L = np.sqrt(dx * dx + dy * dy)
+                    for ei, (a, b) in enumerate(skeleton_pairs.tolist()):
+                        sel = both_vis[:, ei]
+                        if sel.any():
+                            edge_lengths.setdefault((int(a), int(b)), []).extend(
+                                L[sel, ei].astype(float).tolist()
                             )
 
+        # _sample_image_meta does its own PIL reads — pass cache to skip duplicates.
+        meta = _sample_image_meta(img_paths, wh_cache=wh_cache or None)
         stats[split] = {
             "n_images": len(img_paths),
             "n_instances": n_instances,
             "vis_counts": vis_counts.tolist(),
             "labeled_counts": labeled_counts.tolist(),
+            "v_breakdown": v_breakdown.tolist(),
             "heat": heat,
             "edge_lengths": edge_lengths,
+            "inst_sizes_vs_vis": inst_sizes_vs_vis,
+            "n_empty": n_empty,
+            "_img_meta": meta,
         }
 
     if not stats:
@@ -1134,18 +1718,23 @@ def _stats_keypoint(
         for sp in split_list
     )
 
-    fig = plt.figure(figsize=(20, 11))
+    dataset_name = data_cfg.get("dataset_name") or data_cfg.get("name") or "dataset"
+    fig = plt.figure(figsize=(20, 16))
     fig.suptitle(
-        f"{split_summary}  |  Total: {total_images:,} images / {total_inst:,} instances  |  Keypoint",
-        fontsize=12, fontweight="bold", y=0.99,
+        _format_suptitle(dataset_name, subset_active, subset_pct)
+        + f"\n{split_summary}  |  Total: {total_images:,} images / {total_inst:,} instances",
+        fontsize=12, fontweight="bold", y=0.995,
     )
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.55, wspace=0.38)
+    gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.85, wspace=0.40)
     ax0 = fig.add_subplot(gs[0, 0])
     ax1 = fig.add_subplot(gs[0, 1])
     ax2 = fig.add_subplot(gs[0, 2])
     ax3 = fig.add_subplot(gs[1, 0])
     ax4 = fig.add_subplot(gs[1, 1])
     ax5 = fig.add_subplot(gs[1, 2])
+    ax6 = fig.add_subplot(gs[2, 0])  # resolution scatter
+    ax7 = fig.add_subplot(gs[2, 1])  # pixel mean/std
+    ax8 = fig.add_subplot(gs[2, 2])  # empty-label panel
 
     # [0,0] Images per split
     _bar_images_per_split(ax0, split_list, [stats[s]["n_images"] for s in split_list])
@@ -1155,20 +1744,26 @@ def _stats_keypoint(
     ax1.set_title("Instances per Split", fontsize=11, fontweight="bold")
     ax1.set_xlabel("# instances")
 
-    # [0,2] Per-joint visibility rate
-    # Aggregate across splits
-    total_vis = np.zeros(num_keypoints, dtype=np.int64)
+    # [0,2] Per-joint v=0/v=1/v=2 stacked bar (% of instances).
+    total_vb = np.zeros((num_keypoints, 3), dtype=np.int64)
     total_lab = np.zeros(num_keypoints, dtype=np.int64)
     for sp in split_list:
-        total_vis += np.asarray(stats[sp]["vis_counts"], dtype=np.int64)
+        total_vb += np.asarray(stats[sp]["v_breakdown"], dtype=np.int64)
         total_lab += np.asarray(stats[sp]["labeled_counts"], dtype=np.int64)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        rate = np.where(total_lab > 0, total_vis / np.maximum(total_lab, 1), 0.0)
-    ax2.bar(range(num_keypoints), rate * 100.0, color="#4C72B0")
+    denom = np.maximum(total_lab, 1)
+    pct_v0 = total_vb[:, 0] / denom * 100.0
+    pct_v1 = total_vb[:, 1] / denom * 100.0
+    pct_v2 = total_vb[:, 2] / denom * 100.0
+    x = np.arange(num_keypoints)
+    ax2.bar(x, pct_v0, color="#cccccc", label="v=0 (unlabeled)")
+    ax2.bar(x, pct_v1, bottom=pct_v0, color="#f0ad4e", label="v=1 (occluded)")
+    ax2.bar(x, pct_v2, bottom=pct_v0 + pct_v1, color="#4C72B0", label="v=2 (visible)")
     ax2.set_ylim(0, 105)
-    ax2.set_title("Per-Joint Visibility Rate", fontsize=11, fontweight="bold")
+    ax2.set_title("Per-Joint Visibility (v=0/1/2 stacked)",
+                  fontsize=11, fontweight="bold")
     ax2.set_xlabel("joint index")
-    ax2.set_ylabel("% instances w/ visible")
+    ax2.set_ylabel("% of instances")
+    ax2.legend(fontsize=7.5, framealpha=0.9, loc="lower right")
 
     # [1,0] Spatial heatmap (bbox-normalized, aggregated across splits)
     heat = np.zeros_like(next(iter(stats.values()))["heat"])
@@ -1186,35 +1781,68 @@ def _stats_keypoint(
         for k, v in stats[sp]["edge_lengths"].items():
             agg_edges.setdefault(k, []).extend(v)
     if agg_edges:
-        # Flat histogram of all edges (color-coded first 8 edges separately)
-        top_edges = list(agg_edges.items())[:8]
-        for (a, b), lens in top_edges:
-            ax4.hist(lens, bins=30, alpha=0.35, label=f"{a}-{b}")
-        ax4.set_title("Skeleton Edge Lengths (top 8)", fontsize=11, fontweight="bold")
-        ax4.set_xlabel("normalized length")
-        ax4.set_ylabel("count")
-        ax4.legend(fontsize=7, framealpha=0.9)
+        # Violin distribution of length per skeleton edge — all edges, not top-8.
+        edge_keys = sorted(agg_edges.keys())
+        data = [agg_edges[k] for k in edge_keys]
+        labels_e = [f"{a}-{b}" for (a, b) in edge_keys]
+        try:
+            parts = ax4.violinplot(data, showmeans=False, showmedians=True, widths=0.85)
+            for pc in parts.get("bodies", []):
+                pc.set_facecolor("#4C72B0")
+                pc.set_alpha(0.55)
+        except Exception:
+            # Fallback: boxplot on degenerate input
+            ax4.boxplot(data, labels=labels_e)
+        ax4.set_xticks(range(1, len(labels_e) + 1))
+        ax4.set_xticklabels(labels_e, rotation=60, ha="right", fontsize=7)
+        ax4.set_title("Skeleton Edge Length Distribution (all edges)",
+                      fontsize=11, fontweight="bold")
+        ax4.set_ylabel("normalized length")
     else:
         ax4.axis("off")
         ax4.text(0.5, 0.5, "(no skeleton: set data.skeleton)",
                  ha="center", va="center", transform=ax4.transAxes, fontsize=10, color="#888")
 
-    # [1,2] Summary text panel
+    # [1,2] Summary text panel — table form to fit one cell.
     ax5.axis("off")
-    lines = ["Key Statistics (keypoint)\n"]
+    lines = ["Key Statistics (keypoint)", ""]
+    lines.append(f"{'split':<6}{'imgs':>8}{'inst':>8}{'vis%':>9}")
+    lines.append("-" * 32)
     for sp in split_list:
         s = stats[sp]
-        lines.append(f"[{sp}]")
-        lines.append(f"  images        {s['n_images']:>7,}")
-        lines.append(f"  instances     {s['n_instances']:>7,}")
         if s["n_instances"]:
-            mean_vis = np.mean(np.asarray(s["vis_counts"]) /
-                               max(s["n_instances"], 1)) * 100
-            lines.append(f"  mean vis rate  {mean_vis:>6.1f}%")
-        lines.append("")
-    ax5.text(0.02, 0.97, "\n".join(lines), transform=ax5.transAxes,
+            vis = np.mean(np.asarray(s["vis_counts"]) /
+                          max(s["n_instances"], 1)) * 100
+            vis_str = f"{vis:>8.1f}%"
+        else:
+            vis_str = f"{'-':>9}"
+        lines.append(f"{sp:<6}{s['n_images']:>8,}{s['n_instances']:>8,}{vis_str}")
+    lines.append("")
+    ax5.text(0.02, 0.98, "\n".join(lines), transform=ax5.transAxes,
              fontsize=9, va="top", ha="left", family="monospace",
              bbox=dict(boxstyle="round,pad=0.5", facecolor="whitesmoke", alpha=0.85))
+
+    # [2,0] Resolution scatter
+    _panel_resolution_scatter(ax6, stats, split_list, input_size=data_cfg.get("input_size"))
+    # [2,1] Per-channel pixel mean/std
+    _panel_pixel_stats(ax7, stats, split_list)
+    # [2,2] Empty-label panel (0 visible joints / no instances)
+    _panel_empty_labels(
+        ax8,
+        {sp: stats[sp]["n_empty"] for sp in split_list},
+        {sp: stats[sp]["n_images"] for sp in split_list},
+        title="Empty Images (0 visible joints)",
+    )
+
+    # Per-chart captions.
+    _chart_caption(ax0, "Total image count per split.")
+    _chart_caption(ax1, "Annotated person/instance count per split.")
+    _chart_caption(ax2, "Fraction of instances where each joint is marked visible. Rare joints → per-joint loss weights or drop.")
+    _chart_caption(ax3, "Joint locations normalized to bbox. Strong central peak = canonical pose; spread = pose diversity.")
+    _chart_caption(ax4, "Distribution of skeleton edge lengths. Wide spread = pose variety; narrow = canonical pose only.")
+    _chart_caption(ax6, "W×H of every image. Crosshair = model input_size.")
+    _chart_caption(ax7, "Sampled RGB stats; should match mean/std in 05_data.yaml.")
+    _chart_caption(ax8, "Instances with no visible joints — usually fully occluded; exclude from loss.")
 
     json_out = {
         "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -1222,6 +1850,30 @@ def _stats_keypoint(
         "num_keypoints": num_keypoints,
         "total_images": total_images,
         "total_instances": total_inst,
+        "empty_labels": {sp: stats[sp]["n_empty"] for sp in split_list},
+        "pixel_stats_rgb": {
+            sp: {
+                "mean": [round(v, 5) for v in stats[sp]["_img_meta"]["mean_rgb"]],
+                "std": [round(v, 5) for v in stats[sp]["_img_meta"]["std_rgb"]],
+                "range": "[0,1]",
+                "sample_n": stats[sp]["_img_meta"]["pixel_sample_n"],
+            } for sp in split_list
+        },
+        "resolution_scatter_sample": {
+            sp: [list(map(int, p)) for p in stats[sp]["_img_meta"]["scatter"]]
+            for sp in split_list
+        },
+        "task_specific": {
+            "keypoint": {
+                "v_breakdown_per_joint": {
+                    sp: stats[sp]["v_breakdown"] for sp in split_list
+                },
+                "instance_size_vs_visible_joints": {
+                    sp: [list(t) for t in stats[sp]["inst_sizes_vs_vis"][:512]]
+                    for sp in split_list
+                },
+            },
+        },
         "splits": {
             sp: {
                 "n_images": stats[sp]["n_images"],
@@ -1294,6 +1946,41 @@ def _describe_augmentation(training_cfg: dict) -> dict:
     return {k: aug[k] for k in keys if k in aug}
 
 
+def _resolve_dataset_root(data_cfg: dict, data_config_path: str | Path | None) -> Path | None:
+    """Resolve ``data_cfg['path']`` to an absolute Path, anchored at the data
+    config's directory when the value is relative. Returns None if unset.
+    """
+    raw = data_cfg.get("path") or data_cfg.get("root")
+    if not raw:
+        return None
+    p = Path(str(raw))
+    if p.is_absolute():
+        return p
+    if data_config_path:
+        anchor = Path(str(data_config_path)).resolve().parent
+        return (anchor / p).resolve()
+    return p.resolve()
+
+
+def _split_size_block(
+    split_sizes: dict[str, int],
+    full_sizes: dict[str, int] | None,
+) -> dict[str, dict]:
+    """Per-split block: always emits ``n_images``; when subset is active and
+    full size is known, also emits ``n_images_full`` + ``n_images_used``.
+    """
+    out: dict[str, dict] = {}
+    full_sizes = full_sizes or {}
+    for sp, n in (split_sizes or {}).items():
+        block: dict = {"n_images": int(n)}
+        full = full_sizes.get(sp)
+        if full is not None and int(full) > 0 and int(full) != int(n):
+            block["n_images_full"] = int(full)
+            block["n_images_used"] = int(n)
+        out[str(sp)] = block
+    return out
+
+
 def write_dataset_info(
     out_dir: Path,
     *,
@@ -1304,16 +1991,17 @@ def write_dataset_info(
     training_cfg: dict | None,
     class_names: dict[int, str],
     split_sizes: dict[str, int],
+    full_sizes: dict[str, int] | None = None,
 ) -> None:
     """Emit ``00_dataset_info.{md,json}`` with dataset provenance.
 
-    Self-describing run folders: any reader can tell which dataset a run
-    trained on without needing the original training config in hand.
+    Outputs are portable: only the dataset basename, a relative path from
+    ``out_dir`` to the dataset root, and config **basenames** are written
+    — no absolute paths.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     training_cfg = training_cfg or {}
     data_section = training_cfg.get("data", {}) or {}
-    # tensor_prep is authoritative for input_size / mean / std / normalize.
     from utils.config import resolve_tensor_prep
     backend = (training_cfg.get("training", {}) or {}).get("backend", "pytorch")
     tp = resolve_tensor_prep(training_cfg, backend=backend) or {}
@@ -1322,18 +2010,38 @@ def write_dataset_info(
     )
     mean = tp.get("mean") or data_cfg.get("mean") or data_section.get("mean")
     std = tp.get("std") or data_cfg.get("std") or data_section.get("std")
-    dataset_root = data_cfg.get("path") or data_cfg.get("root")
     gpu_augment = bool((training_cfg.get("training", {}) or {}).get("gpu_augment", False))
+
+    # Relative-path provenance (no absolutes leak into outputs).
+    abs_root = _resolve_dataset_root(data_cfg, data_config_path)
+    if abs_root is not None:
+        dataset_name = abs_root.name.rstrip("/") or str(abs_root)
+        try:
+            dataset_relpath = os.path.relpath(str(abs_root), start=str(out_dir))
+        except ValueError:
+            # Different drives on Windows etc. — fall back to basename.
+            dataset_relpath = abs_root.name
+    else:
+        dataset_name = data_cfg.get("dataset_name") or data_cfg.get("name") or "unknown"
+        dataset_relpath = None
+
+    data_config_basename = (
+        os.path.basename(str(data_config_path)) if data_config_path else None
+    )
+    training_config_basename = (
+        os.path.basename(str(training_config_path)) if training_config_path else None
+    )
 
     info = {
         "feature_name": feature_name,
-        "data_config": str(data_config_path) if data_config_path else None,
-        "training_config": str(training_config_path) if training_config_path else None,
-        "dataset_name": data_cfg.get("dataset_name") or data_cfg.get("name"),
-        "dataset_root": str(dataset_root) if dataset_root else None,
+        "dataset_name": dataset_name,
+        "dataset_relpath": dataset_relpath,
+        "data_config": data_config_basename,
+        "training_config": training_config_basename,
+        "task": _normalize_task(data_cfg.get("task")),
         "num_classes": len(class_names) if class_names else None,
         "class_names": {int(k): str(v) for k, v in (class_names or {}).items()},
-        "split_sizes": {str(k): int(v) for k, v in (split_sizes or {}).items()},
+        "splits": _split_size_block(split_sizes, full_sizes),
         "input_size": list(input_size) if input_size is not None else None,
         "mean": list(mean) if mean is not None else None,
         "std": list(std) if std is not None else None,
@@ -1348,7 +2056,7 @@ def write_dataset_info(
         } if tp else None,
         "augmentation": _describe_augmentation(training_cfg),
         "gpu_augment": gpu_augment,
-        "run_started": datetime.datetime.now().isoformat(timespec="seconds"),
+        "created_utc": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
         "git_sha": _git_sha(),
     }
 
@@ -1365,24 +2073,33 @@ def write_dataset_info(
             return str(v)
         return str(v)
 
+    splits_str = ", ".join(
+        f"{k}={v['n_images']}"
+        + (f" (full {v['n_images_full']})" if "n_images_full" in v else "")
+        for k, v in info["splits"].items()
+    )
+    dataset_line = f"`{info['dataset_name']}`"
+    if dataset_relpath:
+        dataset_line += f" (rel: `{dataset_relpath}`)"
+
     md_lines = [
         f"# Dataset info — {info['feature_name'] or 'unknown'}",
         "",
-        f"- **Feature folder**: `{info['feature_name']}`" if info["feature_name"] else "- **Feature folder**: _unknown_",
-        f"- **Data config**: `{info['data_config']}`",
-        f"- **Training config**: `{info['training_config']}`",
-        f"- **Dataset name**: `{info['dataset_name']}`",
-        f"- **Dataset root**: `{info['dataset_root']}`",
+        f"- **Feature folder**: `{info['feature_name'] or 'unknown'}`",
+        f"- **Dataset**: {dataset_line}",
+        f"- **Data config**: `{info['data_config'] or 'n/a'}`",
+        f"- **Training config**: `{info['training_config'] or 'n/a'}`",
+        f"- **Task**: `{info['task']}`",
         f"- **Num classes**: {info['num_classes']}",
         f"- **Class names**: {_fmt(info['class_names'])}",
-        f"- **Split sizes**: {_fmt(info['split_sizes'])}",
+        f"- **Splits**: {splits_str}",
         f"- **Input size**: {_fmt(info['input_size'])}",
         f"- **Normalization**: mean={_fmt(info['mean'])}, std={_fmt(info['std'])}",
         f"- **tensor_prep**: {_fmt(info['tensor_prep'])}",
         f"- **Training backend**: `{info['backend']}`",
         f"- **GPU augmentation**: `{info['gpu_augment']}`",
         f"- **Augmentation**: {_fmt(info['augmentation'])}",
-        f"- **Run started**: {info['run_started']}",
+        f"- **Created (UTC)**: {info['created_utc']}",
         f"- **Git SHA**: `{info['git_sha'] or 'n/a'}`",
         "",
     ]
@@ -1436,7 +2153,7 @@ def main():
     grid_cols = data_viz_cfg.get("grid_cols", 4)
     thickness = data_viz_cfg.get("thickness", 2)
     text_scale = data_viz_cfg.get("text_scale", 0.4)
-    dpi = data_viz_cfg.get("dpi", 120)
+    dpi = data_viz_cfg.get("dpi", 150)
 
     logger.info("Output: %s", out_dir)
 

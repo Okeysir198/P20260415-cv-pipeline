@@ -305,6 +305,7 @@ class HFDatasetStatsCallback(TrainerCallback):
                 s: (len(idxs) if idxs is not None else int(self.full_sizes.get(s, 0)))
                 for s, idxs in self.subsets.items()
             }
+            full_sizes = {s: int(v) for s, v in self.full_sizes.items()} if self.full_sizes else None
             write_dataset_info(
                 out_dir,
                 feature_name=self.feature_name,
@@ -314,7 +315,17 @@ class HFDatasetStatsCallback(TrainerCallback):
                 training_cfg=self.training_config,
                 class_names=class_names,
                 split_sizes=split_sizes,
+                full_sizes=full_sizes,
             )
+            if full_sizes and any(
+                idxs is not None and len(idxs) < int(full_sizes.get(s, 0))
+                for s, idxs in self.subsets.items()
+            ):
+                logger.warning(
+                    "HFDatasetStatsCallback: data.subset.* active — dataset stats reflect subset, "
+                    "not full splits. full=%s used=%s",
+                    full_sizes, split_sizes,
+                )
         except Exception as e:  # pragma: no cover
             logger.warning("HFDatasetStatsCallback: write_dataset_info failed — %s", e)
 
@@ -323,10 +334,27 @@ class HFDatasetStatsCallback(TrainerCallback):
             return control
 
         try:
+            # Compute subset_active / subset_pct from full vs used split sizes.
+            subset_active = False
+            subset_pct: float | None = None
+            if self.full_sizes:
+                ratios = []
+                for s, idxs in self.subsets.items():
+                    full_n = int(self.full_sizes.get(s, 0))
+                    if full_n <= 0:
+                        continue
+                    used_n = len(idxs) if idxs is not None else full_n
+                    if used_n < full_n:
+                        subset_active = True
+                    ratios.append(used_n / full_n)
+                if subset_active and ratios:
+                    subset_pct = round(float(np.mean(ratios)) * 100)
             generate_dataset_stats(
                 self.data_config, self.base_dir, class_names,
                 self.splits, out_dir, self.dpi,
                 subset_indices=self.subsets,
+                subset_active=subset_active,
+                subset_pct=subset_pct,
             )
         except Exception as e:  # pragma: no cover
             logger.warning("HFDatasetStatsCallback failed: %s", e)

@@ -292,7 +292,18 @@ class KeypointDataset(BaseDataset):
         self.data_config = data_config
         self.num_classes = data_config["num_classes"]
         self.class_names = data_config["names"]
-        self.num_keypoints = data_config["num_keypoints"]
+        # Accept either explicit `num_keypoints` or derive from `kpt_shape: [K, 3]`
+        # — both conventions appear in real configs.
+        nk = data_config.get("num_keypoints")
+        if nk is None:
+            kpt_shape = data_config.get("kpt_shape") or []
+            if isinstance(kpt_shape, (list, tuple)) and len(kpt_shape) >= 1:
+                nk = int(kpt_shape[0])
+        if not nk:
+            raise KeyError(
+                "data_config must define `num_keypoints` or `kpt_shape: [K, 3]`"
+            )
+        self.num_keypoints = int(nk)
         self.input_size = tuple(data_config["input_size"])  # (h, w)
 
         # Expected columns per label line: 5 (box) + num_keypoints * 3

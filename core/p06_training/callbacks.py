@@ -766,11 +766,16 @@ class DatasetStatsLogger(Callback):
                 def _full_len(split: str) -> int:
                     loader = getattr(trainer, f"{split}_loader", None)
                     ds = getattr(loader, "dataset", None) if loader is not None else None
-                    return len(ds) if ds is not None else 0
+                    if ds is None:
+                        return 0
+                    # Unwrap torch.utils.data.Subset to report underlying full split size.
+                    underlying = getattr(ds, "dataset", ds) if hasattr(ds, "indices") else ds
+                    return len(underlying)
                 split_sizes = {
                     s: (len(idxs) if idxs is not None else _full_len(s))
                     for s, idxs in subset_map.items()
                 }
+                full_sizes = {s: _full_len(s) for s in subset_map}
                 write_dataset_info(
                     out_dir,
                     feature_name=getattr(trainer, "_feature_name", None),
@@ -780,17 +785,46 @@ class DatasetStatsLogger(Callback):
                     training_cfg=getattr(trainer, "config", None),
                     class_names=class_names,
                     split_sizes=split_sizes,
+                    full_sizes=full_sizes,
                 )
+                if any(
+                    idxs is not None and len(idxs) < int(full_sizes.get(s, 0))
+                    for s, idxs in subset_map.items()
+                ):
+                    logger.warning(
+                        "DatasetStatsLogger: data.subset.* active — dataset stats reflect "
+                        "subset, not full splits. full=%s used=%s",
+                        full_sizes, split_sizes,
+                    )
             except Exception as e:
                 logger.warning("DatasetStatsLogger: write_dataset_info failed — %s", e)
 
             if _load_cached_stats(out_dir):
                 logger.info("DatasetStatsLogger: cache hit — skipping recompute (%s)", out_dir)
                 return
+            # Subset summary for suptitle annotation.
+            subset_active = False
+            subset_pct: float | None = None
+            try:
+                ratios = []
+                for s in active_splits:
+                    full_n = int(full_sizes.get(s, 0))
+                    if full_n <= 0:
+                        continue
+                    used_n = int(split_sizes.get(s, full_n))
+                    if used_n < full_n:
+                        subset_active = True
+                    ratios.append(used_n / full_n)
+                if subset_active and ratios:
+                    subset_pct = round(sum(ratios) / len(ratios) * 100)
+            except Exception:
+                pass
             generate_dataset_stats(
                 self.data_config, self.base_dir, class_names,
                 active_splits, out_dir, self.dpi,
                 subset_indices=subset_map,
+                subset_active=subset_active,
+                subset_pct=subset_pct,
             )
             stats_path = out_dir / "01_dataset_stats.png"
             wb_cb = next((c for c in trainer.callback_runner.callbacks if isinstance(c, WandBLogger)), None)

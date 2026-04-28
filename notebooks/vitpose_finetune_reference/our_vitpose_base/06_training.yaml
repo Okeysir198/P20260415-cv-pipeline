@@ -1,0 +1,142 @@
+# ViTPose-base on COCO-keypoints, via our in-repo pipeline + HF Trainer.
+# Parity target: notebooks/vitpose_finetune_reference/reference_vitpose_base/
+#                (HF docs port, top-down 2D pose, 17 COCO keypoints).
+#
+# Status: ⚠ BLOCKED. The `hf_keypoint` arch below is NOT yet registered in
+# `core/p06_models/`. See ./README.md for the wiring TODO. This config is
+# the contract that arch must satisfy when it lands.
+#
+# Once wired, run from repo root:
+#   uv run core/p06_training/train.py \
+#     --config notebooks/vitpose_finetune_reference/our_vitpose_base/06_training.yaml
+#
+# Artefacts land in
+#   notebooks/vitpose_finetune_reference/our_vitpose_base/runs/seed42/
+# matching the same observability tree as the segformer/detr reference runs.
+
+model:
+  arch: hf_keypoint                      # ⚠ to be added — see README TODO
+  pretrained: usyd-community/vitpose-base-simple
+  num_keypoints: 17
+  input_size: [256, 192]                  # (H, W) ViTPose default
+  # Decoder head reshapes per num_keypoints → tolerate size mismatch on reload.
+  ignore_mismatched_sizes: true
+  # ViTPose is top-down: it takes a person crop, not a full image. The
+  # data pipeline must crop with GT boxes (training) or detector boxes
+  # (deployment). When `top_down: true`, KeypointDataset is expected to
+  # emit `(image_crop, keypoints_in_crop, target_weight)` triples.
+  top_down: true
+  bbox_padding: 1.25                      # H:W aspect-aware expansion factor
+
+# HF AutoImageProcessor (VitPoseImageProcessor) owns rescale+normalize.
+tensor_prep:
+  input_size: [256, 192]
+  rescale: true
+  normalize: imagenet
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 32
+  num_workers: 8
+  prefetch_factor: 4
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+# Top-down pose typically uses lighter augmentation than detection —
+# half-body crops + scale/rotation + flip. Our pipeline supports the
+# standard set; mosaic/mixup are off (they don't apply to single-person
+# crops).
+augmentation:
+  library: torchvision
+  mosaic: false
+  mixup: false
+  fliplr: 0.5                             # uses flip_indices from 05_data.yaml
+  scale: [0.75, 1.25]
+  degrees: 30.0
+  translate: 0.0
+  shear: 0.0
+  brightness: 0.2
+  contrast: 0.2
+  saturation: 0.2
+  hue: 0.0
+  hsv_p: 0.0
+  perspective_p: 0.0
+
+training:
+  backend: hf
+  epochs: 30
+  optimizer: adamw
+  lr: 5.0e-4
+  weight_decay: 0.01
+  warmup_steps: 500
+  scheduler: cosine
+  per_device_train_batch_size: 32
+  per_device_eval_batch_size: 32
+  bf16: true
+  amp: false
+  gpu_augment: false
+  ema: false
+  # Heatmap target params — the registered `hf_keypoint` builder must
+  # consume these and synthesize Gaussian heatmaps at quarter resolution.
+  heatmap:
+    stride: 4                             # input/4 → 64x48 for 256x192
+    sigma: 2.0
+  metric_for_best_model: AP
+  greater_is_better: true
+
+  # Same observability tree as detection/seg/cls — keypoint viz routes
+  # through utils/viz.py::draw_keypoints (skeleton + dots).
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+  val_viz:
+    enabled: true
+    num_samples: 8
+    grid_cols: 2
+  best_viz:
+    enabled: true
+  error_analysis:
+    enabled: true
+
+loss:
+  # Heatmap MSE weighted by per-joint visibility mask. The trainer must
+  # zero-weight joints with visibility == 0.
+  type: keypoint_heatmap_mse
+  use_target_weight: true
+
+logging:
+  # IMPORTANT: no `run_name` key — HF Trainer uses it as the output
+  # folder name. See the repo CLAUDE.md "HF Trainer ghost-folder footgun".
+  wandb_project: smart-camera
+  save_dir: runs/seed42
+  report_to: none
+
+checkpoint:
+  save_best: true
+  metric: AP
+  mode: max
+  save_interval: 1
+
+evaluation:
+  # COCO OKS-AP via pycocotools keypoint eval. The keypoint metric module
+  # in core/p08_evaluation/ must expose this under the `AP` key for HF
+  # Trainer's `metric_for_best_model` lookup.
+  metric: oks_ap
+  oks_sigmas_from_data: true
+  score_threshold: 0.0
+  eval_strategy: epoch
+
+seed: 42

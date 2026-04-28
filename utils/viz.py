@@ -54,9 +54,13 @@ __all__ = [
     "fit_figsize",
     "shorten_label",
     "new_figure",
+    "truncate_label",
+    "safe_colorbar",
+    "wrap_suptitle",
     # Constants
     "COCO_SKELETON_EDGES",
     "PLOT_COLOR_CYCLE",
+    "PALETTE",
 ]
 
 
@@ -416,6 +420,9 @@ def apply_plot_style() -> None:
         "lines.linewidth": 2.0,
         "lines.markersize": 5,
         "font.family": "DejaVu Sans",
+        "font.size": 10,
+        "figure.facecolor": "white",
+        "savefig.pad_inches": 0.2,
         "axes.prop_cycle": mpl.cycler(color=PLOT_COLOR_CYCLE),
     })
     _PLOT_STYLE_APPLIED = True
@@ -468,3 +475,75 @@ def new_figure(n_items: int | None = None, **fig_kwargs: Any):
 
     figsize = fig_kwargs.pop("figsize", fit_figsize(n_items or 1))
     return plt.subplots(figsize=figsize, constrained_layout=True, **fig_kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Standardized chart helpers (data_preview / error_analysis)
+# ---------------------------------------------------------------------------
+
+
+def _build_palette(min_len: int = 20) -> list[str]:
+    """Stable categorical palette of length >= ``min_len``.
+
+    Reuses :data:`PLOT_COLOR_CYCLE` (supervision-derived) and tops up from
+    matplotlib's ``tab20`` so per-class colors stay consistent across image
+    overlays and matplotlib plots.
+    """
+    import matplotlib as mpl
+
+    palette = list(PLOT_COLOR_CYCLE)
+    if len(palette) < min_len:
+        cmap = mpl.colormaps["tab20"]
+        for i in range(cmap.N):
+            r, g, b, _ = cmap(i)
+            hex_c = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+            if hex_c not in palette:
+                palette.append(hex_c)
+            if len(palette) >= min_len:
+                break
+    return palette
+
+
+PALETTE: list[str] = _build_palette(20)
+
+
+# Expose ``apply_plot_style`` as a classmethod on the re-exported ``VizStyle``
+# so call sites can use ``VizStyle.apply_plot_style()`` without importing the
+# module-level function. Additive — does not shadow any existing attribute.
+if not hasattr(VizStyle, "apply_plot_style"):
+    VizStyle.apply_plot_style = staticmethod(apply_plot_style)  # type: ignore[attr-defined]
+if not hasattr(VizStyle, "PALETTE"):
+    VizStyle.PALETTE = PALETTE  # type: ignore[attr-defined]
+
+
+def truncate_label(name: str, max_len: int = 16) -> str:
+    """Truncate ``name`` with an ellipsis if longer than ``max_len``.
+
+    Companion to :func:`shorten_label` (default 18) with a tighter default
+    for dense legends and confusion-matrix tick labels.
+    """
+    s = str(name)
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
+
+
+def safe_colorbar(ax, mappable, label: str | None = None):
+    """Attach a colorbar with sensible spacing defaults.
+
+    Uses ``fraction=0.046, pad=0.04`` (the canonical "matches axes height"
+    pair) and applies ``label`` if given.
+    """
+    import matplotlib.pyplot as plt
+
+    cbar = plt.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04)
+    if label:
+        cbar.set_label(label)
+    return cbar
+
+
+def wrap_suptitle(text: str, width: int = 60) -> str:
+    """Wrap a long suptitle to ``width`` chars per line."""
+    import textwrap
+
+    return textwrap.fill(str(text), width=width)
