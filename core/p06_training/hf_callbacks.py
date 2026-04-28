@@ -84,8 +84,14 @@ def _run_topdown_keypoint_post_train(
     - 07_per_joint_performance: per-joint PCK@0.1, sorted ascending.
     - 08_confusion_left_right: 8 L↔R pairs × {correct, swapped, both wrong}
       heatmap (the workhorse diagnostic for symmetric-joint failures).
+    - 09_confidence_vs_error: per-joint score-vs-pixel-error scatter
+      (calibration check).
+    - 10_failure_mode_contribution: per-joint × {ok, near_miss, far_off,
+      low_score, ghost} heatmap (fractions of GT-visible joints).
     - 12_hardest_crops: top-12 worst val crops (highest mean pixel err)
       with GT|Pred skeletons side-by-side.
+    - 13_failure_mode_examples/: galleries grouped by failure type —
+      ``high_error/kp_<k>/``, ``ghost/kp_<k>/``, ``swapped_pair/<L>__<R>/``.
     - summary.{json,md}: compact metrics dump.
 
     No detection-shaped postprocess; everything goes through the same
@@ -188,7 +194,45 @@ def _run_topdown_keypoint_post_train(
         ds=val_ds, dpi=dpi,
     )
 
-    summary = {**pck, **ap_dict, "n_persons": int(n)}
+    # ---- 4) Sweeps that re-run the model. ----
+    try:
+        _chart_14_robustness_sweep(
+            model=model, val_ds=val_ds, ea_dir=ea_dir,
+            input_hw=(input_h, input_w), sigmas=sigmas, dpi=dpi,
+        )
+    except Exception as e:
+        logger.warning("robustness_sweep skipped: %s", e, exc_info=True)
+    try:
+        _chart_20_bbox_padding_sweep(
+            model=model, val_ds=val_ds, ea_dir=ea_dir,
+            input_hw=(input_h, input_w), sigmas=sigmas, dpi=dpi,
+        )
+    except Exception as e:
+        logger.warning("bbox_padding_sweep skipped: %s", e, exc_info=True)
+        import traceback as _tb
+        logger.warning(_tb.format_exc())
+
+    # Real COCO-shape OKS-AP via pycocotools (12-stat dict). Skips silently
+    # when pycocotools is missing.
+    coco_eval: dict[str, float] = {}
+    try:
+        from core.p08_evaluation.keypoint_metrics import (
+            compute_oks_ap_pycocotools,
+        )
+        coco_eval = compute_oks_ap_pycocotools(
+            pred_xy=pred_xy, pred_scores=pred_score,
+            gt_xy=gt_xy, weight=weight,
+            image_ids=sample_idx, sigmas=sigmas,
+            image_size=(input_h, input_w),
+        )
+    except Exception as e:
+        logger.warning("pycocotools OKS-AP skipped: %s", e, exc_info=True)
+
+    summary = {
+        **pck, **ap_dict,
+        "n_persons": int(n),
+        "coco_eval": coco_eval,
+    }
     (ea_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     md_lines = [
         "# Keypoint top-down error analysis",
@@ -206,7 +250,13 @@ def _run_topdown_keypoint_post_train(
         "- `01_overview.png` — headline metrics + per-joint err bar.",
         "- `07_per_joint_performance.png` — PCK@0.1 per joint sorted ascending.",
         "- `08_confusion_left_right.png` — symmetric-pair confusion heatmap.",
+        "- `09_confidence_vs_error.png` — heatmap-peak score vs pixel error scatter.",
+        "- `10_failure_mode_contribution.png` — per-joint × failure-mode fractions.",
         "- `12_hardest_crops.png` — top-12 worst predictions, GT vs Pred.",
+        "- `13_failure_mode_examples/` — galleries: high_error, ghost, swapped_pair.",
+        "- `14_robustness_sweep.png` — AP/PCK vs corruption (gaussian_blur,",
+        "  jpeg, brightness) at 3 severities.",
+        "- `20_bbox_padding_sweep.png` — AP/PCK vs bbox_padding ∈ {1.0..2.0}.",
     ]
     (ea_dir / "summary.md").write_text("\n".join(md_lines))
     logger.info("post-train (top-down keypoint): saved %s", ea_dir)
@@ -318,46 +368,437 @@ def _render_topdown_keypoint_error_analysis(
     img_err = (pixel_err * vis).sum(axis=1) / n_vis_per_img
     hardest = np.argsort(-img_err)[:12].tolist()
     pick_idx = [int(sample_idx[i]) for i in hardest]
-    if pick_idx:
-        # Render with the model again — re-uses the standard top-down grid path.
-        # Need access to a model handle. Pull from caller via closure isn't
-        # available; the caller already wrote best.png with a similar render.
-        # Instead, we render a static GT|Pred panel grid using already-decoded
-        # pred_xy/gt_xy in crop coords.
-        from core.p10_inference.supervision_bridge import _draw_keypoints_panel
+    from core.p10_inference.supervision_bridge import _draw_keypoints_panel
+    from utils.viz import classification_banner as _banner
 
-        inner = getattr(ds, "dataset", ds)
-        from utils.viz import classification_banner as _banner
-        style = VizStyle()
+    inner = getattr(ds, "dataset", ds)
+    style = VizStyle()
+
+    def _annotated_crop(h_idx: int, caption: str) -> np.ndarray | None:
+        real_idx = int(sample_idx[h_idx])
+        try:
+            item = ds[real_idx]
+        except Exception:
+            return None
+        crop = _denormalize_pixel_values(item["pixel_values"].cpu().numpy())
+        gt_kp = np.concatenate(
+            [gt_xy[h_idx], (weight[h_idx] > 0).astype(np.float32)[:, None] * 2.0],
+            axis=1,
+        )
+        pred_kp = np.concatenate([pred_xy[h_idx], pred_score[h_idx, :, None]], axis=1)
+        panel = _draw_keypoints_panel(crop, gt_kp, style.gt_color_rgb, style)
+        pred_style = VizStyle(kpt_visibility_threshold=0.3)
+        panel = _draw_keypoints_panel(panel, pred_kp, style.pred_color_rgb, pred_style)
+        panel = _banner(
+            panel, caption, style=style, position="top",
+            bg_color_rgb=(0, 0, 0), text_color_rgb=(255, 255, 255),
+        )
+        return panel
+
+    if pick_idx:
         panels = []
         for h in hardest:
             real_idx = int(sample_idx[h])
-            try:
-                item = ds[real_idx]
-            except Exception:
-                continue
-            crop = _denormalize_pixel_values(item["pixel_values"].cpu().numpy())
-            gt_kp = np.concatenate(
-                [gt_xy[h], (weight[h] > 0).astype(np.float32)[:, None] * 2.0],
-                axis=1,
-            )
-            pred_kp = np.concatenate([pred_xy[h], pred_score[h, :, None]], axis=1)
-            panel = _draw_keypoints_panel(crop, gt_kp, style.gt_color_rgb, style)
-            pred_style = VizStyle(kpt_visibility_threshold=0.3)
-            panel = _draw_keypoints_panel(panel, pred_kp, style.pred_color_rgb, pred_style)
-            panel = _banner(
-                panel,
-                f"#{real_idx}  err={img_err[h]:.1f}px",
-                style=style, position="top",
-                bg_color_rgb=(0, 0, 0), text_color_rgb=(255, 255, 255),
-            )
-            panels.append(panel)
+            ann = _annotated_crop(h, f"#{real_idx}  err={img_err[h]:.1f}px")
+            if ann is not None:
+                panels.append(ann)
         if panels:
             save_image_grid(
                 panels, ea_dir / "12_hardest_crops.png",
                 cols=min(4, len(panels)),
                 header="Hardest crops — top-12 by mean per-image pixel error",
             )
+
+    # ----- 09 confidence_vs_error — per-joint score vs pixel-error scatter -----
+    # Calibration check: a well-calibrated heatmap head produces high scores
+    # at correct predictions and low scores at wrong ones.
+    fig, ax = plt.subplots(1, 1, figsize=(7, 4.5))
+    cmap = plt.get_cmap("tab20", K)
+    for k in range(K):
+        m = vis[:, k] > 0
+        if not m.any():
+            continue
+        ax.scatter(
+            pred_score[m, k], pixel_err[m, k],
+            s=8, alpha=0.4, color=cmap(k), label=kp_names[k] if K <= 17 else None,
+        )
+    ax.axhline(0.1 * ref_size, ls="--", color="0.4", lw=0.8, label=f"PCK@0.1 = {0.1 * ref_size:.0f}px")
+    ax.set_xlabel("Heatmap-peak score (pred)")
+    ax.set_ylabel("Pixel error vs GT (px)")
+    ax.set_title("Per-joint confidence vs error")
+    if K <= 17:
+        ax.legend(fontsize=7, ncol=2, loc="upper right", framealpha=0.85)
+    fig.tight_layout()
+    fig.savefig(ea_dir / "09_confidence_vs_error.png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+    # ----- 10 failure_mode_contribution — per-joint × mode heatmap -----
+    # Modes (counts per joint, fractions of all GT-visible joints):
+    #   ok          : visible joint, pred error within PCK@0.1
+    #   far_off     : visible joint, pred error >= 2x PCK@0.1 threshold
+    #   near_miss   : visible joint, PCK@0.1 < err < 2x PCK@0.1 (recoverable)
+    #   low_score   : visible joint, pred score < 0.3 (likely missed)
+    #   ghost       : non-visible joint (GT v=0), pred score >= 0.5 (false alarm)
+    thr10 = 0.1 * ref_size
+    modes = ["ok", "near_miss", "far_off", "low_score", "ghost"]
+    counts = np.zeros((K, len(modes)), dtype=np.float32)
+    for k in range(K):
+        v = vis[:, k] > 0
+        nv = ~v
+        err_k = pixel_err[:, k]
+        sc_k = pred_score[:, k]
+        denom = max(v.sum(), 1)
+        counts[k, 0] = ((err_k < thr10) & v).sum() / denom
+        counts[k, 1] = ((err_k >= thr10) & (err_k < 2 * thr10) & v).sum() / denom
+        counts[k, 2] = ((err_k >= 2 * thr10) & v).sum() / denom
+        counts[k, 3] = ((sc_k < 0.3) & v).sum() / denom
+        counts[k, 4] = ((sc_k >= 0.5) & nv).sum() / max(nv.sum(), 1)
+    fig, ax = plt.subplots(figsize=(7, max(4, K * 0.3)))
+    im = ax.imshow(counts, aspect="auto", cmap="magma", vmin=0, vmax=1)
+    ax.set_xticks(range(len(modes)))
+    ax.set_xticklabels(modes, rotation=20)
+    ax.set_yticks(range(K))
+    ax.set_yticklabels(kp_names)
+    for i in range(K):
+        for j in range(len(modes)):
+            v = counts[i, j]
+            if v > 0.01:
+                ax.text(j, i, f"{v:.2f}", ha="center", va="center",
+                        color="white" if v < 0.55 else "black", fontsize=7)
+    fig.colorbar(im, ax=ax, fraction=0.04)
+    ax.set_title("Failure-mode contribution per joint (fractions)")
+    fig.tight_layout()
+    fig.savefig(ea_dir / "10_failure_mode_contribution.png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+    # ----- 13 failure_mode_examples/ — top-N crops per failure category -----
+    # Three galleries that surface systematic issues, organised so a reviewer
+    # can scroll through one folder per failure type:
+    #   high_error/kp_<k>/   joints with pixel error in the top-5% per joint
+    #   ghost/kp_<k>/        non-visible GT joints that pred fires hot on
+    #   swapped_pair/<a>__<b>/  L↔R swaps (PCK@0.1 satisfied if labels flipped)
+    gallery_dir = ea_dir / "13_failure_mode_examples"
+    gallery_dir.mkdir(parents=True, exist_ok=True)
+    n_gallery_per_class = 6
+
+    # high_error: per-joint hardest non-correct samples
+    he_dir = gallery_dir / "high_error"
+    for k in range(K):
+        v = vis[:, k] > 0
+        if not v.any():
+            continue
+        err_k = np.where(v, pixel_err[:, k], -np.inf)
+        idx_sorted = np.argsort(-err_k)[:n_gallery_per_class]
+        idx_sorted = [int(i) for i in idx_sorted if err_k[i] > thr10]
+        if not idx_sorted:
+            continue
+        kdir = he_dir / f"kp_{k:02d}_{kp_names[k]}"
+        kdir.mkdir(parents=True, exist_ok=True)
+        panels = []
+        for i in idx_sorted:
+            ann = _annotated_crop(i, f"{kp_names[k]} err={pixel_err[i, k]:.0f}px")
+            if ann is not None:
+                panels.append(ann)
+        if panels:
+            save_image_grid(
+                panels, kdir / "gallery.png",
+                cols=min(3, len(panels)),
+                header=f"high_error — {kp_names[k]} (top {len(panels)})",
+            )
+
+    # ghost: GT v=0 but pred score high
+    gh_dir = gallery_dir / "ghost"
+    for k in range(K):
+        nv = ~(vis[:, k] > 0)
+        if not nv.any():
+            continue
+        sc_k = np.where(nv, pred_score[:, k], -np.inf)
+        idx_sorted = np.argsort(-sc_k)[:n_gallery_per_class]
+        idx_sorted = [int(i) for i in idx_sorted if sc_k[i] >= 0.5]
+        if not idx_sorted:
+            continue
+        kdir = gh_dir / f"kp_{k:02d}_{kp_names[k]}"
+        kdir.mkdir(parents=True, exist_ok=True)
+        panels = []
+        for i in idx_sorted:
+            ann = _annotated_crop(i, f"ghost {kp_names[k]} score={pred_score[i, k]:.2f}")
+            if ann is not None:
+                panels.append(ann)
+        if panels:
+            save_image_grid(
+                panels, kdir / "gallery.png",
+                cols=min(3, len(panels)),
+                header=f"ghost — {kp_names[k]} (top {len(panels)})",
+            )
+
+    # swapped_pair: COCO 17-kpt L↔R pairs only
+    if K >= 17:
+        sp_dir = gallery_dir / "swapped_pair"
+        coco_lr_pairs = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12), (13, 14), (15, 16)]
+        for l, r in coco_lr_pairs:
+            both = (vis[:, l] > 0) & (vis[:, r] > 0)
+            if not both.any():
+                continue
+            d_lr = np.linalg.norm(pred_xy[:, l] - gt_xy[:, r], axis=-1)
+            d_rl = np.linalg.norm(pred_xy[:, r] - gt_xy[:, l], axis=-1)
+            d_ll = np.linalg.norm(pred_xy[:, l] - gt_xy[:, l], axis=-1)
+            d_rr = np.linalg.norm(pred_xy[:, r] - gt_xy[:, r], axis=-1)
+            swap_mask = both & (d_lr < thr10) & (d_rl < thr10) & ((d_ll >= thr10) | (d_rr >= thr10))
+            if not swap_mask.any():
+                continue
+            sample_indices = np.where(swap_mask)[0][:n_gallery_per_class]
+            pdir = sp_dir / f"{kp_names[l]}__{kp_names[r]}"
+            pdir.mkdir(parents=True, exist_ok=True)
+            panels = []
+            for i in sample_indices:
+                ann = _annotated_crop(int(i), f"swap {kp_names[l]}↔{kp_names[r]}")
+                if ann is not None:
+                    panels.append(ann)
+            if panels:
+                save_image_grid(
+                    panels, pdir / "gallery.png",
+                    cols=min(3, len(panels)),
+                    header=f"L↔R swap — {kp_names[l]}↔{kp_names[r]}",
+                )
+
+
+def _topdown_eval_pass(
+    model: Any, ds: Any, *, input_hw: tuple[int, int], sigmas: np.ndarray,
+    pixel_transform=None, batch_size: int = 32,
+) -> dict[str, float]:
+    """Run a single eval pass over `ds` and return AP/PCK metrics.
+
+    `pixel_transform`, if given, is called on the already-normalised
+    ``pixel_values`` tensor (shape B,3,H,W) per batch and must return a
+    same-shape tensor — used by the robustness sweep to inject
+    corruptions in input space.
+    """
+    import torch
+    from core.p08_evaluation.keypoint_metrics import (
+        decode_heatmaps_to_xy, compute_pck, compute_oks, compute_oks_ap,
+    )
+
+    device = next(model.parameters()).device
+    was_training = model.training
+    model.eval()
+    pred_xy_buf, gt_xy_buf, weight_buf, pixel_err_buf = [], [], [], []
+    n = len(ds)
+    input_h, input_w = input_hw
+    with torch.inference_mode():
+        for start in range(0, n, batch_size):
+            chunk = list(range(start, min(start + batch_size, n)))
+            items = [ds[i] for i in chunk]
+            px = torch.stack([it["pixel_values"] for it in items]).to(device)
+            if pixel_transform is not None:
+                px = pixel_transform(px)
+            tg = torch.stack([it["target_heatmap"] for it in items]).numpy()
+            tw = torch.stack([it["target_weight"] for it in items]).numpy()
+            out = model(pixel_values=px)
+            ph = out["heatmaps"] if isinstance(out, dict) else out.heatmaps
+            ph = ph.detach().float().cpu().numpy()
+            stride = int(input_h // ph.shape[2])
+            pxy, _ = decode_heatmaps_to_xy(ph, stride=stride)
+            gxy, _ = decode_heatmaps_to_xy(tg, stride=stride)
+            err = np.linalg.norm(pxy - gxy, axis=-1)
+            pred_xy_buf.append(pxy)
+            gt_xy_buf.append(gxy)
+            weight_buf.append(tw)
+            pixel_err_buf.append(err)
+
+    if was_training:
+        model.train()
+    pxy = np.concatenate(pred_xy_buf, axis=0)
+    gxy = np.concatenate(gt_xy_buf, axis=0)
+    w = np.concatenate(weight_buf, axis=0)
+    err = np.concatenate(pixel_err_buf, axis=0)
+    ref_size = float(np.sqrt(input_h * input_h + input_w * input_w))
+    pck = compute_pck(pxy, gxy, w, ref_size=ref_size)
+    oks = compute_oks(pxy, gxy, w, sigmas=sigmas, area=float(input_h * input_w))
+    ap = compute_oks_ap(oks)
+    return {**pck, **ap}
+
+
+def _chart_14_robustness_sweep(
+    model: Any, val_ds: Any, ea_dir: Path,
+    *, input_hw: tuple[int, int], sigmas: np.ndarray, dpi: int,
+) -> None:
+    """AP/PCK vs corruption (gaussian_blur, jpeg, brightness) at 3 severities."""
+    import json
+    import torch
+    import torch.nn.functional as F
+
+    _IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    _IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+
+    device = next(model.parameters()).device
+    mean_d = _IMAGENET_MEAN.to(device)
+    std_d = _IMAGENET_STD.to(device)
+
+    def _denorm_renorm(px: torch.Tensor, transform_rgb01) -> torch.Tensor:
+        rgb = px * std_d + mean_d                # → [0, 1]
+        rgb = rgb.clamp(0, 1)
+        rgb = transform_rgb01(rgb)
+        rgb = rgb.clamp(0, 1)
+        return (rgb - mean_d) / std_d
+
+    def _gaussian_kernel(sigma: float) -> torch.Tensor:
+        radius = max(1, int(round(3 * sigma)))
+        x = torch.arange(-radius, radius + 1, dtype=torch.float32, device=device)
+        k1d = torch.exp(-(x ** 2) / (2 * sigma ** 2))
+        k1d = k1d / k1d.sum()
+        k2d = (k1d[:, None] * k1d[None, :])
+        return k2d.view(1, 1, k2d.shape[0], k2d.shape[1])
+
+    def _gaussian_blur(sigma: float):
+        k = _gaussian_kernel(sigma)
+        kk = k.expand(3, 1, k.shape[2], k.shape[3])
+        pad = kk.shape[2] // 2
+        def fn(rgb: torch.Tensor) -> torch.Tensor:
+            return F.conv2d(rgb, kk, padding=pad, groups=3)
+        return fn
+
+    def _brightness(delta: float):
+        def fn(rgb: torch.Tensor) -> torch.Tensor:
+            return rgb + delta
+        return fn
+
+    def _jpeg(quality: int):
+        # Per-image cv2 JPEG round-trip; slow but accurate.
+        import cv2 as _cv2
+        def fn(rgb: torch.Tensor) -> torch.Tensor:
+            out = []
+            for i in range(rgb.shape[0]):
+                arr = (rgb[i].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                bgr = _cv2.cvtColor(arr, _cv2.COLOR_RGB2BGR)
+                ok, buf = _cv2.imencode(".jpg", bgr, [_cv2.IMWRITE_JPEG_QUALITY, quality])
+                if not ok:
+                    out.append(rgb[i]); continue
+                dec = _cv2.imdecode(buf, _cv2.IMREAD_COLOR)
+                rgb_dec = _cv2.cvtColor(dec, _cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+                out.append(torch.from_numpy(rgb_dec).permute(2, 0, 1).to(rgb.device))
+            return torch.stack(out, dim=0)
+        return fn
+
+    sweeps: dict[str, list[tuple[str, Any]]] = {
+        "gaussian_blur": [("σ=1", _gaussian_blur(1.0)),
+                          ("σ=2", _gaussian_blur(2.0)),
+                          ("σ=4", _gaussian_blur(4.0))],
+        "brightness":    [("Δ=-0.4", _brightness(-0.4)),
+                          ("Δ=-0.2", _brightness(-0.2)),
+                          ("Δ=+0.2", _brightness(+0.2))],
+        "jpeg":          [("q=50", _jpeg(50)),
+                          ("q=30", _jpeg(30)),
+                          ("q=10", _jpeg(10))],
+    }
+
+    # Baseline (no corruption).
+    baseline = _topdown_eval_pass(model, val_ds, input_hw=input_hw, sigmas=sigmas)
+
+    results: dict[str, dict[str, dict]] = {"_baseline": baseline}
+    for corruption, severities in sweeps.items():
+        results[corruption] = {}
+        for label, fn in severities:
+            results[corruption][label] = _topdown_eval_pass(
+                model, val_ds, input_hw=input_hw, sigmas=sigmas,
+                pixel_transform=lambda px, fn=fn: _denorm_renorm(px, fn),
+            )
+
+    # Plot: AP across corruptions/severities.
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    width = 0.25
+    corr_names = list(sweeps.keys())
+    severity_labels = ["mild", "moderate", "severe"]
+    x = np.arange(len(corr_names))
+    for i, sev in enumerate(severity_labels):
+        ap_vals = [results[c][list(sweeps[c])[i][0]]["AP"] for c in corr_names]
+        ax.bar(x + (i - 1) * width, ap_vals, width=width, label=sev,
+               color=["#a78bfa", "#7c3aed", "#4c1d95"][i])
+    ax.axhline(baseline["AP"], color="0.4", ls="--", lw=0.8,
+               label=f"baseline AP={baseline['AP']:.3f}")
+    ax.set_xticks(x)
+    ax.set_xticklabels(corr_names)
+    ax.set_ylabel("OKS-AP")
+    ax.set_title("Robustness sweep — AP under input corruption")
+    ax.legend(fontsize=8, framealpha=0.9)
+    fig.tight_layout()
+    fig.savefig(ea_dir / "14_robustness_sweep.png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    (ea_dir / "14_robustness_sweep.json").write_text(json.dumps(results, indent=2))
+
+
+def _chart_20_bbox_padding_sweep(
+    model: Any, val_ds: Any, ea_dir: Path,
+    *, input_hw: tuple[int, int], sigmas: np.ndarray, dpi: int,
+) -> None:
+    """AP/PCK vs bbox_padding ∈ {1.0, 1.1, 1.25, 1.5, 2.0}.
+
+    Critical for deployment: the production detector's bbox is rarely as
+    tight as the GT used in training, and the model's PCK degrades fast
+    when the crop becomes too loose or tight.
+    """
+    import json
+    from copy import copy as _copy
+
+    inner = getattr(val_ds, "dataset", val_ds)
+    if type(inner).__name__ != "KeypointTopDownDataset":
+        return  # sweep only meaningful for this dataset
+
+    paddings = [1.0, 1.1, 1.25, 1.5, 2.0]
+    results: dict[float, dict[str, float]] = {}
+
+    # Resolve the absolute dataset root once so re-instantiated datasets
+    # don't depend on an inherited base_dir attribute (BaseDataset doesn't
+    # keep one). `inner.img_dir` is `<root>/<split>[/images]` — peel back.
+    abs_root = inner.img_dir
+    if abs_root.name == "images":
+        abs_root = abs_root.parent.parent
+    else:
+        abs_root = abs_root.parent
+    abs_data_config = dict(inner.data_config)
+    abs_data_config["path"] = str(abs_root)
+
+    for pad in paddings:
+        # Re-instantiate the underlying dataset with the new padding.
+        from core.p05_data.keypoint_dataset import KeypointTopDownDataset
+        new_inner = KeypointTopDownDataset(
+            data_config=abs_data_config, split=inner.split,
+            processor=inner.processor, bbox_padding=pad,
+            heatmap_sigma=inner.heatmap_sigma, is_train=False,
+            base_dir=None,
+        )
+        # Wrap with the same Subset (if any) by index reuse so we evaluate the
+        # same person crops, just at different paddings.
+        if hasattr(val_ds, "indices"):
+            from torch.utils.data import Subset
+            ds_at_pad = Subset(new_inner, list(val_ds.indices))
+        else:
+            ds_at_pad = new_inner
+        results[pad] = _topdown_eval_pass(
+            model, ds_at_pad, input_hw=input_hw, sigmas=sigmas,
+        )
+
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    pads = list(results.keys())
+    ax.plot(pads, [results[p]["AP"] for p in pads], marker="o", lw=2,
+            color="#7c3aed", label="OKS-AP")
+    ax.plot(pads, [results[p]["pck_10"] for p in pads], marker="s", lw=1.5,
+            color="#3b82f6", label="PCK@0.1")
+    ax.plot(pads, [results[p]["pck_20"] for p in pads], marker="^", lw=1.5,
+            color="#10b981", label="PCK@0.2")
+    ax.set_xlabel("bbox_padding")
+    ax.set_ylabel("metric")
+    ax.set_xticks(pads)
+    ax.set_title("BBox-padding sweep — robustness to detector-bbox tightness")
+    ax.legend(framealpha=0.9)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(ea_dir / "20_bbox_padding_sweep.png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    (ea_dir / "20_bbox_padding_sweep.json").write_text(
+        json.dumps({str(p): r for p, r in results.items()}, indent=2)
+    )
 
 
 def _render_topdown_keypoint_grid(

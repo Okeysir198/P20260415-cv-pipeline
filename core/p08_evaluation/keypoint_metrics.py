@@ -144,6 +144,194 @@ def compute_oks_ap(
     }
 
 
+def compute_oks_ap_pycocotools(
+    pred_xy: np.ndarray,
+    pred_scores: np.ndarray,
+    gt_xy: np.ndarray,
+    weight: np.ndarray,
+    image_ids: np.ndarray | list,
+    *,
+    sigmas: np.ndarray | list[float] | None = None,
+    bbox_xywh: np.ndarray | None = None,
+    image_size: tuple[int, int] | None = None,
+) -> dict[str, float]:
+    """COCO-shape OKS-AP via the official pycocotools keypoint evaluator.
+
+    Builds a synthetic COCO ground-truth + predictions JSON in-memory
+    from the supplied per-person arrays, then runs ``COCOeval(..., "keypoints")``
+    and returns the canonical 12-stat dict the challenge reports.
+
+    The numpy-only `compute_oks_ap` in this module is the right metric for
+    in-loop checkpoint selection (fast, gradient-friendly to call); use this
+    function for **end-of-training parity numbers** against the challenge
+    leaderboard.
+
+    Args:
+        pred_xy:     ``(N, K, 2)`` predicted x, y in image-pixel coords.
+        pred_scores: ``(N, K)`` per-joint heatmap-peak scores.
+        gt_xy:       ``(N, K, 2)`` ground-truth x, y in image-pixel coords.
+        weight:      ``(N, K)`` GT visibility {0, 1, 2}.
+        image_ids:   ``(N,)`` integer COCO image_ids — must align across
+                     pred + GT. When the source dataset has no real
+                     image_id, pass `np.arange(N)` (each person treated
+                     as its own image — equivalent for top-down eval).
+        sigmas:      Per-joint sigmas (length K). Falls back to COCO 17-kpt.
+        bbox_xywh:   Optional ``(N, 4)`` bbox per person. Defaults to the
+                     full image size if `image_size` is given, else a
+                     unit-area placeholder (top-down crops have constant
+                     area so OKS scaling is unaffected).
+        image_size:  ``(H, W)`` of the crop / image used for default bbox.
+
+    Returns:
+        Dict with keys ``AP``, ``AP50``, ``AP75``, ``APm``, ``APl``,
+        ``AR``, ``AR50``, ``AR75``, ``ARm``, ``ARl``. Returns ``{}``
+        with a logged warning if pycocotools isn't installed.
+
+    Notes:
+        - COCO keypoint flat list is ``[x0,y0,v0,...]`` with v ∈ {0,1,2}.
+        - Predictions need a per-person ``score`` (max of per-joint scores).
+        - When all images share the same id, pycocotools collapses everything
+          into a single image — fine for top-down where each row is its own
+          person crop.
+    """
+    try:
+        from pycocotools.coco import COCO
+        from pycocotools.cocoeval import COCOeval
+    except ImportError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "pycocotools not installed — install with `uv pip install pycocotools` "
+            "to enable COCO-shape OKS-AP."
+        )
+        return {}
+
+    N, K, _ = pred_xy.shape
+    if sigmas is None:
+        if K == 17:
+            sigmas_arr = COCO_KP_SIGMAS
+        else:
+            raise ValueError(
+                f"Provide `sigmas` of length {K} (COCO defaults only cover 17 kpts)."
+            )
+    else:
+        sigmas_arr = np.asarray(sigmas, dtype=np.float32)
+
+    if image_size is not None:
+        H, W = int(image_size[0]), int(image_size[1])
+    else:
+        H = int(max(np.ceil(gt_xy[..., 1].max()), 1)) if gt_xy.size else 256
+        W = int(max(np.ceil(gt_xy[..., 0].max()), 1)) if gt_xy.size else 192
+    default_bbox = bbox_xywh if bbox_xywh is not None else np.tile(
+        np.array([0.0, 0.0, W, H], dtype=np.float32), (N, 1),
+    )
+    default_area = default_bbox[:, 2] * default_bbox[:, 3]
+
+    image_ids = [int(i) for i in image_ids]
+    unique_image_ids = sorted(set(image_ids))
+
+    # ---- Build COCO GT ----
+    gt_anns = []
+    for i in range(N):
+        kp_flat: list[float] = []
+        n_visible = 0
+        for k in range(K):
+            v = float(weight[i, k])
+            if v > 0:
+                kp_flat.extend([float(gt_xy[i, k, 0]), float(gt_xy[i, k, 1]), 2.0])
+                n_visible += 1
+            else:
+                kp_flat.extend([0.0, 0.0, 0.0])
+        gt_anns.append({
+            "id": int(i + 1),  # 1-indexed
+            "image_id": int(image_ids[i]),
+            "category_id": 1,
+            "keypoints": kp_flat,
+            "num_keypoints": int(n_visible),
+            "bbox": [float(x) for x in default_bbox[i]],
+            "area": float(default_area[i]),
+            "iscrowd": 0,
+        })
+
+    # COCO category for `person` with the keypoint list — names are required
+    # by pycocotools. We always use COCO's 17-kpt names; the sigmas array
+    # length is the source of truth for K.
+    _COCO_KP_NAMES = [
+        "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+        "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+        "left_wrist", "right_wrist", "left_hip", "right_hip",
+        "left_knee", "right_knee", "left_ankle", "right_ankle",
+    ]
+    if K == 17:
+        kp_names = _COCO_KP_NAMES
+    else:
+        kp_names = [f"kp{i:02d}" for i in range(K)]
+
+    coco_gt_dict = {
+        "info": {"description": "synthetic top-down keypoint eval"},
+        "licenses": [],
+        "images": [
+            {"id": iid, "width": W, "height": H, "file_name": f"{iid}.jpg"}
+            for iid in unique_image_ids
+        ],
+        "categories": [{
+            "id": 1, "name": "person", "supercategory": "person",
+            "keypoints": kp_names,
+            "skeleton": [],
+        }],
+        "annotations": gt_anns,
+    }
+
+    # ---- Build predictions ----
+    pred_anns = []
+    for i in range(N):
+        kp_flat = []
+        for k in range(K):
+            kp_flat.extend([
+                float(pred_xy[i, k, 0]), float(pred_xy[i, k, 1]),
+                float(pred_scores[i, k]),
+            ])
+        pred_anns.append({
+            "image_id": int(image_ids[i]),
+            "category_id": 1,
+            "keypoints": kp_flat,
+            "score": float(np.mean(pred_scores[i])),
+        })
+
+    # ---- Run COCOeval. pycocotools loads from path; use a temp file. ----
+    import json
+    import tempfile
+    from contextlib import redirect_stdout
+    from io import StringIO
+    with tempfile.TemporaryDirectory() as tmp:
+        from pathlib import Path as _P
+        gt_path = _P(tmp) / "gt.json"
+        gt_path.write_text(json.dumps(coco_gt_dict))
+        coco_gt = COCO(str(gt_path))
+        coco_dt = coco_gt.loadRes(pred_anns)
+        coco_eval = COCOeval(coco_gt, coco_dt, iouType="keypoints")
+        # Use our sigmas (override pycocotools' COCO 17-kpt defaults).
+        coco_eval.params.kpt_oks_sigmas = sigmas_arr.astype(np.float64)
+        # Buffer stdout — summarize() prints to console; we capture for the JSON.
+        buf = StringIO()
+        with redirect_stdout(buf):
+            coco_eval.evaluate()
+            coco_eval.accumulate()
+            coco_eval.summarize()
+    stats = coco_eval.stats  # length-10 array (AP/AR variants)
+    return {
+        "AP": float(stats[0]),
+        "AP50": float(stats[1]),
+        "AP75": float(stats[2]),
+        "APm": float(stats[3]),
+        "APl": float(stats[4]),
+        "AR": float(stats[5]),
+        "AR50": float(stats[6]),
+        "AR75": float(stats[7]),
+        "ARm": float(stats[8]),
+        "ARl": float(stats[9]),
+    }
+
+
 # COCO 17-keypoint default sigmas (used when 05_data.yaml omits oks_sigmas).
 COCO_KP_SIGMAS = np.array(
     [.026, .025, .025, .035, .035, .079, .079, .072, .072,
