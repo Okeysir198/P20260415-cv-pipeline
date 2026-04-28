@@ -165,6 +165,16 @@ def main() -> None:
             )
             logger.info("Training complete (HF Trainer).")
             logger.info("  Total epochs: %d", summary.get("total_epochs", 0))
+        elif backend == "paddle":
+            from core.p06_training.paddle_trainer import train_with_paddle
+
+            summary = train_with_paddle(
+                config_path=str(config_path),
+                overrides=overrides_or_none,
+                resume_from=args.resume,
+            )
+            logger.info("Training complete (PaddlePaddle).")
+            logger.info("  Total epochs: %d", summary.get("total_epochs", 0))
         elif backend == "custom":
             custom_class_path = training_cfg.get("custom_trainer_class")
             if not custom_class_path:
@@ -191,7 +201,7 @@ def main() -> None:
             logger.info("  Total epochs: %d", summary["total_epochs"])
         else:
             logger.error(
-                "Unknown training backend: '%s'. Valid values: pytorch, hf, custom", backend
+                "Unknown training backend: '%s'. Valid values: pytorch, hf, paddle, custom", backend
             )
             sys.exit(1)
 
