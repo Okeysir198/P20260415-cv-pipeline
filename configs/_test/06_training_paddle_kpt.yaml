@@ -1,0 +1,57 @@
+# Training config — PaddleDetection PP-TinyPose 128x96 (test fixture)
+#
+# Drives the `backend: paddle` keypoint (top-down pose) path. PP-TinyPose
+# is Baidu's mobile keypoint model — Lite-HRNet backbone, 17 COCO joints,
+# 128x96 input. Top-down: assumes person bboxes are pre-detected.
+#
+# NOTE: there is currently no keypoint dataset fixture in
+# `configs/_test/05_data_keypoint*.yaml` or `tests/fixtures/`. The matching
+# test (tests/test_p06_training_paddle_kpt.py) skips-with-reason on the
+# missing-fixture case as well as the missing-`.venv-paddle/` case.
+# This config is intentionally retained for documentation: it pins the
+# expected schema once the keypoint fixture lands.
+
+model:
+  arch: paddle-pp-tinypose
+  variant: tinypose_128x96
+  pretrained: null
+  num_keypoints: 17              # COCO person
+  input_size: [128, 96]          # [H, W]
+
+data:
+  # Placeholder — once a keypoint test fixture is checked in, point this
+  # at tests/configs/_test/05_data_keypoint.yaml (test_keypoint_100).
+  dataset_config: 05_data_keypoint.yaml
+  batch_size: 4
+  num_workers: 0
+  pin_memory: false
+  task: keypoint                 # paddle-backend dispatcher reads this
+
+training:
+  backend: paddle
+  epochs: 1
+  optimizer: adam
+  lr: 0.0005
+  weight_decay: 0.0
+  warmup_epochs: 0
+  scheduler: cosine
+  patience: 0
+  amp: false
+  grad_clip: 1.0
+  ema: false
+  val_viz: {enabled: false}
+  train_viz: {enabled: false}
+  aug_viz: {enabled: false}
+  data_viz: {enabled: false}
+
+logging:
+  wandb_project: null
+  save_dir: ../../tests/outputs/08_training_paddle_kpt
+
+checkpoint:
+  save_best: true
+  metric: val/PCK
+  mode: max
+  save_interval: 1
+
+seed: 42
