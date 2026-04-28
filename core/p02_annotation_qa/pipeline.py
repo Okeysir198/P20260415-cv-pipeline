@@ -301,7 +301,7 @@ def verify_image_task(
         for issue in data.get("issues", [])
     ]
 
-    result_copy["quality_score"] = float(data.get("quality_score", 0.0))
+    result_copy["quality_score"] = float(data.get("quality_score") or 0.0)
     result_copy["grade"] = data.get("grade", "")
     result_copy["suggested_fixes"] = [
         {
