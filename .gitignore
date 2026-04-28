@@ -55,3 +55,4 @@ build/
 .claude/scheduled_tasks.lock
 .claude/plugins/*/.claude-plugin/marketplace.json
 
+.claude/worktrees/
