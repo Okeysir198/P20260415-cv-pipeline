@@ -23,6 +23,7 @@ from __future__ import annotations
 import math
 import random
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import cv2
@@ -49,6 +50,66 @@ def _is_topdown_keypoint_dataset(ds: Any) -> bool:
     """Return True for ``KeypointTopDownDataset`` (or a Subset wrapping one)."""
     inner = getattr(ds, "dataset", ds)
     return type(inner).__name__ == "KeypointTopDownDataset"
+
+
+def _collect_source_bboxes(ds: Any, indices: np.ndarray) -> np.ndarray:
+    """Return ``(N, 4)`` source-image bboxes in pixel xywh for each sample idx.
+
+    For ``KeypointTopDownDataset`` we read the YOLO row + source image dims
+    out of ``_index`` directly without re-decoding pixels. The returned
+    bbox lives in **source-image** pixel coords (not crop coords) so
+    pycocotools' area-based bucketing reflects the real person size in
+    the original image. Falls back to a unit-area placeholder if the
+    underlying dataset can't supply it.
+    """
+    inner = getattr(ds, "dataset", ds)
+    n = len(indices)
+    out = np.zeros((n, 4), dtype=np.float32)
+    if type(inner).__name__ != "KeypointTopDownDataset":
+        return out
+    import cv2
+    img_dims_cache: dict[Path, tuple[int, int]] = {}
+    for i, idx in enumerate(indices):
+        try:
+            img_path, row = inner._index[int(idx)]
+        except (AttributeError, IndexError):
+            continue
+        if img_path in img_dims_cache:
+            ih, iw = img_dims_cache[img_path]
+        else:
+            im = cv2.imread(str(img_path))
+            if im is None:
+                continue
+            ih, iw = im.shape[:2]
+            img_dims_cache[img_path] = (ih, iw)
+        cx, cy, bw, bh = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+        x = (cx - bw / 2.0) * iw
+        y = (cy - bh / 2.0) * ih
+        w = bw * iw
+        h = bh * ih
+        out[i] = [max(0.0, x), max(0.0, y), max(1.0, w), max(1.0, h)]
+    return out
+
+
+def _resolve_skeleton_edges(
+    inner_ds: Any,
+) -> list[tuple[int, int]] | None:
+    """Pull skeleton edges from a dataset's `data_config["skeleton"]`.
+
+    Returns ``None`` when no skeleton is defined — callers pass that to
+    ``annotate_keypoints`` which then renders dots only.
+    """
+    cfg = getattr(inner_ds, "data_config", None) or {}
+    raw = cfg.get("skeleton") or []
+    edges: list[tuple[int, int]] = []
+    for pair in raw:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2:
+            try:
+                a, b = int(pair[0]), int(pair[1])
+                edges.append((a, b))
+            except (TypeError, ValueError):
+                continue
+    return edges or None
 
 
 def _denormalize_pixel_values(
@@ -219,11 +280,16 @@ def _run_topdown_keypoint_post_train(
         from core.p08_evaluation.keypoint_metrics import (
             compute_oks_ap_pycocotools,
         )
+        # Collect per-person source-image bboxes (in source pixel coords) so
+        # pycocotools can bucket persons into S / M / L by area. Without this
+        # every crop has identical area and APm/ARm collapse to -1.
+        bbox_xywh = _collect_source_bboxes(val_ds, sample_idx)
         coco_eval = compute_oks_ap_pycocotools(
             pred_xy=pred_xy, pred_scores=pred_score,
             gt_xy=gt_xy, weight=weight,
             image_ids=sample_idx, sigmas=sigmas,
             image_size=(input_h, input_w),
+            bbox_xywh=bbox_xywh,
         )
     except Exception as e:
         logger.warning("pycocotools OKS-AP skipped: %s", e, exc_info=True)
@@ -373,6 +439,7 @@ def _render_topdown_keypoint_error_analysis(
 
     inner = getattr(ds, "dataset", ds)
     style = VizStyle()
+    skeleton_edges = _resolve_skeleton_edges(inner)
 
     def _annotated_crop(h_idx: int, caption: str) -> np.ndarray | None:
         real_idx = int(sample_idx[h_idx])
@@ -386,9 +453,14 @@ def _render_topdown_keypoint_error_analysis(
             axis=1,
         )
         pred_kp = np.concatenate([pred_xy[h_idx], pred_score[h_idx, :, None]], axis=1)
-        panel = _draw_keypoints_panel(crop, gt_kp, style.gt_color_rgb, style)
+        panel = _draw_keypoints_panel(
+            crop, gt_kp, style.gt_color_rgb, style, skeleton_edges=skeleton_edges,
+        )
         pred_style = VizStyle(kpt_visibility_threshold=0.3)
-        panel = _draw_keypoints_panel(panel, pred_kp, style.pred_color_rgb, pred_style)
+        panel = _draw_keypoints_panel(
+            panel, pred_kp, style.pred_color_rgb, pred_style,
+            skeleton_edges=skeleton_edges,
+        )
         panel = _banner(
             panel, caption, style=style, position="top",
             bg_color_rgb=(0, 0, 0), text_color_rgb=(255, 255, 255),
@@ -861,6 +933,7 @@ def _render_topdown_keypoint_grid(
     gt_xy, _ = decode_heatmaps_to_xy(target_hms, stride=stride)
 
     style = VizStyle()
+    skeleton_edges = _resolve_skeleton_edges(inner)
     panels: list[np.ndarray] = []
     for i, (real_idx, _) in enumerate(samples):
         crop = _denormalize_pixel_values(samples[i][1]["pixel_values"].cpu().numpy())
@@ -873,11 +946,16 @@ def _render_topdown_keypoint_grid(
             [pred_xy[i], pred_scores[i, :, None]], axis=1,
         )
         from core.p10_inference.supervision_bridge import _draw_keypoints_panel
-        panel = _draw_keypoints_panel(crop, gt_kp, style.gt_color_rgb, style)
+        panel = _draw_keypoints_panel(
+            crop, gt_kp, style.gt_color_rgb, style, skeleton_edges=skeleton_edges,
+        )
         # Override threshold for pred dots: model heatmap-peak scores aren't
         # in the same range as visibility {0,1,2}; use a configured cutoff.
         pred_style = VizStyle(kpt_visibility_threshold=pred_score_threshold)
-        panel = _draw_keypoints_panel(panel, pred_kp, style.pred_color_rgb, pred_style)
+        panel = _draw_keypoints_panel(
+            panel, pred_kp, style.pred_color_rgb, pred_style,
+            skeleton_edges=skeleton_edges,
+        )
         # Caption: idx
         from utils.viz import classification_banner as _banner
         panel = _banner(panel, f"#{real_idx}", style=style, position="top",
@@ -921,6 +999,7 @@ def _render_gt_panel(
     class_names: dict[int, str],
     thickness: int = 2,
     text_scale: float = 0.4,
+    skeleton_edges: list[tuple[int, int]] | None = None,
 ) -> np.ndarray:
     """Task-aware single-panel GT rendering on a BGR image.
 
@@ -968,7 +1047,10 @@ def _render_gt_panel(
         # representative skeleton. TODO: per-instance overlay loop.
         if isinstance(kpts, np.ndarray) and kpts.ndim == 3 and kpts.shape[0] >= 1:
             kpts = kpts[0]
-        annotated_rgb = _draw_keypoints_panel(image_rgb, kpts, style.gt_color_rgb, style)
+        annotated_rgb = _draw_keypoints_panel(
+            image_rgb, kpts, style.gt_color_rgb, style,
+            skeleton_edges=skeleton_edges,
+        )
     else:
         annotated_rgb = image_rgb
 
@@ -1268,6 +1350,10 @@ class HFDataLabelGridCallback(TrainerCallback):
 
     def on_train_begin(self, args, state, control, **kwargs):
         class_names = _build_class_names(self.data_config)
+        skeleton_edges = (
+            _resolve_skeleton_edges(SimpleNamespace(data_config=self.data_config))
+            if self.task == "keypoint" else None
+        )
         for split in self.splits:
             try:
                 ds = build_dataset_for_viz(
@@ -1295,6 +1381,7 @@ class HFDataLabelGridCallback(TrainerCallback):
                 annotated.append(_render_gt_panel(
                     item["image"], target, self.task, class_names,
                     self.thickness, self.text_scale,
+                    skeleton_edges=skeleton_edges,
                 ))
             if not annotated:
                 continue
@@ -1350,6 +1437,10 @@ class HFAugLabelGridCallback(TrainerCallback):
 
     def on_train_begin(self, args, state, control, **kwargs):
         class_names = _build_class_names(self.data_config)
+        skeleton_edges = (
+            _resolve_skeleton_edges(SimpleNamespace(data_config=self.data_config))
+            if self.task == "keypoint" else None
+        )
         mean = np.asarray(
             self.data_config.get("mean", [0.485, 0.456, 0.406]),
             dtype=np.float32,
@@ -1411,6 +1502,7 @@ class HFAugLabelGridCallback(TrainerCallback):
                 annotated.append(_render_gt_panel(
                     aug_bgr, target, self.task, class_names,
                     self.thickness, self.text_scale,
+                    skeleton_edges=skeleton_edges,
                 ))
             if not annotated:
                 continue
@@ -1748,6 +1840,10 @@ class HFNormalizedInputPreviewCallback(TrainerCallback):
             self.data_config.get("std", [0.229, 0.224, 0.225]),
             dtype=np.float32,
         ).reshape(1, 1, 3)
+        skeleton_edges = (
+            _resolve_skeleton_edges(SimpleNamespace(data_config=self.data_config))
+            if self.task == "keypoint" else None
+        )
 
         # Val pipeline — resize + normalize, no aug. For detection we pass an
         # augmentation dict with the stateless flags off; for other tasks
@@ -1816,6 +1912,7 @@ class HFNormalizedInputPreviewCallback(TrainerCallback):
                 annotated.append(_render_gt_panel(
                     img_bgr, target, self.task, class_names,
                     self.thickness, self.text_scale,
+                    skeleton_edges=skeleton_edges,
                 ))
             except Exception as e:
                 logger.warning(

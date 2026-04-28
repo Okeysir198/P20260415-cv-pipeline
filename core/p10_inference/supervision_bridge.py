@@ -540,8 +540,14 @@ def _mask_overlay(
 
 def _draw_keypoints_panel(
     image: np.ndarray, kpts: np.ndarray, color_rgb: tuple[int, int, int], style: "VizStyle",
+    skeleton_edges: list[tuple[int, int]] | None = None,
 ) -> np.ndarray:
-    """Draw (K,2) or (K,3) keypoints on a panel with the given RGB color."""
+    """Draw (K,2) or (K,3) keypoints + optional skeleton edges on a panel.
+
+    Edges connecting any joint hidden by visibility (xy moved off-canvas in
+    :func:`utils.viz.annotate_keypoints`) are clipped naturally by cv2,
+    so passing the full edge list works for partial visibility.
+    """
     if kpts is None:
         return image.copy()
     arr = np.asarray(kpts, dtype=np.float32)
@@ -559,7 +565,8 @@ def _draw_keypoints_panel(
     # annotate_keypoints lives in utils.viz; import lazily to avoid cycle.
     from utils.viz import annotate_keypoints
     return annotate_keypoints(
-        image, xy, skeleton_edges=None, confidence=conf, style=style, color=color,
+        image, xy, skeleton_edges=skeleton_edges, confidence=conf,
+        style=style, color=color,
     )
 
 
