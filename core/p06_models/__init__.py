@@ -42,6 +42,13 @@ with contextlib.suppress(ImportError):
     import core.p06_models.timm_model  # noqa: F401
     import core.p06_models.timm_variants  # noqa: F401
 
+# Import PaddleClas classification module to trigger registration. The module
+# itself defers heavy paddle imports to build-time, so this block only guards
+# against missing torch-side deps in unusually minimal venvs (mirrors Unit 4's
+# paddle_detection block).
+with contextlib.suppress(ImportError):
+    import core.p06_models.paddle_classification  # noqa: F401
+
 # Import pose model modules to trigger registration (optional deps)
 with contextlib.suppress(ImportError):
     import core.p06_models.rtmpose  # noqa: F401
