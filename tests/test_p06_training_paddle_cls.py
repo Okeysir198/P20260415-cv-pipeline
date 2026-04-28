@@ -49,7 +49,7 @@ def test_paddle_cls_full_chain():
     for d in (OUT_DIR, EVAL_DIR, EXPORT_DIR, INFER_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
-    py = str(PADDLE_VENV)
+    py = sys.executable  # main venv: train.py imports torch; paddle dispatcher subprocess-hops into .venv-paddle/
     env = {**os.environ, "WANDB_MODE": "disabled", "CUDA_VISIBLE_DEVICES": "0"}
 
     # Train

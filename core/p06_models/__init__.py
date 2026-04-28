@@ -13,23 +13,27 @@ Example::
 
 import contextlib
 
-# Import model modules to trigger registration.
-# yolox is always available (only needs torch). HF-backed modules are
-# soft-imported so minimal venvs (e.g. .venv-yolox-official/) that omit
-# transformers / timm still get a usable yolox registry.
-import core.p06_models.yolox  # noqa: F401
-from core.p06_models.base import DetectionModel
-from core.p06_models.face_base import FaceDetector, FaceEmbedder
-from core.p06_models.face_registry import (
-    FACE_DETECTOR_REGISTRY,
-    FACE_EMBEDDER_REGISTRY,
-    build_face_detector,
-    build_face_embedder,
-)
-from core.p06_models.pose_base import PoseModel
-from core.p06_models.pose_registry import POSE_MODEL_REGISTRY, build_pose_model
+# Import model modules to trigger registration. All architecture modules are
+# soft-imported so paddle-only venvs (which lack torch) and minimal venvs
+# (.venv-yolox-official/, etc.) can still use whatever subset they have.
 from core.p06_models.registry import MODEL_REGISTRY, build_model
 
+with contextlib.suppress(ImportError):
+    from core.p06_models.base import DetectionModel  # noqa: F401
+with contextlib.suppress(ImportError):
+    from core.p06_models.face_base import FaceDetector, FaceEmbedder  # noqa: F401
+    from core.p06_models.face_registry import (  # noqa: F401
+        FACE_DETECTOR_REGISTRY,
+        FACE_EMBEDDER_REGISTRY,
+        build_face_detector,
+        build_face_embedder,
+    )
+with contextlib.suppress(ImportError):
+    from core.p06_models.pose_base import PoseModel  # noqa: F401
+    from core.p06_models.pose_registry import POSE_MODEL_REGISTRY, build_pose_model  # noqa: F401
+
+with contextlib.suppress(ImportError):
+    import core.p06_models.yolox  # noqa: F401  (torch — main venv)
 with contextlib.suppress(ImportError):
     import core.p06_models.dfine  # noqa: F401
     import core.p06_models.hf_classification_variants  # noqa: F401

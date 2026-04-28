@@ -78,7 +78,11 @@ uv pip install --python "$PYTHON" \
   "onnx>=1.17" \
   "onnxruntime-gpu>=1.20; platform_machine == 'x86_64'" \
   "onnxruntime>=1.20; platform_machine != 'x86_64'" \
-  "pandas>=2.2"
+  "pandas>=2.2" \
+  "imgaug>=0.4" \
+  "faiss-gpu-cu12>=1.10; platform_machine == 'x86_64'" \
+  "motmetrics>=1.4" \
+  "setuptools>=68,<81"  # ppdet uses pkg_resources, dropped in setuptools 81
 
 echo "Installing repo as editable so core/ + utils/ are importable..."
 uv pip install --python "$PYTHON" -e "$REPO_ROOT" --no-deps

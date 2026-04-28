@@ -117,7 +117,7 @@ def test_paddle_det_full_chain():
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     INFER_DIR.mkdir(parents=True, exist_ok=True)
 
-    py = str(PADDLE_VENV)
+    py = sys.executable  # main venv: train.py imports torch; paddle dispatcher subprocess-hops into .venv-paddle/
     env = {**os.environ, "WANDB_MODE": "disabled", "CUDA_VISIBLE_DEVICES": "0"}
 
     # 2. Train 1 epoch
