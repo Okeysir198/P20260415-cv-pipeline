@@ -69,6 +69,12 @@ with contextlib.suppress(ImportError):
 with contextlib.suppress(ImportError):
     import core.p06_models.mobilefacenet  # noqa: F401
 
+# Import paddle-native model modules to trigger registration. Heavy paddle
+# imports are deferred to each module's builder — the module itself is
+# import-safe in the main venv (only the builders fail without paddle).
+with contextlib.suppress(ImportError):
+    import core.p06_models.paddle_keypoint  # noqa: F401
+
 __all__ = [
     "build_model",
     "MODEL_REGISTRY",
