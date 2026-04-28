@@ -17,7 +17,7 @@ Upstream:
 | Side | State | Notes |
 |---|---|---|
 | `reference_vitpose_base/` | ✅ verified end-to-end + 10% learning curve | Tested with `.venv-notebook/` (`transformers 5.6.0.dev0`). Smoke (30 persons × 1 ep): trains in ~30 s, inference grid renders correct skeletons. 10% learning run (15k persons × 15 ep, 20 min): eval_loss 0.001286 → 0.001078 (min @ ep11, −16.2%), train loss 3.7× reduction — model fits cleanly, ep11 is the sweet spot. |
-| `our_vitpose_base/` | ✅ smoke-verified end-to-end | `@register_model("hf_keypoint")` + `HFKeypointModel` in `core/p06_models/hf_model.py`, `KeypointTopDownDataset` in `core/p05_data/keypoint_dataset.py`, keypoint branch in `core/p06_training/hf_trainer.py::_build_datasets`, `dump_coco_keypoints.py` for YOLO-pose dump. Smoke (28 train images, 9 val): `train_loss=0.00210, eval_loss=0.00224`. Post-train viz callbacks still emit warnings and skip — they assume YOLO-pose targets, not top-down crops; tracked as a follow-up. |
+| `our_vitpose_base/` | ✅ verified on 10% checkpoint | `@register_model("hf_keypoint")` + `HFKeypointModel` (core/p06_models/hf_model.py); `KeypointTopDownDataset` (core/p05_data/keypoint_dataset.py); keypoint branch in `core/p06_training/hf_trainer.py::_build_datasets`; `dump_coco_keypoints.py` for the YOLO-pose dump. Full per-run observability tree (data_preview/00..04, val_predictions/{epochs,best,error_analysis/{01,07-10,12,13,14,20,summary,coco_eval}}). Validated on the standalone reference's `learn10pct_seed42/best/` checkpoint: PCK@0.05=0.77, PCK@0.20=0.97, OKS-mean=0.82, in-loop AP=0.71, COCO AP=0.31 (APm=0.19, APl=0.56). |
 
 ## Layout
 
@@ -88,8 +88,8 @@ training:
   # Reference uses `loss` (eval heatmap MSE) for in-loop best selection.
   # Real metric is OKS-AP via offline pycocotools eval — wire under key
   # `AP` once the in-repo p08 keypoint metric lands.
-  metric_for_best_model: AP    # target — until the OKS-AP metric lands,
-                               # use `loss` (matches reference smoke today)
+  metric_for_best_model: AP    # OKS-AP now lands via core/p08_evaluation/
+                               # keypoint_metrics.py; this is the active metric.
 
 logging:
   report_to: none

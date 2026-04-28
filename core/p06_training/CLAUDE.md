@@ -103,14 +103,16 @@ runs/<ts>/
 │       │   │  detection: missed/, localization/, class_confusion/, duplicate/, background_fp/   (each /<class>/)
 │       │   │  classification: misclassified/<gt>__as__<pred>/, low_confidence_correct/<cls>/, high_confidence_wrong/<gt>__as__<pred>/
 │       │   │  segmentation: low_iou/<cls>/, missed/<cls>/, false_positive/<cls>/, boundary_error/<cls>/
-│       │   │  keypoint: high_error/kp_<k>/, occluded_misprediction/kp_<k>/, swapped_pair/<L>__<R>/
-│       ├── 14_robustness_sweep.{png,json}        metric vs corruption (gaussian_blur · jpeg · brightness · rotation), 3 severities
+│       │   │  keypoint: high_error/kp_<k>_<name>/, ghost/kp_<k>_<name>/, swapped_pair/<L>__<R>/
+│       ├── 14_robustness_sweep.{png,json}        metric vs corruption — det: blur/jpeg/brightness/rotation;
+│       │                                          kpt: blur/brightness/jpeg (no rotation — heatmap geometry breaks); 3 severities
 │       ├── 15_recoverable_map_vs_iou.png         (detection) per-mode Δ mAP across IoU 0.5→0.9
 │       ├── 16_confidence_attribution.png         (detection) FN causality: true_miss / under_conf / loc_fail
 │       ├── 17_boxes_per_image.png                (detection) crowdedness
 │       ├── 18_bbox_aspect_ratio.png              (detection) per-class log-scale w/h
 │       ├── 19_size_recall.png                    (detection) recall by COCO size bands
 │       └── 20_pixel_confusion_matrix.png         (segmentation) row-normalised C×C pixel cross-tab
+│           OR 20_bbox_padding_sweep.png          (keypoint top-down) AP/PCK vs bbox_padding ∈ {1.0..2.0}
 ├── test_predictions/           same flat 01..20 layout as val_predictions/error_analysis/
 └── test_results.json           HF Trainer metrics on the test split
 ```
@@ -180,9 +182,12 @@ Need EMA / per-component LR / custom callback registry?
 ├── Yes → backend: pytorch
 └── No
     │
-    Is the task detection / classification / segmentation?
-    ├── Yes → backend: hf   (DDP/DeepSpeed/bf16 available, HF Trainer output layout)
-    └── No  → backend: pytorch (pose/keypoint/face)
+    Is the task detection / classification / segmentation / keypoint (top-down)?
+    ├── Yes → backend: hf   (DDP/DeepSpeed/bf16 available, HF Trainer output layout,
+    │                        full data_preview/val_predictions/error_analysis tree
+    │                        for every supported task — keypoint goes through the
+    │                        `hf_keypoint` arch + `KeypointTopDownDataset`)
+    └── No  → backend: pytorch (pose/face — top-down kpt now works on HF too)
 ```
 
 ## Adding a new loss function

@@ -13,7 +13,7 @@ Most phases expose a CLI under `run_*.py`; p05/p06_models/p10 are library-only. 
 | **p02** annotation QA | `core/p02_annotation_qa/run_qa.py` | `05_data.yaml`, existing `labels/`, shared `02_annotation_quality.yaml` | `features/<f>/runs/<ts>_02_annotation_quality/{report.html, worst_images.json, fixes.json}` |
 | **p03** generative augment | `core/p03_generative_aug/run_generative_augment.py` | `05_data.yaml`, shared `03_generative_augment.yaml`, SAM3 + Flux services | `features/<f>/runs/<ts>_03_generative_aug/` (synthesised images + new labels) |
 | **p04** Label Studio bridge | `core/p04_label_studio/bridge.py` (subcommands `setup`, `import`, `export`) | `05_data.yaml`, LS REST API, `LS_API_KEY` env | LS project tasks on import; YOLO `.txt` over `labels/` on export |
-| **p05** data | library only — `YOLOXDataset`, `ClassificationDataset`, `SegmentationDataset`, `KeypointDataset` | `05_data.yaml` + split dirs | in-memory `Dataset` / `DataLoader` |
+| **p05** data | library only — `YOLOXDataset`, `ClassificationDataset`, `SegmentationDataset`, `KeypointDataset` (full-frame YOLO-pose), `KeypointTopDownDataset` (per-person crops + heatmap targets, used with `hf_keypoint`) | `05_data.yaml` + split dirs | in-memory `Dataset` / `DataLoader` |
 | **p06_models** | library only — `build_model(config)` | `config["model"]["arch"]` | `nn.Module` |
 | **p06_training** | `core/p06_training/train.py` | `06_training.yaml` (refs `05_data.yaml` by filename) | `<save_dir>/{best.pt, last.pt, test_results.json, data_preview/, val_predictions/{epochs/, best.png, error_analysis/}, test_predictions/{best.png, error_analysis/}}` — full 3-axis observability tree produced on `on_train_end` (both backends). See `core/p06_training/CLAUDE.md` for the artifact map. |
 | **p07** HPO | `core/p07_hpo/run_hpo.py` | `06_training.yaml` + shared `08_hyperparameter_tuning.yaml` | `features/<f>/runs/hpo/<ds>/{study.pkl, best_config.yaml}` |
@@ -68,7 +68,7 @@ Separate registries exist for:
 
 | Registry | File | Used by |
 |---|---|---|
-| `@register_model` | `p06_models/registry.py` | yolox, timm, hf_detection, hf_classification, hf_segmentation |
+| `@register_model` | `p06_models/registry.py` | yolox, timm, hf_detection, hf_classification, hf_segmentation, hf_keypoint |
 | `@register_pose_model` | `p06_models/pose_registry.py` | rtmpose, mediapipe_pose |
 | `@register_face_detector` | `p06_models/face_registry.py` | scrfd |
 | `@register_face_embedder` | `p06_models/face_registry.py` | mobilefacenet |
@@ -152,6 +152,7 @@ p06_training   →  <save_dir>/best.pt        (or last.pt if best wasn't saved)
 ## Out of scope for this file
 
 - **Per-feature workflows**: see `features/README.md` and each feature's own README.
+- **Keypoint top-down metrics + offline COCO AP**: see `core/p08_evaluation/keypoint_metrics.py` (numpy PCK/OKS + `compute_oks_ap_pycocotools` wrapper).
 - **Config schemas + CLI override syntax**: see `configs/CLAUDE.md`.
 - **Test-runner mechanics + fixtures**: see `tests/CLAUDE.md`.
 - **External service start/health**: see `services/CLAUDE.md`.

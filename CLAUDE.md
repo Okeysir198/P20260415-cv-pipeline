@@ -33,7 +33,10 @@ uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs
 #     05 duplicates_leakage · 06 learning_ability · 07 per_class_performance
 #     08 confusion_matrix · 09 confidence_calibration · 10 failure_mode_contribution
 #     11 failure_by_attribute · 12 hardest_images · 13 failure_mode_examples/
-#     14 robustness_sweep · 15..19 (detection-only) · 20 pixel_confusion_matrix (seg-only)
+#     14 robustness_sweep (det/cls/seg/kpt; per-task corruptions)
+#     15..19 detection-only · 20 pixel_confusion_matrix (seg) | bbox_padding_sweep (kpt)
+#     keypoint adds: 08 confusion_left_right · 09 confidence_vs_error
+#     10 failure_mode_contribution · 13 failure_mode_examples/{high_error,ghost,swapped_pair}/
 #     summary.md auto-iterates 01→20 with description + signal + suggested next step.
 #   Authoritative name map: `CHART_FILENAMES` in core/p08_evaluation/error_analysis_runner.py.
 #   No more sibling distribution_mismatch/, learning_ability/, or LQ_/DM_/LA_ prefixed files.
@@ -139,6 +142,7 @@ model = build_model(config)  # Dispatches by config["model"]["arch"]
 | `timm` | Classification | timm (any architecture via `timm_name`) |
 | `hf-classification` | Classification | HF Transformers |
 | `hf-segformer/mask2former/dinov2-seg` | Segmentation | HF Transformers |
+| `hf_keypoint` | Keypoint (top-down) | HF Transformers (ViTPose family) |
 
 ## Training Backends
 
@@ -218,6 +222,8 @@ import from any `features/<name>/code/`**.
 - **HF Trainer hard-fails on missing wandb/TB setup; pytorch backend swallows**. Without `wandb login` the HF Trainer's wandb callback raises `UsageError` during `trainer.train()` setup, killing the run before epoch 1. The tensorboard `SummaryWriter`'s background writer thread can also crash on a missing `<output_dir>/runs/<date-host>/` subdir race. The pytorch backend's `WandBLogger` logs the error and continues. Fix for HF-backend configs: set `logging.report_to: none` (disables both); flip to `wandb` or `["wandb","tensorboard"]` only after `wandb login` is verified on the host.
 - **`optimum-onnx` (not `optimum` itself) pins `transformers==4.57`** — conflicts with main venv's git transformers (5.5). Keep optimum-onnx export work in `.venv-export/`. Cross-venv checkpoint reload is **not** transparent: transformers 5.5 renamed 52 detection-model layer keys vs 4.57, so a main-venv-trained DETR checkpoint won't fully load under export venv's tf 4.57 (52 missing + 52 unexpected) — Optimum then exports a partially-random ONNX. For DETR-family, prefer `torch.onnx.export(..., dynamo=False)` directly in the main venv (dynamo mode fails on tf 5.5's `aten._is_all_true`), followed by `onnxruntime.quantization.quantize_static` for INT8 — both are version-agnostic.
 - **INT8 ONNX is slower than fp32 on ORT CUDA EP** — ORT has no real INT8 kernels for DETR-family ops and emulates via dequant/requant. Real INT8 speedup needs TensorRT EP engine build. Also: `onnxruntime.quantization.quantize_static` runs calibration on **CPU EP** with no `use_gpu` kwarg (the raw API is not Optimum's `ORTQuantizer`) — saturates every core for minutes on transformer models. For DETR-family, MinMax calibration on 32 images collapses mAP (→ ~0); needs percentile or QAT or excluding attention/LayerNorm ops to be useful.
+- **Keypoint top-down (`hf_keypoint`) emits a different sample shape** — `KeypointTopDownDataset.__getitem__` returns `{pixel_values, target_heatmap, target_weight}` (per-person crops with Gaussian heatmap targets), NOT the `{boxes, keypoints}` full-frame YOLO-pose dict that `KeypointDataset` returns. Anything new that consumes a keypoint dataset needs to branch on the type or you'll silently hit detection-shaped postprocess paths that produce zero predictions. The HF Trainer dispatcher (`_build_datasets`) and the post-train runner (`_run_topdown_keypoint_post_train`) are the canonical examples.
+- **`pycocotools` APm/APl needs real source bboxes** — every top-down crop has identical area (input_h × input_w), so passing the crop bbox to `compute_oks_ap_pycocotools` collapses every person into a single area bucket and APm/ARm come back as -1.0. `_collect_source_bboxes(...)` in `core/p06_training/hf_callbacks.py` reads the YOLO label row + source image dims out of `KeypointTopDownDataset._index` to recover real source-pixel bboxes. New keypoint metric callers must do the same or their challenge-shape AP numbers will be misleading.
 
 ## Code Style
 
