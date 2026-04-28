@@ -632,6 +632,22 @@ def train_with_hf(
 _SUPPORTED_HF_TASKS = {"detr", "classification", "segmentation", "keypoint"}
 
 
+def _wandb_credentials_available() -> bool:
+    """Best-effort check for wandb auth without raising. Returns True if
+    WANDB_API_KEY is set OR a logged-in `wandb` session exists in netrc/env.
+    Used to drop wandb from `report_to` rather than letting HF Trainer's
+    wandb callback hard-fail at trainer.train() setup.
+    """
+    if _os.environ.get("WANDB_API_KEY"):
+        return True
+    try:
+        import wandb  # noqa: PLC0415
+        # `wandb.api.api_key` reads from netrc/env without triggering a login.
+        return bool(getattr(wandb.api, "api_key", None))
+    except Exception:
+        return False
+
+
 def _validate_hf_backend_config(config: dict, output_format: str) -> None:
     """Fail fast on config combos the HF backend can't honour, rather than
     silently downgrading features and surprising the user at training time.
@@ -667,6 +683,16 @@ def _validate_hf_backend_config(config: dict, output_format: str) -> None:
                 "Detection: training.amp=True (fp16) overflows the DETR "
                 "decoder. Use training.bf16=True (RTX 5090/A100+) or "
                 "training.amp=False."
+            )
+        # D-FINE's distribution-focused loss stalls val mAP ~0.15 under bf16;
+        # RT-DETRv2 is bf16-safe. Block the foot-gun rather than letting the
+        # run silently under-train.
+        arch = (config.get("model", {}).get("arch", "") or "").lower()
+        if arch.startswith("dfine") and train_cfg.get("bf16", False):
+            hard_errors.append(
+                "D-FINE diverges under bf16 (val mAP stalls ~0.15). Set "
+                "training.bf16=False (use fp32) — fp16/amp also overflows. "
+                "RT-DETRv2 is bf16-safe; only D-FINE is affected."
             )
         aug_cfg = config.get("augmentation", {})
         if aug_cfg.get("mosaic", False):
@@ -899,11 +925,18 @@ def _config_to_training_args(
             save_dir = str((config_path.parent / save_dir).resolve())
     else:
         # features/<name>/configs/06_training.yaml → parent.parent.name = <name>
-        run_name = (
-            log_cfg.get("run_name")
-            or log_cfg.get("project")
-            or config_path.parent.parent.name
-        )
+        feature_name = config_path.parent.parent.name
+        explicit_run_name = log_cfg.get("run_name") or log_cfg.get("project")
+        run_name = explicit_run_name or feature_name
+        # Stale `logging.run_name` silently creates ghost folders under
+        # features/<run_name>/runs/ instead of the actual feature folder.
+        # Warn loudly so the user catches it before training finishes.
+        if explicit_run_name and explicit_run_name != feature_name:
+            logger.warning(
+                f"logging.run_name={explicit_run_name!r} differs from feature folder "
+                f"{feature_name!r} — runs will land in features/{run_name}/runs/ "
+                f"(likely a stale config). Drop run_name or set it to {feature_name!r}."
+            )
         save_dir = str(generate_run_dir(run_name, "06_training"))
 
     # Map optimizer name
@@ -929,6 +962,29 @@ def _config_to_training_args(
     # For non-detection tasks we keep the current concat-batch behaviour.
     eval_do_concat_batches = output_format != "detr"
 
+    # Resolve report_to up-front so we can drop wandb when the host has no
+    # credentials. HF Trainer's wandb callback hard-fails at trainer.train()
+    # setup if neither WANDB_API_KEY nor a logged-in netrc is found, killing
+    # the run before epoch 1. Detect early and fall back to tensorboard.
+    report_to = log_cfg.get("report_to") or (
+        ["wandb", "tensorboard"] if log_cfg.get("wandb_project") else "tensorboard"
+    )
+    if isinstance(report_to, str):
+        report_to_list = [report_to]
+    elif isinstance(report_to, (list, tuple)):
+        report_to_list = list(report_to)
+    else:
+        report_to_list = []
+    if any(r == "wandb" for r in report_to_list) and not _wandb_credentials_available():
+        logger.warning(
+            "wandb requested in logging.report_to but no credentials found "
+            "(WANDB_API_KEY unset and no logged-in wandb session). Dropping "
+            "wandb to avoid hard-failing trainer setup; tensorboard kept. "
+            "Run `wandb login` to re-enable."
+        )
+        report_to_list = [r for r in report_to_list if r != "wandb"]
+    report_to_resolved = report_to_list if report_to_list else "none"
+
     training_args = TrainingArguments(
         output_dir=save_dir,
         num_train_epochs=epochs,
@@ -949,9 +1005,7 @@ def _config_to_training_args(
         load_best_model_at_end=ckpt_cfg.get("save_best", False),
         metric_for_best_model=hf_metric if ckpt_cfg.get("save_best", False) else None,
         greater_is_better=ckpt_cfg.get("mode", "max") == "max" if ckpt_cfg.get("save_best", False) else None,
-        report_to=log_cfg.get("report_to") or (
-            ["wandb", "tensorboard"] if log_cfg.get("wandb_project") else "tensorboard"
-        ),
+        report_to=report_to_resolved,
         run_name=log_cfg.get("run_name"),
         seed=config.get("seed", 42),
         data_seed=config.get("seed", 42),

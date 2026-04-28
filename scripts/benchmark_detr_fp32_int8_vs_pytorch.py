@@ -9,8 +9,10 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -241,7 +243,24 @@ def bench_onnx(
     }
 
 
+def _verdict(int8: dict, fp32: dict, *, speedup_threshold: float = 1.2,
+             map_drop_threshold: float = 0.01) -> tuple[str, str]:
+    """Decide whether INT8 beats fp32. Returns (label, reason)."""
+    if not int8 or not fp32:
+        return "INT8 N/A", "no fp32 baseline"
+    speedup = fp32["latency_median_ms"] / int8["latency_median_ms"] if int8["latency_median_ms"] > 0 else 0.0
+    map_drop = fp32["map"] - int8["map"]
+    if speedup >= speedup_threshold and map_drop <= map_drop_threshold + 1e-6:
+        return "INT8 OK", f"{speedup:.2f}x speedup, mAP drop {map_drop:+.3f}"
+    return "INT8 NOT VIABLE", f"{speedup:.2f}x speedup, mAP drop {map_drop:+.3f} — use fp32"
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--strict", action="store_true",
+                        help="Exit nonzero if any INT8 backend is NOT VIABLE.")
+    args = parser.parse_args()
+
     assert torch.cuda.is_available(), "CUDA required"
     assert "CUDAExecutionProvider" in ort.get_available_providers(), "ORT CUDA EP required"
     print(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -297,9 +316,27 @@ def main() -> None:
             f"{r['map']:>.3f}  {r['map_50']:>.3f}   {r['map_75']:>.3f}"
         )
 
+    # INT8 viability verdict per arch — fp32 ONNX is the baseline.
+    print("\n" + "=" * 96)
+    print(f"{'Model':<22} {'Verdict':<20} {'Detail':<50}")
+    print("-" * 96)
+    failed: list[str] = []
+    by_arch: dict[str, dict[str, dict]] = {}
+    for r in all_results:
+        by_arch.setdefault(r["model"], {})[r["backend"]] = r
+    for name, runs in by_arch.items():
+        label, reason = _verdict(runs.get("onnx-int8", {}), runs.get("onnx-fp32", {}))
+        print(f"{name:<22} {label:<20} {reason}")
+        if label == "INT8 NOT VIABLE":
+            failed.append(name)
+
     out_json = REPO / "bench_detr_fp32_int8_pytorch.json"
     out_json.write_text(json.dumps(all_results, indent=2))
     print(f"\nResults → {out_json.relative_to(REPO)}")
+
+    if args.strict and failed:
+        print(f"\n--strict: {len(failed)} arch(s) failed INT8 viability — {failed}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

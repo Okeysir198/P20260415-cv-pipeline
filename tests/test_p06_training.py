@@ -318,6 +318,42 @@ def test_get_param_groups():
     print(f"    get_param_groups: {len(groups)} groups, {total_params} params (model has {model_params})")
 
 
+def test_yolox_no_double_sigmoid():
+    """Regression: YOLOX `_DecoupledHead` (yolox.py:553-555) and the official
+    Megvii adapter (decode_in_inference=True) BOTH sigmoid obj+cls inside the
+    model's eval-mode forward. `_postprocess_yolox` MUST NOT re-sigmoid —
+    doing so squashes scores into [0.25, 0.55] and makes conf_threshold
+    meaningless. Drive the postprocess with known *probability* inputs
+    (already-sigmoided) and assert the output score equals obj * cls
+    exactly. A re-sigmoid would replace 0.6 * 0.95 = 0.570 with
+    sigmoid(0.6) * sigmoid(0.95) = 0.646 * 0.721 = 0.466.
+    """
+    from core.p06_training.postprocess import _postprocess_yolox  # noqa: PLC0415
+
+    # Single anchor, single class. xywh in pixel space, obj=0.6, cls=0.95.
+    # Box: cx=100, cy=100, w=20, h=20 → xyxy = [90, 90, 110, 110].
+    pred = torch.tensor([[[100.0, 100.0, 20.0, 20.0, 0.6, 0.95]]])
+    results = _postprocess_yolox(pred, conf_threshold=0.0, nms_threshold=0.5)
+    assert len(results) == 1 and results[0]["scores"].size == 1, \
+        f"expected 1 detection, got {results[0]}"
+    score = float(results[0]["scores"][0])
+    expected = 0.6 * 0.95  # 0.570
+    double_sigmoid = float(torch.sigmoid(torch.tensor(0.6)) *
+                           torch.sigmoid(torch.tensor(0.95)))  # ~0.466
+    assert abs(score - expected) < 1e-5, (
+        f"YOLOX postprocess returned score={score:.4f}, expected {expected:.4f}. "
+        f"If a sigmoid was re-applied the score would be ~{double_sigmoid:.4f}."
+    )
+    # And conf_threshold must filter using the un-sigmoided product.
+    filtered = _postprocess_yolox(pred, conf_threshold=0.55, nms_threshold=0.5)
+    assert filtered[0]["scores"].size == 1, (
+        "conf_threshold=0.55 should KEEP score=0.57 — got 0 detections, "
+        "indicating the product was incorrectly re-sigmoided to ~0.47."
+    )
+    print(f"    yolox postprocess score={score:.3f} (expected {expected:.3f}; "
+          f"double-sigmoid would be {double_sigmoid:.3f})")
+
+
 if __name__ == "__main__":
     run_all([
         ("train_2_epochs", test_train_2_epochs),
@@ -336,4 +372,5 @@ if __name__ == "__main__":
         ("build_model_yolox", test_build_model_yolox),
         ("build_model_unknown", test_build_model_unknown),
         ("get_param_groups", test_get_param_groups),
+        ("yolox_no_double_sigmoid", test_yolox_no_double_sigmoid),
     ], title="Test 04: Training (2 epochs)")

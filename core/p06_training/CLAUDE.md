@@ -290,6 +290,11 @@ Gotchas
   the correct weights — so `test_results.json` is trustworthy even when
   `pytorch_model.bin` is not. Any analyzer-rerun script must load from the
   best-checkpoint folder, not the root.
+  **Downstream reload is now safe**: `core/p08_evaluation/evaluate.py`,
+  `core/p09_export/export.py`, and `core/p10_inference/predictor.py` all run
+  `utils.checkpoint.strip_hf_prefix` before `load_state_dict(strict=False)`
+  and warn on unexpected-key counts. The hazard above is specifically HF
+  Trainer's in-process `_load_best_model`, which bypasses our reload sites.
 - **`self.save_dir` is an instance attribute** (set inside `_build_callbacks`)
   so `_finalize_training` and `_build_pytorch_training_config` can read it
   after the main loop. Do not convert it back to a local variable — it's the

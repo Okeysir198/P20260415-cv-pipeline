@@ -104,7 +104,15 @@ def load_model(model_path: str, data_config: dict, device: torch.device) -> torc
                      checkpoint.get("model",
                      checkpoint.get("state_dict", checkpoint)))
         if isinstance(state_dict, dict):
-            model.load_state_dict(state_dict, strict=False)
+            from utils.checkpoint import strip_hf_prefix  # noqa: PLC0415
+            state_dict = strip_hf_prefix(state_dict)
+            _, unexpected = model.load_state_dict(state_dict, strict=False)
+            if unexpected:
+                import logging  # noqa: PLC0415
+                logging.getLogger(__name__).warning(
+                    "load_state_dict: %d unexpected keys (first 3: %s)",
+                    len(unexpected), list(unexpected)[:3],
+                )
     else:
         if hasattr(checkpoint, "state_dict"):
             model.load_state_dict(checkpoint.state_dict(), strict=False)

@@ -139,10 +139,12 @@ class DetectionPredictor:
         conf_threshold: float = 0.5,
         iou_threshold: float = 0.45,
         device: Any | None = None,
+        providers: list[str] | None = None,
     ) -> None:
         self.model_path = Path(model_path)
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
+        self._onnx_providers = providers
 
         # --- Parse data config ---
         self.class_names: dict[int, str] = {
@@ -539,7 +541,14 @@ class DetectionPredictor:
                 "model", checkpoint.get("model_state_dict")
             )
             if state_dict is not None:
-                model.load_state_dict(state_dict)
+                from utils.checkpoint import strip_hf_prefix  # noqa: PLC0415
+                state_dict = strip_hf_prefix(state_dict)
+                missing, unexpected = model.load_state_dict(state_dict, strict=False)
+                if unexpected:
+                    logger.warning(
+                        f"load_state_dict: {len(unexpected)} unexpected keys "
+                        f"(first 3: {list(unexpected)[:3]})"
+                    )
             model.to(self.device)
             model.eval()
             self._output_format = getattr(model, "output_format", "yolox")
@@ -558,6 +567,8 @@ class DetectionPredictor:
                 state_dict = checkpoint["model_state_dict"]
 
         if state_dict is not None:
+            from utils.checkpoint import strip_hf_prefix  # noqa: PLC0415
+            state_dict = strip_hf_prefix(state_dict)
             minimal_config = {
                 "model": {
                     "arch": "yolox",
@@ -613,13 +624,19 @@ class DetectionPredictor:
         if not Path(path).exists():
             raise FileNotFoundError(f"ONNX model not found: {path}")
 
-        # CUDA-only: fail loudly if the GPU EP isn't available. No silent
-        # CPU fallback — operators must fix the underlying GPU issue.
-        if "CUDAExecutionProvider" not in ort.get_available_providers():
+        # CUDA-only by default: fail loudly if the GPU EP isn't available. No
+        # silent CPU fallback — operators must fix the underlying GPU issue.
+        # Caller can override via the predictor's `providers` kwarg (e.g.
+        # ["TensorrtExecutionProvider", "CUDAExecutionProvider"]).
+        available = ort.get_available_providers()
+        requested = self._onnx_providers or ["CUDAExecutionProvider"]
+        unknown = [p for p in requested if p not in available]
+        if unknown:
             raise RuntimeError(
-                "GPU required: onnxruntime-gpu not available. "
-                "Install onnxruntime-gpu, not onnxruntime-cpu."
+                f"Requested ONNX providers not available: {unknown}. "
+                f"Available: {available}. Install the matching onnxruntime "
+                f"build (onnxruntime-gpu ships CUDA + TensorRT EPs)."
             )
-        session = ort.InferenceSession(path, providers=["CUDAExecutionProvider"])
+        session = ort.InferenceSession(path, providers=requested)
         logger.info("ONNX Runtime providers: %s", session.get_providers())
         return session

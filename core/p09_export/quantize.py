@@ -21,11 +21,39 @@ import numpy as np
 import onnxruntime as ort
 from onnxruntime.quantization import (
     CalibrationDataReader,
+    CalibrationMethod,
     QuantFormat,
     QuantType,
     quantize_dynamic,
     quantize_static,
 )
+
+# DETR-family ops where INT8 emulation degrades accuracy without a real speedup
+# on ORT CUDA EP (no native INT8 kernels for transformer attention/normalisation).
+# Skipped from static quantization when an arch hint signals DETR-family. List is
+# conservative — these are the ops where MinMax/percentile calibration most often
+# collapses pred_boxes to NaN or all-zero scores on D-FINE / RT-DETRv2.
+_DETR_OPS_EXCLUDE_TYPES: list[str] = [
+    "LayerNormalization",
+    "Softmax",
+    "Gather",
+]
+
+
+def _is_detr_family(arch_hint: str | None, onnx_path: str) -> bool:
+    """Detect DETR-family from an explicit arch string or the ONNX filename."""
+    candidates = []
+    if arch_hint:
+        candidates.append(arch_hint.lower())
+    candidates.append(Path(onnx_path).stem.lower())
+    return any("dfine" in c or "rtdetr" in c or "detr" in c for c in candidates)
+
+
+_CALIBRATION_METHOD_MAP = {
+    "minmax": CalibrationMethod.MinMax,
+    "entropy": CalibrationMethod.Entropy,
+    "percentile": CalibrationMethod.Percentile,
+}
 
 from loguru import logger
 
@@ -228,6 +256,9 @@ class ModelQuantizer:
         save_path: str | None = None,
         max_calibration_samples: int = 100,
         quantization_preset: str | None = None,
+        calibration_method: str = "percentile",
+        arch_hint: str | None = None,
+        nodes_to_exclude: list[str] | None = None,
     ) -> str:
         """Apply static INT8 quantization with calibration data.
 
@@ -253,10 +284,39 @@ class ModelQuantizer:
 
         preset = _resolve_preset(quantization_preset)
 
+        # Calibration method gating: MinMax on DETR-family collapses mAP to ~0
+        # (verified on D-FINE / RT-DETRv2). Refuse MinMax for DETR-family
+        # rather than silently producing a broken model.
+        calib_key = (calibration_method or "percentile").lower()
+        if calib_key not in _CALIBRATION_METHOD_MAP:
+            raise ValueError(
+                f"Unknown calibration_method='{calibration_method}'. "
+                f"Choose one of: {sorted(_CALIBRATION_METHOD_MAP)}"
+            )
+        is_detr = _is_detr_family(arch_hint, self.onnx_path)
+        if calib_key == "minmax" and is_detr:
+            raise ValueError(
+                "MinMax calibration on DETR-family models collapses mAP to ~0 "
+                "(see CLAUDE.md). Use calibration_method='percentile' (default) "
+                "or 'entropy', and pass arch_hint to keep the DETR op-exclude "
+                "list active."
+            )
+        # Auto-exclude transformer ops on DETR-family unless caller pinned a list.
+        if nodes_to_exclude is None and is_detr:
+            ops_excluded = list(_DETR_OPS_EXCLUDE_TYPES)
+            logger.warning(
+                f"DETR-family detected (arch_hint={arch_hint!r}); excluding op types "
+                f"{ops_excluded} from INT8 quantization. ORT CUDA EP has no real "
+                f"INT8 kernels for these ops; emulation is often slower than fp32."
+            )
+        else:
+            ops_excluded = []
+
         logger.info("Applying static INT8 quantization...")
         logger.info("  Input:  %s", self.onnx_path)
         logger.info("  Output: %s", save_path)
         logger.info("  Calibration samples: %d", max_calibration_samples)
+        logger.info("  Calibration method: %s", calib_key)
         if quantization_preset:
             logger.info("  Preset: %s", quantization_preset)
 
@@ -277,14 +337,27 @@ class ModelQuantizer:
             max_samples=max_calibration_samples,
         )
 
-        quantize_static(
+        static_kwargs = dict(
             model_input=self.onnx_path,
             model_output=save_path,
             calibration_data_reader=calib_reader,
             quant_format=preset["quant_format"],
             weight_type=preset["weight_type"],
             activation_type=preset["activation_type"],
+            calibrate_method=_CALIBRATION_METHOD_MAP[calib_key],
         )
+        # Only pass nodes_to_exclude when something actually needs excluding —
+        # ORT treats `op_types_to_quantize` and `nodes_to_exclude` as separate
+        # filters; we use op-type-level exclusion via `op_types_to_exclude`
+        # (pre-onnxruntime 1.19 named `nodes_to_exclude` accepts node names
+        # only, so we route through the op-type-keyed `extra_options` dict
+        # which is supported across versions).
+        if ops_excluded:
+            static_kwargs["extra_options"] = {"OpTypesToExcludeOutputQuantization": ops_excluded}
+        if nodes_to_exclude:
+            static_kwargs["nodes_to_exclude"] = list(nodes_to_exclude)
+
+        quantize_static(**static_kwargs)
 
         _log_size_change("Static quantization complete", self.onnx_path, save_path)
 

@@ -116,6 +116,14 @@ def parse_args() -> argparse.Namespace:
         choices=["avx512_vnni", "arm64", "avx2"],
         help="Quantization hardware preset (default: from config or avx512_vnni)",
     )
+    parser.add_argument(
+        "--calibration-method",
+        type=str,
+        default="percentile",
+        choices=["minmax", "entropy", "percentile"],
+        help="Static-INT8 calibration method (default: percentile). MinMax is "
+             "blocked for DETR-family models — collapses mAP to ~0.",
+    )
     return parser.parse_args()
 
 
@@ -181,11 +189,22 @@ def _load_model_from_checkpoint(
     if isinstance(state_dict, dict) and any(k.startswith("module.") for k in state_dict):
         state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
 
+    # HF-backend checkpoints save with `hf_model.` prefix — strip before load_state_dict
+    # or every weight loads randomly under strict=False.
+    if isinstance(state_dict, dict):
+        from utils.checkpoint import strip_hf_prefix  # noqa: PLC0415
+        state_dict = strip_hf_prefix(state_dict)
+
     # Build model from checkpoint config or training config
     build_config = checkpoint["config"] if isinstance(checkpoint, dict) and "config" in checkpoint else training_config
     model = build_model(build_config)
     if isinstance(state_dict, dict):
-        model.load_state_dict(state_dict, strict=False)
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        if unexpected:
+            logger.warning(
+                f"load_state_dict: {len(unexpected)} unexpected keys "
+                f"(first 3: {list(unexpected)[:3]}) — checkpoint may not match arch {arch}"
+            )
     model = model.to(device)
     model.eval()
     logger.info("Model loaded via registry: %s (num_classes=%d)", arch, num_classes)
@@ -309,7 +328,11 @@ def main():
             if data_config_path:
                 data_config = load_config(data_config_path)
                 cal_loader = build_dataloader(data_config, split="val", batch_size=1)
-                quant_path = quantizer.quantize_static(cal_loader)
+                quant_path = quantizer.quantize_static(
+                    cal_loader,
+                    calibration_method=args.calibration_method,
+                    arch_hint=arch,
+                )
             else:
                 logger.warning("Static quantization requires data config. Falling back to dynamic.")
                 quant_path = quantizer.quantize_dynamic()
