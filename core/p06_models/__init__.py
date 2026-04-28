@@ -37,6 +37,13 @@ with contextlib.suppress(ImportError):
     import core.p06_models.hf_segmentation_variants  # noqa: F401
     import core.p06_models.rtdetr  # noqa: F401
 
+# PaddleSeg segmentation registry (Unit 6). Heavy `paddle` / `paddleseg`
+# imports are deferred to the builder bodies, but the registration module
+# itself is torch-only — soft-import for parity with the HF block above so
+# any future torch-import-time failure can't break minimal venvs.
+with contextlib.suppress(ImportError):
+    import core.p06_models.paddle_segmentation  # noqa: F401
+
 # Import timm model module to trigger registration (optional dep)
 with contextlib.suppress(ImportError):
     import core.p06_models.timm_model  # noqa: F401
