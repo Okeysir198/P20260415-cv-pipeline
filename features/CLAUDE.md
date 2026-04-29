@@ -16,9 +16,11 @@
 | `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | 🔄 Phase B: YOLOX-M + RT-DETRv2-R50 PASS, D-FINE-M 50ep rerun pending · Phase C RT-DETRv2-R50 60ep complete 2026-04-22 (mAP@0.5=0.6844) |
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
-| `safety-poketenashi` | Orchestrator | 🔧 Pretrained only | dwpose_384_pose (det_rate=1.0) | — | 🔄 pipelines done |
-| `safety-poketenashi-phone-usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |
-| `safety-point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 v1 rule-based MVP (DWPose + per-frame direction classifier + L→R→F sequence matcher) |
+| `safety-poketenashi_phone_usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |
+| `safety-poketenashi_point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 v1.1 robustness pass landed |
+| `safety-poketenashi_hands_in_pockets` | Pose rule | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |
+| `safety-poketenashi_stair_diagonal` | Pose rule (stateful) | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |
+| `safety-poketenashi_no_handrail` | Pose rule + zone | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |
 | `ppe-helmet_detection` | Detection | 🎯 Fine-tune | melihuzunoglu_yolov11_ppe.pt | 0.105 | ⬜ not started |
 | `ppe-shoes_detection` | Detection | 🎯 Fine-tune | none (no foot detector) | 0.000 | ⬜ not started |
 | `access-face_recognition` | Face recognition | 🔧 Pretrained only | yunet + sface (rank-1=1.0) | — | 🔄 pipelines done |
@@ -153,6 +155,102 @@ Outputs: `metrics.json`, `confusion_matrix.png`, per-class PR curves, `error_bre
 - Worst class + per-class AP gap
 - Size bucket where recall collapses
 - Top 3 failure cases
+
+---
+
+## Deploying multiple rules on one camera
+
+When five `safety-poketenashi_*` rules + `access-zone_intrusion` + ppe-helmet-detection + safety-fall-detection share a single camera feed, naive deployment creates N separate ORT sessions and N separate trackers. Recommended pipeline:
+
+```
+   RTSP / file ingest (~30 fps)
+            │
+            ▼
+   Person detector  (yolo11n.pt, shared)
+            │
+            ▼
+   ByteTrack  (one tracker, persistent track IDs)
+            │
+            ▼
+   Pose backend  (DWPose ONNX, ONE shared ORT session — cache via core/p10_inference/pose_cache.py [Phase 2])
+            │
+            ├──────────────────────────────────────────────────────────────────┐
+            ▼                                                                  │
+   Per-track keypoints (COCO-17)                                               │
+            │                                                                  │
+            ├─► HandsInPocketsDetector ──► `hands_in_pockets`                  │
+            ├─► StairSafetyDetector ────► `stair_diagonal` (stateful per track)│
+            ├─► HandrailDetector + zone ► `no_handrail`                        │
+            ├─► PointingDirectionDetector ► CrosswalkSequenceMatcher           │
+            │                                  └─► `point_and_call_done` / `missing_directions`
+            │                                                                  ▼
+            │                                                  Per-track FSM (APPROACH → CROSSING → DONE)
+            ▼                                                                  │
+   Phone-usage detection model (independent backbone)                          │
+            └──► `phone_usage` bbox                                            │
+                                                                               ▼
+                                                         Event sink: MQTT / REST / time-series DB
+```
+
+### When to enable ByteTrack
+
+ENABLE if any of the following hold:
+- More than one worker can be in frame at once.
+- A rule is **stateful** per person (`safety-poketenashi_stair_diagonal`, `safety-poketenashi_point_and_call` matchers).
+- You need per-worker compliance logs (audit trail by track ID).
+
+ByteTrack is configured in every feature's `configs/10_inference.yaml::tracker:` block, but the YAML stub alone is inert. It's only wired when the caller passes `VideoProcessor(enable_tracking=True, tracker_config=cfg["tracker"])` — see `core/p10_inference/video_inference.py:166-172`. Today this is opt-in per app_demo tab; for production, default it ON.
+
+### When to use person detector + pose detector together
+
+The DWPose ONNX is top-down: it needs per-person crops, not the whole frame. So the answer is "always together" if you use DWPose. The pattern:
+
+```python
+# Canonical pattern at features/safety-poketenashi_point_and_call/code/pose_backend.py:_DWPoseAdapter (lines 98-167)
+person_boxes = person_detector(image_bgr)             # YOLO11n
+for box in person_boxes:
+    crop = warp_affine(image_bgr, box)                 # 384×288 affine warp
+    keypoints, scores = dwpose_session.run(crop)
+    # ... feed keypoints to per-rule detectors
+```
+
+If you're using MediaPipe or hf_keypoint instead, those handle full-frame internally — no person detector needed. For far-field cameras (< 15% of frame height) only DWPose top-down works reliably.
+
+### Shared pose backbone (key Phase 2 work)
+
+Today each `safety-poketenashi_*` feature creates its own `onnxruntime.InferenceSession`. When five run on the same stream that's 5× VRAM and 5× the inference cost. Recommended consolidation:
+
+1. Create `core/p10_inference/pose_cache.py` with a singleton dict keyed by `onnx_path`.
+2. All `_DWPoseAdapter` instances pull from the cache.
+3. The orchestrator harness (a new module, e.g. `core/p10_inference/multi_rule_pipeline.py`) instantiates one cache, one ByteTrack, one pose session, then fans the keypoints out to N rule detectors.
+
+This is **not implemented yet** — feature Phase 2 work, ticketed in the unified multi-task model section below.
+
+### Per-track FSM template
+
+Pose-rule violation alerts (`missing_directions`, etc.) require a state machine per worker:
+
+```
+IDLE  ── person enters approach polygon ──▶  APPROACH
+APPROACH  ── person enters cross polygon ──▶  CROSSING
+              └─ on entry to CROSSING:
+                   if matcher.last_match within `window_seconds`:  emit `compliant`
+                   else:                                           emit `missing_directions`
+CROSSING  ── person exits cross polygon ──▶  DONE
+DONE  ── track aged out / new track ──▶  IDLE
+```
+
+`safety-poketenashi_point_and_call` is the canonical example — see its CLAUDE.md "Deployment Architecture" section for full detail. Other rules can use the same skeleton.
+
+### Site calibration checklist
+
+For each new camera install:
+
+1. **Polygon zones** (image-normalized [0,1] coords): cross_zone, approach_zone, handrail_zones (if applicable). Draw with the existing zone-annotation tool from `access-zone_intrusion`.
+2. **Body-speed thresholds** (`max_body_speed_px_per_sec` in `safety-poketenashi_point_and_call`): record a worker walking and measure hip pixel velocity; depends on camera distance/zoom.
+3. **Pose backend choice**: DWPose for far-field, MediaPipe for close-up + low-power.
+4. **Tracker fps** (`tracker.frame_rate`): match camera output fps.
+5. **Per-rule thresholds**: each rule's `pose_rules.<rule>:` block. Calibrate against 10-20 minutes of recorded site footage (good + bad examples).
 
 ---
 
