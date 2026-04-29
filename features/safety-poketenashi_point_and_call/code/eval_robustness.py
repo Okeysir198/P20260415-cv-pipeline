@@ -74,8 +74,16 @@ def _classify_events(events_t: list[float], windows: list[list[float]]) -> dict:
     return {"tp": tp, "fp": fp, "fn": fn, "matched_windows": sorted(matched)}
 
 
-def _process_video(name: str, video_path: Path, windows: list[list[float]]) -> dict:
+def _process_video(
+    name: str,
+    video_path: Path,
+    windows: list[list[float]],
+    approach_zone_norm: list[list[float]] | None = None,
+    cross_zone_norm: list[list[float]] | None = None,
+) -> dict:
     o = PointAndCallOrchestrator(_CONFIG)
+    if approach_zone_norm is not None or cross_zone_norm is not None:
+        o.set_zones(approach_zone_norm, cross_zone_norm)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return {"error": "could not open video"}
@@ -238,7 +246,11 @@ def main() -> None:
             continue
         windows = meta.get("gesture_windows", [])
         print(f"  RUN   {name}  windows={windows}")
-        per_video[name] = _process_video(name, path, windows)
+        per_video[name] = _process_video(
+            name, path, windows,
+            approach_zone_norm=meta.get("approach_zone_norm"),
+            cross_zone_norm=meta.get("cross_zone_norm"),
+        )
         v = per_video[name]
         if "error" not in v:
             print(f"        -> {_verdict(v)}  ({v['elapsed_s']}s, {v['frames']} frames)")

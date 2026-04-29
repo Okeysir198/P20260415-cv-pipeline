@@ -35,6 +35,7 @@ from utils.config import load_config  # noqa: E402
 from utils.viz import VizStyle, annotate_keypoints, classification_banner  # noqa: E402
 
 from _base import RuleResult  # noqa: E402
+from _zone import ZoneFSM, make_gate  # noqa: E402
 from crosswalk_sequence_matcher import CrosswalkSequenceMatcher  # noqa: E402
 from pointing_direction_detector import PointingDirectionDetector  # noqa: E402
 from pose_backend import build_pose_backend  # noqa: E402
@@ -139,6 +140,19 @@ class PointAndCallOrchestrator:
         self._frame_index = 0
         self._t0_wall: float | None = None
 
+        # Zone-FSM: gates the rule on a per-track APPROACHING-state. Default
+        # config carries empty polygons (`approach_zone: []`, `cross_zone: []`)
+        # → FSM stays APPROACHING forever → rule armed always (current behavior).
+        # When polygons are configured, the rule fires only while the tracked
+        # actor's foot point is in the approach polygon.
+        self._approach_zone_norm: list[list[float]] = list(
+            self._cfg.get("approach_zone", []) or []
+        )
+        self._cross_zone_norm: list[list[float]] = list(
+            self._cfg.get("cross_zone", []) or []
+        )
+        self._zone_fsms: dict[int, ZoneFSM] = {}
+
     # ------------------------------------------------------------------
     # Per-track matcher (lazy)
     # ------------------------------------------------------------------
@@ -149,6 +163,25 @@ class PointAndCallOrchestrator:
             m = CrosswalkSequenceMatcher(**self._seq_kwargs)
             self._matchers[track_id] = m
         return m
+
+    def _get_zone_fsm(self, track_id: int) -> ZoneFSM:
+        f = self._zone_fsms.get(track_id)
+        if f is None:
+            f = ZoneFSM(make_gate(self._approach_zone_norm, self._cross_zone_norm))
+            self._zone_fsms[track_id] = f
+        return f
+
+    def set_zones(self, approach_norm: list[list[float]] | None,
+                  cross_norm: list[list[float]] | None) -> None:
+        """Override the YAML-loaded polygons at runtime.
+
+        Used by the eval harness to apply per-video annotations from
+        `eval/ground_truth.json`. Resets per-track FSMs so a new gate takes
+        effect on the next frame.
+        """
+        self._approach_zone_norm = list(approach_norm or [])
+        self._cross_zone_norm = list(cross_norm or [])
+        self._zone_fsms.clear()
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -182,11 +215,38 @@ class PointAndCallOrchestrator:
         current_label: str | None = None
         sequence_progress: list[str] = []
 
-        for kpts, scores, _box in pose_samples:
+        h, w = image_bgr.shape[:2]
+        for kpts, scores, box in pose_samples:
             res = self._direction_rule.check(kpts, scores)
             label = str(res.debug_info.get("label", "invalid"))
 
             track_id = 0  # v1: single-person.
+
+            # Zone-FSM update: foot point at bottom-center of the person box.
+            # Stays in APPROACHING (rule armed) when no approach polygon is
+            # configured — backward-compat for sample videos without polygons.
+            foot_xy = (float((box[0] + box[2]) * 0.5), float(box[3]))
+            fsm = self._get_zone_fsm(track_id)
+            zone_state = fsm.update(foot_xy, w, h)
+            res.debug_info["zone_state"] = zone_state
+            if not fsm.armed:
+                # Rule disarmed by the zone gate (e.g. lecturer is not in any
+                # configured approach polygon). Skip the matcher.feed() so no
+                # accumulation toward a match.
+                persons.append(
+                    PersonBehavior(
+                        track_id=track_id,
+                        keypoints=np.asarray(kpts, dtype=np.float32),
+                        kp_scores=np.asarray(scores, dtype=np.float32),
+                        direction_label="zone_disarmed",
+                        direction_result=res,
+                        sequence_state={"zone_state": zone_state, "armed": False,
+                                          "sequence_done": False, "progress": []},
+                    )
+                )
+                if current_label is None:
+                    current_label = "zone_disarmed"
+                continue
 
             # Stationary-actor gate: suppress pointing labels while the actor's
             # hips are translating fast (i.e. they're walking, not standing at

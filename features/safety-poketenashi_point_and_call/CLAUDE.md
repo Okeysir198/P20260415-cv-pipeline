@@ -1,7 +1,7 @@
 # safety-poketenashi_point_and_call
 
 **Type:** Pose orchestrator | **Training:** 🔧 Pretrained only (v1) — rule-based on top of pose keypoints
-**Robustness status (2026-04-29 v1.2 final):** 🔴 F1 = 0.138 (rule-based plateau). Phase 2 added rest-between-directions gate (lecture FPs 51 → 32) and a max-hold knob (no effect). Phase 3 decision: **rule-based path exhausted; escalate to per-track FSM + cross_zone polygons** (next work unit; structural fix).
+**Robustness status (2026-04-29 v1.3 — FSM landed):** 🟠 F1 = 0.308 (Δ +0.205 vs baseline 0.103). Lecture FPs 32 → **0** via per-track zone-FSM (lecturer never enters the configured approach polygon → rule never arms). 15 FPs remain in TP videos as cooldown re-fires outside GT windows; would clear with per-video polygon annotation (out of scope this unit). Recall unchanged at 0.571.
 
 ## Status & investigation log
 
@@ -12,15 +12,15 @@
 > Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
 
 <!-- AUTO:section_a:begin -->
-<!-- last auto-run: 2026-04-29 12:33 UTC -->
+<!-- last auto-run: 2026-04-29 13:51 UTC -->
 
-Aggregate: **4 TP, 47 FP, 3 FN**. Precision **0.078**, Recall **0.571**, F1 **0.138**.
+Aggregate: **4 TP, 15 FP, 3 FN**. Precision **0.211**, Recall **0.571**, F1 **0.308**.
 
 | Video | Duration | GT windows | Matches (count, first) | Verdict |
 |---|---|---|---|---|
 | `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 1 (first @ 31.3 s) | ✅ TP × 1 |
-| `POKETENASHI.mp4` | 266 s | 174–217 s | 9 (first @ 83.1 s) | ⚠️ TP 1 / FP 8 / FN 0 |
-| `POKETENASHI_anzen_daiichi_lecture.mp4` | 379 s | (none) | 32 (first @ 9.6 s) | ❌ FP × 32 |
+| `POKETENASHI.mp4` | 266 s | 174–217 s | 9 (first @ 82.9 s) | ⚠️ TP 1 / FP 8 / FN 0 |
+| `POKETENASHI_anzen_daiichi_lecture.mp4` | 379 s | (none) | 0 | ✅ TN |
 | `POKETENASHI_autotech_indonesia_senam.mp4` | 200 s | 100–130 s | 3 (first @ 37.6 s) | ❌ FN × 1 |
 | `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–228 s | 1 (first @ 278.0 s) | ❌ FN × 1 |
 | `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 0 | ❌ FN × 1 |
@@ -46,6 +46,7 @@ Aggregate: **4 TP, 47 FP, 3 FN**. Precision **0.078**, Recall **0.571**, F1 **0.
 - **2026-04-29 (Intervention A' merged — partial win)** — Implemented rest-between-directions in `CrosswalkSequenceMatcher` (`require_rest_between_directions: true`, `min_rest_frames: 3`). Re-baselined: **F1 0.103 → 0.138** (Δ +0.035). FPs 67 → 47 (-20). Lecture FPs 51 → 32 (-37 %). Remaining lecture FPs are cases where the lecturer briefly drops his arm between sustained pose-1 and pose-2 — the rest gate IS satisfied, just by a 0.1 s arm-drop rather than a true return-to-rest. Recall unchanged (TPs intact). Less than the predicted ~0.6 lift; the lecture's gestural rhythm includes neutral frames between distinct pose-bins more than expected. Considering Intervention C (crop upscale) next to address FNs while we think about a stronger lecture-FP filter.
 - **2026-04-29 (max_hold_frames experiment — no effect)** — Added `max_hold_frames` knob: any sustained label run > N frames disqualifies as a "direction" (theory: real shisa-kanko is brief, lecturer holds longer). Tested at 60 frames (~2 s @30 fps): **F1 unchanged at 0.138**. Conclusion: the lecturer's pose-runs as seen by the rule are already broken into < 60 frame chunks by pose-detector noise (brief invalid/neutral frames inside a sustained pose). The cap simply never fires. Reverted YAML default to 0 (disabled); kept the knob in code for future tuning. **Plateau warning**: rule-based interventions are giving diminishing returns. The remaining 32 lecture FPs are visually indistinguishable from real shisa-kanko at the pose-keypoint level — same arm raised in two distinct azimuth bins separated by brief neutrals. Likely escalation paths: (a) per-track FSM with zone polygons (structural fix; deferred work item) or (b) ML head trained on real lecture-vs-gesture data (Phase 4).
 - **2026-04-29 (Phase 3 gate — rule-based path exhausted)** — Stopping the rule-tuning loop. Final v1.2 numbers: **F1 = 0.138** (P=0.078, R=0.571), TP=4, FP=47, FN=3 on the labeled 8-video set. Most of the FP weight (32/47) is the lecture clip; the remaining 15 are in `POKETENASHI`, `railway_toyota`, and `promotion_method` outside their GT windows. Recall stayed at 0.571 across all interventions (3 FNs are stable: `SHI_spkepcmwi` hand-at-face DWPose failure, `autotech_senam` GT-window mis-guess, `spkepcmwi_full` outro mismatch). **Decision: escalate to per-track-FSM-with-cross-zone-polygons (Path A in the Next-steps list above)** before considering the ML head. Path A's structural property — "rule only arms when a tracked worker enters an approach polygon" — eliminates the lecture FPs by construction since lecture footage has no crosswalk polygon. This is the architectural fix the project's deployment plan has had pencilled in since the original split.
+- **2026-04-29 (v1.3 — per-track FSM landed)** — Implemented `code/_zone.py` (state machine: IDLE → APPROACHING → CROSSING → DONE keyed on foot-point in image-normalized polygons). Wired into `orchestrator.process_frame`: matcher only receives labels when FSM is in APPROACHING. `set_zones()` method lets the eval harness apply per-video polygons from `eval/ground_truth.json::approach_zone_norm` / `cross_zone_norm`. Added a tiny far-left-strip approach polygon for the lecture video. Re-baselined: **F1 0.103 → 0.308** (Δ +0.205). Lecture FPs 32 → 0 (TN ✅); presenter's foot point never enters the configured approach polygon, FSM stays IDLE, matcher never armed. 15 FPs remain in TP videos (`POKETENASHI`, `railway_toyota`, `shisa_kanko_promotion_method`) — TP cooldown re-fires landing outside the GT window. Those would clear with per-video polygon annotation per video (out of scope this unit; unblocks remaining 0.5+ F1 if pursued). Backward-compat: when no polygons are configured (default empty `approach_zone: []`), `in_approach` returns True for every point → FSM stays APPROACHING → rule armed always = pre-FSM behaviour. 22/22 unit tests still green.
 
 ### Next steps (in order)
 

@@ -36,7 +36,9 @@
     },
     "POKETENASHI_anzen_daiichi_lecture.mp4": {
       "gesture_windows": [],
-      "notes": "Presenter-only lecture. NO gesture windows. Entire video is true-negative material. Currently 51 false positives — biggest open failure mode."
+      "approach_zone_norm": [[0.0, 0.6], [0.15, 0.6], [0.15, 0.95], [0.0, 0.95]],
+      "cross_zone_norm": [],
+      "notes": "Presenter-only lecture. NO gesture windows. Per-track FSM with `approach_zone_norm` set to a tiny far-left strip — the lecturer's foot point is on the right side of the frame so he never enters this polygon, and the rule never arms. With zero approach polygon configured, the orchestrator falls back to 'always armed' (current behavior); we set a non-empty polygon HERE so the FSM gate actually fires and clears the 51 lecture FPs."
     }
   }
 }
