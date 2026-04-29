@@ -1,0 +1,23 @@
+# Dataset config — safety-poketenashi_stair_diagonal (single-rule split)
+#
+# Pretrained-only feature: no own training set, no 06_training_*.yaml.
+# This file documents the rule's logical class so downstream tooling
+# (alert sinks, demo registry) can refer to it consistently.
+
+dataset_name: "safety_poketenashi_stair_diagonal"
+
+# No training/val/test splits — rule is consumed by the inference pipeline.
+# Listed only as a logical output class for the orchestrator.
+names:
+  0: stair_diagonal
+num_classes: 1
+
+# Pose backbone consumes its own normalization; no model trained here.
+input_size: [640, 640]
+
+# Pose backbone reference (loaded by predictor.py from project pretrained/).
+pose_backbone:
+  family: dwpose
+  weights: pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx
+  input_hw: [384, 288]
+  keypoint_format: coco17  # uses first 17 of DWPose's 133-kpt wholebody output
