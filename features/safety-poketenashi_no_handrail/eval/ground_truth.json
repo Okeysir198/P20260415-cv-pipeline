@@ -1,0 +1,17 @@
+{
+  "_doc": "Ground-truth violation windows per sample video for the no_handrail rule. Each entry: violation_windows is a list of [start_sec, end_sec] ranges where the actor is on stairs WITHOUT touching the railing (= the alert SHOULD fire). Empty list = no violation, true negative. handrail_zones_norm is a list of image-normalized [0,1] polygons around each visible handrail in that camera; null = polygon not yet annotated, harness will skip the video. notes documents the visual cue used. Annotations seeded 2026-04-29 — refine after watching each clip frame-by-frame.",
+  "videos": {
+    "03_TE_no_handrail.mp4": {
+      "duration_s": 35,
+      "violation_windows": null,
+      "handrail_zones_norm": null,
+      "notes": "TE-section split of the POKETENASHI safety video. Actor demonstrates stair-climbing without holding the rail. Eval BLOCKED until handrail polygon is annotated and violation_windows are filled in by frame inspection."
+    },
+    "TE_no_handrail_spkepcmwi.mp4": {
+      "duration_s": 35,
+      "violation_windows": null,
+      "handrail_zones_norm": null,
+      "notes": "TE-section split from the SPKEPCMWI variant of the POKETENASHI safety video. Same actor / scene; different recording / framing. Video file not yet present in samples/. Eval BLOCKED until polygon annotated."
+    }
+  }
+}
