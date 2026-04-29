@@ -3,7 +3,7 @@
 # Real release dirs are named v{N}_{YYYY-MM-DD} (e.g. v1_2026-04-14).
 
 model:
-  use_case: safety-poketenashi-phone-usage             # Use case name (e.g. safety-fire_detection, ppe-helmet_detection)
+  use_case: safety-poketenashi_phone_usage             # Use case name (e.g. safety-fire_detection, ppe-helmet_detection)
   version: 1                           # Auto-incremented or explicit via --version
   released: "YYYY-MM-DD"               # Release date
   notes: ""                            # Free-text release notes (--notes flag)

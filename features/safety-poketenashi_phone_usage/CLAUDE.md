@@ -1,4 +1,4 @@
-# safety-poketenashi-phone-usage
+# safety-poketenashi_phone_usage
 
 **Type:** Detection sub-model | **Training:** Fine-tune required (phone_usage action class not in COCO)
 
@@ -62,3 +62,25 @@ code/benchmark.py                 — COCO baseline benchmark
 eval/benchmark_results.json       — benchmark output
 eval/benchmark_report.md          — benchmark summary
 ```
+
+## Deployment Architecture
+
+### Single-camera pipeline
+This is a detection ML feature (not a pose rule). Frame ingestion → trained YOLOX/RT-DETR/D-FINE model → bbox predictions for `phone_usage` class → bbox overlap with detected person bbox (from a person detector) → triggered flag → event sink.
+
+### Combining with the other safety-poketenashi rules
+When deployed alongside `safety-poketenashi_hands_in_pockets`, `safety-poketenashi_stair_diagonal`, `safety-poketenashi_no_handrail`, `safety-poketenashi_point_and_call`, this feature's bbox output gets fused with their per-person pose outputs at the post-processing layer. See `features/CLAUDE.md` for the multi-feature pipeline.
+
+### When to enable ByteTrack
+Enable for per-worker compliance logging. Configured in `configs/10_inference.yaml::tracker:`; wire via `VideoProcessor(enable_tracking=True, tracker_config=cfg["tracker"])` — see `core/p10_inference/video_inference.py:166-172`.
+
+### When you need person detector + pose detector together
+This feature itself only needs object detection (phone class). However, to associate a phone with a worker, you also run a person detector OR use the same model's `person` class output. No pose required for this rule — pose-rule features (`safety-poketenashi_hands_in_pockets` etc.) handle the COCO-17 keypoints separately.
+
+### Shared backbones
+v1: this feature has its own trained detection backbone. Phase 2 (`features/CLAUDE.md`) plans to merge phone_usage + fall_detection + helmet detection heads onto a shared backbone.
+
+### Site calibration
+- `confidence_thresholds.phone_usage` (in 10_inference.yaml): default 0.50; raise to reduce FPs in cluttered scenes.
+- `frame_windows.phone_usage`: ~10 frames (~0.3s @ 30fps) before alert. Lower = faster response, higher = fewer FPs from brief gestures.
+- `tracker.frame_rate`: match camera fps.

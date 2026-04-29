@@ -5,7 +5,7 @@
 #   rtdetr-r18 / rtdetr-r50
 #
 # Usage:
-#   uv run core/p06_training/train.py --config features/safety-poketenashi-phone-usage/configs/06_training_rtdetr.yaml
+#   uv run core/p06_training/train.py --config features/safety-poketenashi_phone_usage/configs/06_training_rtdetr.yaml
 
 model:
   arch: rtdetr-r50
@@ -93,7 +93,7 @@ logging:
   # run_name omitted — HF Trainer (hf_trainer.py:736-740) uses run_name as the
   # feature folder for generate_run_dir(), so a stale value creates a ghost
   # `features/<run_name>/runs/...` tree. Dropping it makes HF fall back to
-  # config_path.parent.parent.name = "safety-poketenashi-phone-usage" (what we want).
+  # config_path.parent.parent.name = "safety-poketenashi_phone_usage" (what we want).
 
 checkpoint:
   save_best: true

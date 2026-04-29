@@ -1,4 +1,4 @@
-# safety-poketenashi-phone-usage
+# safety-poketenashi_phone_usage
 
 One-line purpose (what does this feature detect / classify / predict?).
 

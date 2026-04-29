@@ -18,7 +18,7 @@
 #
 # Run:
 #   CUDA_VISIBLE_DEVICES=0 .venv-yolox-official/bin/python core/p06_training/train.py \
-#     --config features/safety-poketenashi-phone-usage/configs/06_training_yolox.yaml
+#     --config features/safety-poketenashi_phone_usage/configs/06_training_yolox.yaml
 
 model:
   arch: yolox-m
