@@ -283,6 +283,12 @@ class PointAndCallOrchestrator:
                 # Rule disarmed by the zone gate (e.g. lecturer is not in any
                 # configured approach polygon). Skip the matcher.feed() so no
                 # accumulation toward a match.
+                # NOTE: we deliberately do NOT reset the matcher here — an
+                # actor mid-gesture whose foot point briefly leaves the
+                # polygon (e.g. stepping forward) would lose accumulated
+                # labels and we'd miss the TP. The 5 s window naturally
+                # ages out stale labels; a matcher reset cost us 1 TP for
+                # 1 FP saved on 2026-04-29 testing.
                 persons.append(
                     PersonBehavior(
                         track_id=track_id,
