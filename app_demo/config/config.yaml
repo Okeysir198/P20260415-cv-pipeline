@@ -81,8 +81,8 @@ models:
         - features/safety-fall_pose_estimation/runs/best.pt
     phone:
       model_paths:
-        - features/safety-poketenashi-phone-usage/release/latest/best.pt
-        - features/safety-poketenashi-phone-usage/runs/best.pt
+        - features/safety-poketenashi_phone_usage/release/latest/best.pt
+        - features/safety-poketenashi_phone_usage/runs/best.pt
 
 # Tab order — each entry maps to a build function; remove/reorder to customize
 tabs:
@@ -145,30 +145,43 @@ use_cases:
     torso_angle_threshold: 60
     hip_shoulder_ratio_threshold: 0.6
     description: "Fall detection using RTMPose keypoints"
+  # ----- Poketenashi rules (one entry per rule; no umbrella) -----
+  # Phone usage (ML detection model, single-class fine-tune)
   phone:
-    data_config: features/safety-poketenashi/configs/05_data.yaml
+    data_config: features/safety-poketenashi_phone_usage/configs/05_data.yaml
     alert_classes:
       - phone_usage
+    description: "Poketenashi/phone_usage: phone usage detection while walking"
+  poketenashi_hands_in_pockets:
+    data_config: features/safety-poketenashi_hands_in_pockets/configs/05_data.yaml
+    alert_classes:
       - hands_in_pockets
+    description: "Poketenashi/hands_in_pockets: hands-in-pockets detection"
+  poketenashi_stair_diagonal:
+    data_config: features/safety-poketenashi_stair_diagonal/configs/05_data.yaml
+    alert_classes:
       - stair_diagonal
+    description: "Poketenashi/stair_diagonal: diagonal stair-crossing detection"
+  poketenashi_no_handrail:
+    data_config: features/safety-poketenashi_no_handrail/configs/05_data.yaml
+    alert_classes:
       - no_handrail
-      - no_pointing_calling
-    description: "Poketenashi: prohibited/required action detection (phone, hands, handrail, stairs, pointing-calling)"
+    description: "Poketenashi/no_handrail: handrail-not-held detection on stairs"
   zone:
     person_class_id: 0
     default_zones: []
     description: "Restricted zone intrusion detection"
   point_and_call:
-    data_config: features/safety-point_and_call/configs/05_data.yaml
-    inference_config: features/safety-point_and_call/configs/10_inference.yaml
+    data_config: features/safety-poketenashi_point_and_call/configs/05_data.yaml
+    inference_config: features/safety-poketenashi_point_and_call/configs/10_inference.yaml
     alert_classes:
       - point_and_call_done
       - missing_directions
     pose_configs:
-      dwpose: features/safety-point_and_call/configs/pose_dwpose.yaml
+      dwpose: features/safety-poketenashi_point_and_call/configs/pose_dwpose.yaml
       rtmpose: features/safety-fall_pose_estimation/configs/rtmpose_s.yaml
       mediapipe: features/safety-fall_pose_estimation/configs/mediapipe_full.yaml
-    description: "Rule-based shisa-kanko (point-and-call) crosswalk gesture detector"
+    description: "Poketenashi/point_and_call: rule-based shisa-kanko crosswalk gesture detector"
 
 # Face recognition
 face:

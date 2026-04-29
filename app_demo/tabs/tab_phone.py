@@ -1,6 +1,6 @@
 """Phone detection tab with Image and Video sub-tabs.
 
-Detects phone usage (class 1 = "phone_usage" from features/safety-poketenashi-phone-usage/configs/05_data.yaml,
+Detects phone usage (class 1 = "phone_usage" from features/safety-poketenashi_phone_usage/configs/05_data.yaml,
 or COCO class 67 = "cell phone" when using a pretrained model).
 Uses supervision for all annotation. Video mode uses VideoProcessor
 with optional ByteTrack tracking.
