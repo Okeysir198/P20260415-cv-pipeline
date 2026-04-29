@@ -1,0 +1,13 @@
+{
+  "_doc": "Ground-truth violation windows per sample video. Each entry: violation_windows is a list of [start_sec, end_sec] ranges where the actor visibly has at least one hand stuffed inside a pocket (wrist hidden below hip, near torso centerline). Empty list = no violation should fire (true negative). Annotations are seeded estimates from a quick spot-frame scan with ffmpeg; refine while watching each clip end-to-end.",
+  "videos": {
+    "01_PO_hands_in_pockets.mp4": {
+      "violation_windows": [[3.0, 22.0]],
+      "notes": "PO (POKETENASHI) section: actor walks across the workshop with both hands in pockets. Initial 0–3 s is approach (hands not yet in pockets); from ~3 s onward both hands are clearly stuffed in front trouser pockets through the end. Visual cue: wrists invisible below the belt line, elbows bent forward."
+    },
+    "PO_hands_in_pockets_spkepcmwi.mp4": {
+      "violation_windows": [[2.0, 22.0]],
+      "notes": "SPKEPCMWI variant of the same PO behavior demo. Different actor / location but the same posture: hands buried in front pockets while walking. Brief setup at the start, then sustained violation. Refine if a closer review shows the actor pulling a hand out mid-clip."
+    }
+  }
+}
