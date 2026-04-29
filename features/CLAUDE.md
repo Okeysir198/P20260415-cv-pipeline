@@ -17,7 +17,7 @@
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi_phone_usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |
-| `safety-poketenashi_point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 v1.1 robustness pass landed |
+| `safety-poketenashi_point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🟡 v1.1 calibrated to one clip; **F1 ≈ 0.5** on 9-video set (audit 2026-04-29). Robustness investigation active — see feature CLAUDE.md "Status & investigation log" |
 | `safety-poketenashi_hands_in_pockets` | Pose rule | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |
 | `safety-poketenashi_stair_diagonal` | Pose rule (stateful) | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |
 | `safety-poketenashi_no_handrail` | Pose rule + zone | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |

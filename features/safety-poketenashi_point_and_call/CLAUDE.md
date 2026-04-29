@@ -1,6 +1,48 @@
 # safety-poketenashi_point_and_call
 
 **Type:** Pose orchestrator | **Training:** 🔧 Pretrained only (v1) — rule-based on top of pose keypoints
+**Robustness status (2026-04-29):** 🟡 v1.1 — F1 ≈ 0.5 on 9-video labeled set. Investigation plan active; see "Status & investigation log" below.
+
+## Status & investigation log
+
+> Single source of truth for "where are we with this feature." Anyone (human or future-Claude) picking this back up should read this section first. The detailed investigation plan lives in `~/.claude/plans/`; this is the day-to-day status.
+
+### A. Current evaluation status (last run: **2026-04-29 manual audit** — automated `eval_robustness.py` not yet built)
+
+Aggregate: **4 TPs, 1 FN, 1 N/A, 2 FPs, 2 partial**. Event-level F1 ≈ **0.5**. Threshold-set: post-v1.1 robustness pass (commit `2ac0911` on `main`).
+
+| Video (in `samples/`) | Duration | Ground-truth gesture window | Last-run matches | Verdict |
+|---|---|---|---|---|
+| `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 2 (first @ 30.0 s) | ✅ TP |
+| `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 0 | ❌ FN — actor too small (84 % invalid) |
+| `shisa_kanko_correct_demo.mp4` | 41 s | (cartoon) | 0 | ⚠️ N/A — animated mascot, not a real human; DWPose can't detect cartoons |
+| `shisa_kanko_railway_toyota.mp4` | 3:56 | 148–203 s | 12 (148.7–203 s) | ✅ TP — clusters during the actual railway-worker footage |
+| `shisa_kanko_promotion_method.mp4` | 3:00 | ~4–180 s | 11 (first @ 4.1 s) | ✅ TP |
+| `POKETENASHI.mp4` (full) | 4:26 | SHI section 174–217 s | 11, **first @ 82.9 s** | ⚠️ FP timing — first match is in the KE phone-usage section, not SHI |
+| `POKETENASHI_spkepcmwi_full.mp4` (full) | 5:10 | SHI section 158–228 s | 1 @ 278 s | ⚠️ FP timing — match is in outro, not the SHI window |
+| `POKETENASHI_autotech_indonesia_senam.mp4` | 3:20 | needs frame inspection | 3 (first @ 37.6 s) | ✅ probably TP — group calisthenics, hard to score precisely |
+| `POKETENASHI_anzen_daiichi_lecture.mp4` | 6:19 | (no gesture) | **51 matches** | ❌ massive FP — presenter gesturing while speaking |
+
+### B. Known failure modes (open until resolved)
+
+- [ ] **Lecture FPs** — `POKETENASHI_anzen_daiichi_lecture.mp4` fires 51 times. Root cause: `elbow_angle_min_deg=45` + `min_distinct_directions=2` accept any raised + bent arm in two distinct azimuth bins; presenter's normal hand gestures while speaking pass the gate. Proposed fix: gesture-onset temporal pattern (rest → raise → hold → lower state machine on wrist velocity) — see Phase 2 Intervention A.
+- [ ] **Phone-on-ear FP in `POKETENASHI.mp4`** — first match fires at t=82.9 s during the KE phone-usage section, not the SHI section at 174–217 s. Root cause: `min_wrist_ear_distance_ratio=0.35` is too loose; phone holders' wrist is near forehead/cheek but not directly at the ear. Proposed fix: two-tier confidence gate — Phase 2 Intervention B.
+- [ ] **Far-field FN in `SHI_point_and_call_spkepcmwi.mp4`** — actor at < 15 % of frame height; wrist scores 0.16–0.45 fall below `min_keypoint_score=0.25`. Proposed fix: pre-pose crop upscale — Phase 2 Intervention C.
+- [ ] **Pose-jitter FPs (suspected)** — could be contributing to the lecture / outro FPs. Random-azimuth flicker may pass `min_distinct_directions: 2` if successive frames bin to L vs R noisily. Proposed fix: sequence transition-shape filter — Phase 2 Intervention D.
+- [x] **AV1 codec silent failure** — `shisa_kanko_railway_toyota.mp4` was originally AV1-encoded; OpenCV's bundled FFmpeg can't decode AV1 without HW accel and returned 0 frames silently. Fixed by re-encoding to H.264 (commit on `main`).
+- [ ] *(deferred)* **Cartoon-character handling** — DWPose is photographic-only. `shisa_kanko_correct_demo.mp4` (animated mascot) is unevaluable. No fix planned in v1.x.
+
+### C. Investigation log (append-only)
+
+- **2026-04-29** — Audited the orchestrator on the expanded 9-video sample set. Hand-tabulated F1 ≈ 0.5. Identified 3 actionable failure modes (lecture FPs, phone-on-ear FP, far-field FN) plus the AV1 codec bug (fixed in-place). Investigation plan filed at `~/.claude/plans/with-this-home-ct-admin-documents-langgr-federated-dewdrop.md`. Goal: lift F1 to ≥ 0.8 via 4 rule-based interventions before considering the ML head escalation on the v2 roadmap.
+
+### Next steps (in order)
+
+1. Phase 0: build `code/eval_robustness.py` + `eval/ground_truth.json` so this status block can be auto-regenerated.
+2. Phase 1: per-cluster failure dump (CSV of pose features at FP/FN frames) → confirm hypotheses.
+3. Phase 2: intervention A (gesture-onset temporal pattern) — biggest expected impact.
+4. After each intervention: re-run harness, append a section C log entry, tick the section B checkbox if resolved.
+5. Phase 3 gate: ship rule-based v1.2 if F1 ≥ 0.8, else escalate to ML head (v2).
 
 ## Overview
 
