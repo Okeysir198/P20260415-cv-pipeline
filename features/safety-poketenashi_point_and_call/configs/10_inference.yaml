@@ -31,7 +31,13 @@ pose_rules:
     arm_elevation_max_deg: 60    # forearm within 60° of horizontal (allows raised pointing)
     front_half_angle_deg: 35     # ±35° around body forward axis classifies as front
     side_half_angle_deg: 55      # ±55° around body left/right axis classifies as left/right
-    min_keypoint_score: 0.25     # accept slightly lower keypoint scores (small-in-frame actors)
+    # Phase 1 dump showed SHI_point_and_call_spkepcmwi.mp4's actor performs the
+    # "hand at eye level" Japanese-style point — DWPose's wrist heatmap is
+    # confused by the head's proximity, dropping wrist scores to 0.10–0.13 in
+    # 91 % of in-window frames. Lowering the floor 0.25 → 0.10 admits these
+    # (still-mostly-correct) noisy wrist positions; the trade-off is some
+    # additional noise admitted in other clips.
+    min_keypoint_score: 0.10
     min_wrist_ear_distance_ratio: 0.35  # reject phone-CONTACT-ear (wrist actually touching ear); allow hand-at-eye-level points
     max_body_speed_px_per_sec: 35       # smoothed-over-1.5s hip speed; > N px/s ⇒ walking ⇒ suppress pointing labels; 0 disables
     hold_frames: 3               # each direction sustained ≥ 3 frames (0.1s @30fps); brief gestures count

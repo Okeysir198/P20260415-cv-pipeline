@@ -31,8 +31,8 @@
       "notes": "Full SPKEPCMWI source. SHI section only is positive."
     },
     "POKETENASHI_autotech_indonesia_senam.mp4": {
-      "gesture_windows": [[100.0, 130.0]],
-      "notes": "Group calisthenics / SENAM demo. Approximate SHI section per t=100–130 s thumbnail row; refine with frame inspection if it materially affects scoring."
+      "gesture_windows": [[85.0, 95.0]],
+      "notes": "Group calisthenics / SENAM demo. Refined 2026-04-29 from frame inspection: t=90 s shows all 5 workers performing shisa-kanko (caption 'Tunjuk kanan dan kiri saat melewati persimpangan jalan'); t=95 transitions to outro 'CHALLENGE! SENAM POKETENASHI Untuk Semua Karyawan'. The earlier t=37.6 s events fall in the KE section (group salute) and are real FPs — group calisthenics in non-SHI sections still trigger the rule because there's no FSM polygon for this video."
     },
     "POKETENASHI_anzen_daiichi_lecture.mp4": {
       "gesture_windows": [],

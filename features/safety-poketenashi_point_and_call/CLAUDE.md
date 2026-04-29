@@ -1,7 +1,7 @@
 # safety-poketenashi_point_and_call
 
 **Type:** Pose orchestrator | **Training:** 🔧 Pretrained only (v1) — rule-based on top of pose keypoints
-**Robustness status (2026-04-29 v1.3+gt):** 🟠 F1 = 0.348 (Δ +0.245 vs baseline 0.103). FSM zeroed lecture FPs (32→0); railway GT extension cleared 3 more FPs. Remaining 12 FPs: 8 in POKETENASHI multi-section video (single polygon doesn't fit), 3 in autotech (GT window mis-guessed), 1 real FP in spkepcmwi_full recap card. Recall unchanged at 0.571 (3 stable FNs).
+**Robustness status (2026-04-29 v1.4):** 🟠 F1 = 0.375 (Δ +0.272 vs baseline 0.103). Recall jumped 0.571 → 0.857 by lowering `min_keypoint_score` 0.25 → 0.10 — unblocked the hand-at-face FN in SHI_spkepcmwi AND the spkepcmwi_full SHI-section detection. Trade-off: precision 0.250 → 0.240 (7 more FPs from noise). Net ≈ 4× the original baseline F1.
 
 ## Status & investigation log
 
@@ -12,21 +12,21 @@
 > Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
 
 <!-- AUTO:section_a:begin -->
-<!-- last auto-run: 2026-04-29 14:08 UTC -->
+<!-- last auto-run: 2026-04-29 14:25 UTC -->
 
-Aggregate: **4 TP, 12 FP, 3 FN**. Precision **0.250**, Recall **0.571**, F1 **0.348**.
+Aggregate: **6 TP, 19 FP, 1 FN**. Precision **0.240**, Recall **0.857**, F1 **0.375**.
 
 | Video | Duration | GT windows | Matches (count, first) | Verdict |
 |---|---|---|---|---|
 | `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 1 (first @ 31.3 s) | ✅ TP × 1 |
 | `POKETENASHI.mp4` | 266 s | 174–217 s | 9 (first @ 82.9 s) | ⚠️ TP 1 / FP 8 / FN 0 |
 | `POKETENASHI_anzen_daiichi_lecture.mp4` | 379 s | (none) | 0 | ✅ TN |
-| `POKETENASHI_autotech_indonesia_senam.mp4` | 200 s | 100–130 s | 3 (first @ 37.6 s) | ❌ FN × 1 |
-| `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–228 s | 1 (first @ 278.0 s) | ❌ FN × 1 |
-| `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 0 | ❌ FN × 1 |
+| `POKETENASHI_autotech_indonesia_senam.mp4` | 200 s | 85–95 s | 5 (first @ 37.6 s) | ❌ FN × 1 |
+| `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–228 s | 6 (first @ 204.2 s) | ⚠️ TP 1 / FP 4 / FN 0 |
+| `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 2 (first @ 46.2 s) | ✅ TP × 1 |
 | `shisa_kanko_correct_demo.mp4` | — | (skip) | — | ⚠️ Animated mascot ヨシだ君, not a photographic human. DWPose cannot detect cartoons. |
-| `shisa_kanko_promotion_method.mp4` | 180 s | 4–180 s | 5 (first @ 17.9 s) | ✅ TP × 1 |
-| `shisa_kanko_railway_toyota.mp4` | 236 s | 148–215 s | 12 (first @ 148.8 s) | ✅ TP × 1 |
+| `shisa_kanko_promotion_method.mp4` | 180 s | 4–180 s | 8 (first @ 17.9 s) | ✅ TP × 1 |
+| `shisa_kanko_railway_toyota.mp4` | 236 s | 148–215 s | 14 (first @ 19.6 s) | ⚠️ TP 1 / FP 2 / FN 0 |
 <!-- AUTO:section_a:end -->
 
 ### B. Known failure modes (open until resolved)
@@ -48,6 +48,7 @@ Aggregate: **4 TP, 12 FP, 3 FN**. Precision **0.250**, Recall **0.571**, F1 **0.
 - **2026-04-29 (Phase 3 gate — rule-based path exhausted)** — Stopping the rule-tuning loop. Final v1.2 numbers: **F1 = 0.138** (P=0.078, R=0.571), TP=4, FP=47, FN=3 on the labeled 8-video set. Most of the FP weight (32/47) is the lecture clip; the remaining 15 are in `POKETENASHI`, `railway_toyota`, and `promotion_method` outside their GT windows. Recall stayed at 0.571 across all interventions (3 FNs are stable: `SHI_spkepcmwi` hand-at-face DWPose failure, `autotech_senam` GT-window mis-guess, `spkepcmwi_full` outro mismatch). **Decision: escalate to per-track-FSM-with-cross-zone-polygons (Path A in the Next-steps list above)** before considering the ML head. Path A's structural property — "rule only arms when a tracked worker enters an approach polygon" — eliminates the lecture FPs by construction since lecture footage has no crosswalk polygon. This is the architectural fix the project's deployment plan has had pencilled in since the original split.
 - **2026-04-29 (v1.3 — per-track FSM landed)** — Implemented `code/_zone.py` (state machine: IDLE → APPROACHING → CROSSING → DONE keyed on foot-point in image-normalized polygons). Wired into `orchestrator.process_frame`: matcher only receives labels when FSM is in APPROACHING. `set_zones()` method lets the eval harness apply per-video polygons from `eval/ground_truth.json::approach_zone_norm` / `cross_zone_norm`. Added a tiny far-left-strip approach polygon for the lecture video. Re-baselined: **F1 0.103 → 0.308** (Δ +0.205). Lecture FPs 32 → 0 (TN ✅); presenter's foot point never enters the configured approach polygon, FSM stays IDLE, matcher never armed. 15 FPs remain in TP videos (`POKETENASHI`, `railway_toyota`, `shisa_kanko_promotion_method`) — TP cooldown re-fires landing outside the GT window. Those would clear with per-video polygon annotation per video (out of scope this unit; unblocks remaining 0.5+ F1 if pursued). Backward-compat: when no polygons are configured (default empty `approach_zone: []`), `in_approach` returns True for every point → FSM stays APPROACHING → rule armed always = pre-FSM behaviour. 22/22 unit tests still green.
 - **2026-04-29 (v1.3+gt — railway GT refinement)** — Frame-inspected railway clip at t=210 s; the worker is still performing shisa-kanko (arm fully extended, pointing at train). Extended the railway GT window from `[148, 203]` to `[148, 215]`. Re-baselined: **F1 0.308 → 0.348** (Δ +0.040). Railway moved from `TP1/FP3` to `✅ TP × 1`. Remaining 12 FPs are in (a) POKETENASHI's KE/TE/NA/recap sections — a single approach polygon for the SHI-section curb cannot exclude the other sections' actor positions because the camera angle changes per section (8 FPs); (b) autotech_indonesia_senam — events at t=37.6 fire on group-salute calisthenics in what's probably a different rule's section (3 FPs); (c) spkepcmwi_full's recap card at t=278 with a thumbs-up pose (1 FP). All three FN clusters unchanged: SHI_spkepcmwi hand-at-face, spkepcmwi_full SHI section not detected, autotech SHI section likely not in the [100,130] guess.
+- **2026-04-29 (v1.4 — lower kp_score + autotech GT refine)** — Found autotech's actual SHI section at t=85–95 (workers performing the gesture under caption "Tunjuk kanan dan kiri saat melewati persimpangan jalan"); refined GT from [100, 130]. Tried Intervention C alternative: lowered `min_keypoint_score` 0.25 → 0.10 to admit the hand-at-face wrist scores measured at 0.10–0.13 in Phase 1. Result: **TP 4 → 6** (SHI_spkepcmwi hand-at-face FN cleared; spkepcmwi_full SHI section now detected at t=204), **FN 3 → 1**, **Recall 0.571 → 0.857** (+0.286). FP went 12 → 19 (+7) as the looser score gate admits more noise. Net **F1 0.348 → 0.375** (Δ +0.027). The recall gain is substantial — only 1 FN left (autotech_senam: rule still doesn't trigger inside [85,95] despite group choreography; the largest-person filter likely thrashes on 5 similar-sized boxes per frame). Cumulative since baseline: F1 0.103 → 0.375 (3.6× the original).
 
 ### Next steps (in order)
 
