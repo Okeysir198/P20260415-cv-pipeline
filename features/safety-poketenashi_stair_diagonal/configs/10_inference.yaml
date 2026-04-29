@@ -1,0 +1,46 @@
+# Inference + alert config — safety-poketenashi_stair_diagonal
+# Loaded by core.p10_inference.video_inference.load_alert_config and by
+# code/predictor.py at smoke-test / live-video time.
+#
+# Pose backend: DWPose ONNX (shared with other safety-poketenashi_* rules).
+# Person detector: YOLO11n (top-down crop required for DWPose).
+# Tracking: ByteTrack — REQUIRED for multi-person scenes (rule is stateful).
+
+# ── Pose backbone ─────────────────────────────────────────────────────────────
+models:
+  pose_estimation:
+    weights: pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx
+    input_hw: [384, 288]
+  person_detector:
+    weights: pretrained/access-zone_intrusion/yolo11n.pt
+    conf: 0.35
+
+# ── Per-behavior alert config ─────────────────────────────────────────────────
+alerts:
+  confidence_thresholds:
+    stair_diagonal: 0.0          # rule-based; fires on geometric check, no learned score
+
+  frame_windows:
+    stair_diagonal: 15           # ~0.5 s at 30 fps — confirmed diagonal trajectory
+
+  window_ratio: 0.7              # fraction of window frames where violation must hold
+  cooldown_frames: 90            # ~3 s at 30 fps between repeated alerts per person
+
+# ── Pose-rule parameters ──────────────────────────────────────────────────────
+pose_rules:
+  stair_diagonal:
+    max_diagonal_angle_deg: 20   # crossing angle > this from horizontal stair axis = diagonal
+    min_frames: 5                # min hip positions buffered before evaluating trajectory
+
+# ── Tracking (REQUIRED for multi-person — see CLAUDE.md) ──────────────────────
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.25
+  lost_track_buffer: 30
+  minimum_iou_threshold: 0.1
+  frame_rate: 30
+
+# ── Sample media for smoke tests ──────────────────────────────────────────────
+samples:
+  images: []
+  videos: []
