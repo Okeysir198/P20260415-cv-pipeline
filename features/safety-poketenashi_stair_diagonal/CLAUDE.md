@@ -1,6 +1,50 @@
 # safety-poketenashi_stair_diagonal
 
 **Type:** Pose orchestrator (single-rule) | **Training:** Pretrained only (no own model)
+**Robustness status (2026-04-29):** 🟡 baseline pending — harness scaffolded, awaiting first GPU run.
+
+## Status & investigation log
+
+> Single source of truth for "where are we with this feature." Anyone (human or future-Claude) picking this back up should read this section first.
+
+### A. Current evaluation status
+
+> Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
+
+<!-- AUTO:section_a:begin -->
+_baseline pending — run `code/eval_robustness.py --baseline` on a free GPU to populate this table._
+<!-- AUTO:section_a:end -->
+
+### B. Known failure modes (open until resolved)
+
+_None confirmed yet — populate after the first baseline run + per-cluster failure dump._
+
+### C. Investigation log (append-only)
+
+- **2026-04-29** — Phase 0 scaffolded: `code/eval_robustness.py`, `code/dump_debug.py`, `eval/ground_truth.json`, and this status block landed. Harness mirrors the `safety-poketenashi_point_and_call` template. Two seed videos (`04_NA_diagonal_crossing.mp4`, `NA_diagonal_crossing_spkepcmwi.mp4`) seeded with provisional violation windows derived from filename + duration; refine on first viewing if scoring is materially off. Baseline GPU run pending — single-GPU contention prevents the worker from running it directly.
+
+### Tools
+
+| Script | Purpose | Cost |
+|---|---|---|
+| `code/eval_robustness.py` | Reproducible event-level scoring; auto-rewrites section A above; writes a timestamped report. Pass `--baseline` once to lock the baseline; pass `--against eval/robustness_baseline.json` on later runs to print a delta. | ~minutes on GPU per video |
+| `code/dump_debug.py` | Per-frame CSV with rule debug fields (trajectory_angle_deg, buffer_size, reason) + extra (hip_x/y, kp scores). Default targets the 2 sample videos in `samples/`; pass video filenames to dump a subset. | seconds–minutes on GPU per video |
+| `code/predictor.py --video <path>` | Live single-video inference, writes per-frame timeline JSON. Useful for ad-hoc spot checks. | seconds–minutes on GPU per video |
+
+**Stateful rule note**: `StairSafetyDetector` buffers per-track mid-hip positions across `min_frames` (default 5) consecutive frames before evaluating any trajectory. Clips < ~0.2 s after the actor enters frame **cannot** trigger the rule even if the actor is moving diagonally — the buffer hasn't filled yet. The harness instantiates ONE predictor per video so the buffer accumulates naturally across playback; do not reset it per frame.
+
+### Re-running
+
+```bash
+# Baseline (only the first time):
+uv run python features/safety-poketenashi_stair_diagonal/code/eval_robustness.py --baseline
+
+# After every code/config change:
+uv run python features/safety-poketenashi_stair_diagonal/code/eval_robustness.py \
+  --against features/safety-poketenashi_stair_diagonal/eval/robustness_baseline.json
+```
+
+**Do not run two GPU jobs in parallel** — single-GPU contention will hang the desktop. The dump and harness should run sequentially.
 
 ## Overview
 
