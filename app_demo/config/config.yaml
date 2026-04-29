@@ -102,6 +102,8 @@ tabs:
     builder: app_demo.tabs.tab_phone.build_tab_phone
   - id: zone
     builder: app_demo.tabs.tab_zone.build_tab_zone
+  - id: point_and_call
+    builder: app_demo.tabs.tab_point_and_call.build_tab_point_and_call
   - id: face
     builder: app_demo.tabs.tab_face.build_tab_face
   - id: analytics
@@ -156,6 +158,17 @@ use_cases:
     person_class_id: 0
     default_zones: []
     description: "Restricted zone intrusion detection"
+  point_and_call:
+    data_config: features/safety-point_and_call/configs/05_data.yaml
+    inference_config: features/safety-point_and_call/configs/10_inference.yaml
+    alert_classes:
+      - point_and_call_done
+      - missing_directions
+    pose_configs:
+      dwpose: features/safety-point_and_call/configs/pose_dwpose.yaml
+      rtmpose: features/safety-fall_pose_estimation/configs/rtmpose_s.yaml
+      mediapipe: features/safety-fall_pose_estimation/configs/mediapipe_full.yaml
+    description: "Rule-based shisa-kanko (point-and-call) crosswalk gesture detector"
 
 # Face recognition
 face:
