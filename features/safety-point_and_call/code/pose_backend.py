@@ -264,13 +264,20 @@ def build_pose_backend(cfg: dict) -> PoseBackend:
         onnx_path = _resolve_path(weights, base_dir)
         if not onnx_path.exists():
             raise FileNotFoundError(f"DWPose ONNX not found: {onnx_path}")
-        det_weights_cfg = cfg.get("person_detector", {}) or {}
-        det_weights = det_weights_cfg.get("weights")
+        # person_detector accepts either a string path (10_inference.yaml shape)
+        # with sibling person_conf: ; or a nested {weights, conf} dict (legacy).
+        det_field = cfg.get("person_detector")
+        if isinstance(det_field, str):
+            det_weights = det_field
+            det_conf = float(cfg.get("person_conf", 0.35))
+        else:
+            det_field = det_field or {}
+            det_weights = det_field.get("weights")
+            det_conf = float(det_field.get("conf", cfg.get("person_conf", 0.35)))
         det_weights_path = (
             _resolve_path(det_weights, base_dir) if det_weights else None
         )
-        det = _PersonDetector(weights_path=det_weights_path,
-                              conf=float(det_weights_cfg.get("conf", 0.35)))
+        det = _PersonDetector(weights_path=det_weights_path, conf=det_conf)
         return _DWPoseAdapter(onnx_path=onnx_path, person_detector=det)
 
     if backend in {"rtmpose", "mediapipe", "hf_keypoint"}:

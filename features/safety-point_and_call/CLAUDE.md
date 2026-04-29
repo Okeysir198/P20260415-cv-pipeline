@@ -52,12 +52,17 @@ absolute path from `pretrained/`.
 ## Quick Start
 
 ```bash
-# Smoke-test the orchestrator (default DWPose backend)
+# Smoke-test the orchestrator on sample images (default DWPose backend)
 cp features/safety-poketenashi/samples/*.jpg features/safety-point_and_call/samples/
 uv run features/safety-point_and_call/code/orchestrator.py --smoke-test
 # Writes eval/orchestrator_smoke_test.json + eval/smoke_*.jpg
 
-# Smoke-test with a different backend (verifies the swap)
+# Run on a video file (writes annotated mp4 + per-frame timeline JSON)
+uv run features/safety-point_and_call/code/orchestrator.py \
+  --video features/safety-point_and_call/samples/05_SHI_point_and_call.mp4
+# Writes eval/smoke_<basename>.mp4 + eval/smoke_<basename>.json
+
+# Override pose backend (verifies the swap)
 uv run features/safety-point_and_call/code/orchestrator.py --smoke-test --pose-backend rtmpose
 
 # Latency benchmark across all 4 backends
@@ -84,10 +89,19 @@ uv run app_demo/run.py
       `test_pointing_direction_detector.py`,
       `test_crosswalk_sequence_matcher.py`.
 - [x] Gradio demo tab + registration in `app_demo/config/config.yaml`.
-- [ ] Tune sequence-matcher windows + per-frame thresholds against field clips
-      (smoke samples are factory-worker frames, not crosswalk gestures —
-      tuning needs real footage).
+- [x] **v1.1 robustness pass** (2026-04-29): forearm-vector geometry,
+      wrist-far-from-ear filter, stationary-actor gate, largest-person filter,
+      `min_distinct_directions` OR-acceptance. End-to-end smoke on POKETENASHI
+      training video — true positive on good actor (SHI t=31.47s), no false
+      positive on bad-example walking actor.
+- [x] `--video <path>` CLI on `orchestrator.py` writes annotated mp4 +
+      per-frame timeline JSON to `eval/smoke_<basename>.{mp4,json}`.
+- [x] Config-wiring fix: `pose_rules.point_and_call.*` keys now actually load
+      (were silently using hardcoded defaults).
+- [x] `pose_backend.py` accepts both string and dict shapes for `person_detector`.
 - [ ] Optional `cross_zone:` polygon configured per deployment site.
+- [ ] Far-field actors (NA-style scenes): fix under-detection by either using
+      a higher-resolution pose model or upscaling the person crop before pose.
 
 ## Files
 
@@ -104,14 +118,16 @@ code/
   pose_backend.py           PoseBackend Protocol + build_pose_backend() factory +
                             _DWPoseAdapter, _GenericPoseAdapter, _PersonDetector
   pointing_direction_detector.py
-                            PointingDirectionDetector(PoseRule) — operates only on
-                            (kpts17, scores17), backend-agnostic
+                            PointingDirectionDetector(PoseRule) — uses forearm
+                            (elbow→wrist) vector for elevation + azimuth; phone-to-ear
+                            rejection via wrist-far-from-ear ratio
   crosswalk_sequence_matcher.py
                             CrosswalkSequenceMatcher — sliding-window run-length
-                            matcher, supports modes LR/RL/LRF/RLF/LFR/RFL/FLR/FRL,
-                            cooldown after success
+                            matcher; strict ordered modes LR/RL/LRF/RLF/LFR/RFL/FLR/FRL
+                            OR `min_distinct_directions` ≥ N OR-acceptance; cooldown
   orchestrator.py           PointAndCallOrchestrator + dataclasses + draw() +
-                            --smoke-test CLI with --pose-backend override
+                            --smoke-test CLI + --video CLI; largest-person filter +
+                            stationary-actor (hip-velocity) gate
   benchmark.py              Loops 4 backends; per-backend latency + det_rate,
                             graceful error capture per backend
 
@@ -120,8 +136,11 @@ tests/
   test_pointing_direction_detector.py
   test_crosswalk_sequence_matcher.py
 
-samples/                    point-and-call clips / frames (curate per deployment site)
-eval/orchestrator_smoke_test.json     gitignored — written by --smoke-test
+samples/                    point-and-call clips / frames; current set is split from
+                            POKETENASHI safety video (PT Trimitra Baterai Prakasa);
+                            05_SHI_*.mp4 contains the actual gesture demonstration
+eval/orchestrator_smoke_test.json     gitignored — written by --smoke-test (images)
+eval/smoke_<basename>.{mp4,json}      gitignored — written by --video (clips)
 eval/benchmark_results.json           gitignored — written by benchmark.py
 ```
 
@@ -137,14 +156,24 @@ pose:
 
 pose_rules:
   point_and_call:
-    elbow_angle_min_deg: 160            # arm must be nearly straight
-    arm_elevation_max_deg: 30           # arm roughly horizontal (reject "pointing up")
-    front_half_angle_deg: 30            # ±30° around body forward = "front"
-    side_half_angle_deg: 45             # off-axis half-angle for left/right buckets
-    min_keypoint_score: 0.3
-    hold_frames: 6                      # each direction sustained ≥ 6 frames
+    # Geometry — tuned for casual industrial-video pointing (NOT formal Japanese stiff-arm form).
+    # Captures both "arm extended sideways" and "hand-at-eye-level" Japanese-style points.
+    elbow_angle_min_deg: 45             # allows tight L-shape (hand-at-eye-level points)
+    arm_elevation_max_deg: 60           # forearm within 60° of horizontal (allows raised pointing)
+    front_half_angle_deg: 35            # ±35° around body forward axis = front
+    side_half_angle_deg: 55             # ±55° around body left/right axis = left/right
+    min_keypoint_score: 0.25            # accept slightly lower scores (small-in-frame actors)
+    min_wrist_ear_distance_ratio: 0.35  # reject phone-CONTACT-ear; allow hand-at-eye-level
+    max_body_speed_px_per_sec: 35       # smoothed-over-1.5s hip speed > N ⇒ walking ⇒ suppress pointing
+    # Sequence acceptance — TWO ways to fire `point_and_call_done`:
+    #   (a) one of the strict ordered permutations below matches, OR
+    #   (b) `min_distinct_directions` distinct directions accumulate in window.
+    # 2-D pose can't reliably tell "front" from "vertically up the body" when
+    # an actor faces the camera, so 2 distinct directions is the robust default.
+    hold_frames: 3                      # each direction sustained ≥ 3 frames (~0.1 s @30fps)
     window_seconds: 5.0                 # full sequence must complete within 5 s
-    sequence_modes: [LR, RL, LRF, RLF]  # accepted ordered sequences
+    sequence_modes: [LRF, LFR, RLF, RFL, FLR, FRL]
+    min_distinct_directions: 2          # 0=disabled (use sequence_modes only); 2/3=OR-condition
 
 alerts:
   frame_windows:
@@ -155,6 +184,41 @@ alerts:
 
 cross_zone: []                          # optional polygon (norm coords); enables missing_directions
 ```
+
+## Algorithm robustness (real-world video calibration)
+
+The original geometry was tuned for formal stiff-arm Japanese shisa-kanko. Industrial
+training footage shows casual variations (bent elbows, slightly diagonal arms, walking
+actors with briefly extended arms) that defeat strict thresholds. v1.1 adds five
+robustness layers, each driven by a YAML knob:
+
+| Layer | YAML knob | Purpose |
+|---|---|---|
+| Forearm-vector geometry | `code/pointing_direction_detector.py` (always on) | Compute elevation + azimuth from elbow→wrist (forearm), not shoulder→wrist. Captures the actual pointing direction when the upper arm is dropped. |
+| Wrist-far-from-ear | `min_wrist_ear_distance_ratio` | Rejects phone-to-ear poses: wrist within N×shoulder-width of nearest ear ⇒ not pointing. |
+| Stationary-actor gate | `max_body_speed_px_per_sec` | Smoothed (1.5 s) hip-midpoint velocity. `> N px/s` ⇒ actor is walking, not standing at the curb ⇒ suppress pointing labels. |
+| Largest-person filter | `code/orchestrator.py::process_frame` (always on) | When multiple people are detected (forklift driver + worker, etc.), feed only the largest-area box to the matcher to prevent label-flicker faking a multi-direction sequence. |
+| Distinct-direction OR-acceptance | `min_distinct_directions` | Fires `point_and_call_done` when N distinct directions accumulate, in addition to strict permutation matching. Robust to "front" being indistinguishable from "vertically up" in 2-D pose. |
+
+### End-to-end smoke results (v1.1)
+
+| Clip | True positive | False positive | Notes |
+|---|---|---|---|
+| `samples/05_SHI_point_and_call.mp4` (41 s) | ✅ matches at t=30.00s & t=33.00s (good actor pointing) | ✅ none | Bad-example walking actor with briefly extended arm correctly suppressed by velocity gate |
+| `samples/04_NA_diagonal_crossing.mp4` (35 s) | ✅ match at t=25.40s (actor's gesture before crossing) | ✅ none | After threshold relaxation, actor's hand-at-eye + arm-extended sequence both register (point_left + point_right) |
+
+### Known limitations
+
+- **Far-field actors**: when the actor is < 15 % of frame height (NA clip), keypoint
+  scores fall below the rule's `min_keypoint_score` floor, and most pointing-frames
+  return `invalid`. Tracking + a higher-resolution pose model would help.
+- **Forearm vs upper-arm bending**: a "phone in hand, walking" pose with arm
+  swinging at the side can briefly hit the extension thresholds, but the
+  stationary-actor gate suppresses these because hips are moving.
+- **2-D front detection**: a worker pointing AWAY from the camera (down the
+  crosswalk) has the wrist at near-zero pixel offset from the shoulder. The
+  rule conflates this with "vertically up" and either case fails the elevation
+  filter. Hence `min_distinct_directions: 2` instead of strict 3.
 
 ## v2 Roadmap
 

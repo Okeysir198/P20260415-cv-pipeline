@@ -30,6 +30,8 @@ from _geometry import (  # noqa: E402
 )
 
 # COCO-17 indices used by this rule.
+_NOSE = 0
+_L_EAR, _R_EAR = 3, 4
 _L_SHOULDER, _R_SHOULDER = 5, 6
 _L_ELBOW, _R_ELBOW = 7, 8
 _L_WRIST, _R_WRIST = 9, 10
@@ -56,12 +58,17 @@ class PointingDirectionDetector(PoseRule):
         front_half_angle_deg: float = 30.0,
         side_half_angle_deg: float = 45.0,
         min_keypoint_score: float = 0.3,
+        min_wrist_ear_distance_ratio: float = 0.0,
     ) -> None:
         self._elbow_angle_min_deg = float(elbow_angle_min_deg)
         self._arm_elevation_max_deg = float(arm_elevation_max_deg)
         self._front_half_angle_deg = float(front_half_angle_deg)
         self._side_half_angle_deg = float(side_half_angle_deg)
         self._min_keypoint_score = float(min_keypoint_score)
+        # Reject "phone-to-ear" / hand-near-face poses: require wrist to be at
+        # least N * shoulder_width away from the nearest ear. 0 disables the
+        # check (default; tests don't supply ear-distant fixtures).
+        self._min_wrist_ear_dist_ratio = float(min_wrist_ear_distance_ratio)
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -91,6 +98,10 @@ class PointingDirectionDetector(PoseRule):
                 return RuleResult(False, 0.0, self.behavior, debug)
 
         # Per-side extension check.
+        # Elevation + azimuth use the FOREARM vector (elbow->wrist): more robust
+        # to bent-elbow real-world pointing where the upper arm is dropped but
+        # the forearm is the actual pointing vector. Elbow-angle gate still uses
+        # the full shoulder-elbow-wrist triangle (a true straight-arm criterion).
         sides = {
             "left": (_L_SHOULDER, _L_ELBOW, _L_WRIST),
             "right": (_R_SHOULDER, _R_ELBOW, _R_WRIST),
@@ -98,17 +109,25 @@ class PointingDirectionDetector(PoseRule):
         side_metrics: dict[str, dict] = {}
         extending: list[str] = []
 
+        # Reject phone-to-ear: wrist within R*shoulder_width of nearest ear.
+        sw = float(np.linalg.norm(keypoints[_R_SHOULDER] - keypoints[_L_SHOULDER])) + 1e-6
         for name, (s_idx, e_idx, w_idx) in sides.items():
             ea = elbow_angle_deg(
                 keypoints[s_idx], keypoints[e_idx], keypoints[w_idx]
             )
-            el = arm_elevation_deg(keypoints[s_idx], keypoints[w_idx])
+            el = arm_elevation_deg(keypoints[e_idx], keypoints[w_idx])
             side_metrics[name] = {"elbow_angle": ea, "arm_elevation": el}
-            if (
+            if not (
                 ea >= self._elbow_angle_min_deg
                 and el <= self._arm_elevation_max_deg
             ):
-                extending.append(name)
+                continue
+            if self._min_wrist_ear_dist_ratio > 0.0:
+                d_l_ear = float(np.linalg.norm(keypoints[w_idx] - keypoints[_L_EAR]))
+                d_r_ear = float(np.linalg.norm(keypoints[w_idx] - keypoints[_R_EAR]))
+                if min(d_l_ear, d_r_ear) / sw < self._min_wrist_ear_dist_ratio:
+                    continue
+            extending.append(name)
 
         if not extending:
             debug["label"] = "neutral"
@@ -123,7 +142,7 @@ class PointingDirectionDetector(PoseRule):
         else:
             side = extending[0]
 
-        s_idx, _e_idx, w_idx = sides[side]
+        s_idx, e_idx, w_idx = sides[side]
 
         _, e_x, e_y = torso_frame_basis(
             keypoints[_L_SHOULDER],
@@ -131,9 +150,9 @@ class PointingDirectionDetector(PoseRule):
             keypoints[_L_HIP],
             keypoints[_R_HIP],
         )
-        # Use the chosen-side shoulder as origin for the arm vector.
+        # Forearm vector (elbow->wrist) is what actually points at the target.
         azimuth = arm_azimuth_torso_frame(
-            keypoints[s_idx], keypoints[w_idx], e_x, e_y
+            keypoints[e_idx], keypoints[w_idx], e_x, e_y
         )
 
         debug["side"] = side
@@ -145,7 +164,7 @@ class PointingDirectionDetector(PoseRule):
         debug["label"] = label
 
         # Confidence = min of wrist+elbow+shoulder scores for the chosen side.
-        conf = float(min(scores[s_idx], scores[_e_idx], scores[w_idx]))
+        conf = float(min(scores[s_idx], scores[e_idx], scores[w_idx]))
         # Detector never fires triggered itself.
         return RuleResult(False, conf, self.behavior, debug)
 

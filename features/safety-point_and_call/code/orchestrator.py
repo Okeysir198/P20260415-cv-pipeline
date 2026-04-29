@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ _DIRECTION_RULE_KEYS = {
     "front_half_angle_deg",
     "side_half_angle_deg",
     "min_keypoint_score",
+    "min_wrist_ear_distance_ratio",
 }
 
 
@@ -104,12 +106,28 @@ class PointAndCallOrchestrator:
         rule_kwargs = {k: v for k, v in pac_cfg.items() if k in _DIRECTION_RULE_KEYS}
         self._direction_rule = PointingDirectionDetector(**rule_kwargs)
 
-        seq_cfg = self._cfg.get("sequence", {}) or {}
+        # Stationary-actor gate: a true shisa-kanko gesture is performed at the
+        # curb (worker stops, points, then crosses). Walking actors with briefly
+        # extended arms (the SHI/NA "bad example" scenes) look identical
+        # frame-to-frame. Forcing label -> neutral when hips translate faster
+        # than this threshold removes that false-positive class.
+        self._max_body_speed_px_per_sec = float(pac_cfg.get("max_body_speed_px_per_sec", 0.0))
+        # Per-track sliding window of (timestamp, hip_xy) for smoothed speed.
+        from collections import deque
+        self._hip_history: dict[int, deque] = {}
+        self._hip_window_seconds = 1.5
+
+        # Sequence params live under pose_rules.point_and_call: in 10_inference.yaml;
+        # cooldown_frames lives under alerts:.
+        alerts_cfg = self._cfg.get("alerts", {}) or {}
         self._seq_kwargs = {
-            "hold_frames": int(seq_cfg.get("hold_frames", 5)),
-            "window_seconds": float(seq_cfg.get("window_seconds", 8.0)),
-            "sequence_modes": list(seq_cfg.get("modes", ["LR", "RL", "LRF", "RLF"])),
-            "cooldown_frames": int(seq_cfg.get("cooldown_frames", 90)),
+            "hold_frames": int(pac_cfg.get("hold_frames", 5)),
+            "window_seconds": float(pac_cfg.get("window_seconds", 8.0)),
+            "sequence_modes": list(
+                pac_cfg.get("sequence_modes", ["LRF", "LFR", "RLF", "RFL", "FLR", "FRL"])
+            ),
+            "cooldown_frames": int(alerts_cfg.get("cooldown_frames", 90)),
+            "min_distinct_directions": int(pac_cfg.get("min_distinct_directions", 0)),
         }
         # Per-track matcher. v1 uses a single track id 0.
         self._matchers: dict[int, CrosswalkSequenceMatcher] = {}
@@ -143,6 +161,17 @@ class PointAndCallOrchestrator:
             timestamp = t0 - self._t0_wall
 
         pose_samples = self._pose(image_bgr)
+        # v1: single-person matcher. When multiple people are visible (forklift
+        # driver + worker, etc.) feeding all their labels into track_id=0
+        # produces label-flicker that fakes a "multi-direction sequence". Keep
+        # only the largest-area person box so the matcher sees one consistent
+        # actor.
+        if len(pose_samples) > 1:
+            def _box_area(s):
+                b = s[2]
+                return float((b[2] - b[0]) * (b[3] - b[1]))
+            pose_samples = [max(pose_samples, key=_box_area)]
+
         persons: list[PersonBehavior] = []
         alerts: list[str] = []
         current_label: str | None = None
@@ -153,6 +182,28 @@ class PointAndCallOrchestrator:
             label = str(res.debug_info.get("label", "invalid"))
 
             track_id = 0  # v1: single-person.
+
+            # Stationary-actor gate: suppress pointing labels while the actor's
+            # hips are translating fast (i.e. they're walking, not standing at
+            # the curb performing the gesture). Speed is smoothed over a
+            # 0.5 s sliding window so single-frame pose jitter doesn't fake
+            # a "stopped" instant inside a walking sequence.
+            from collections import deque
+            hip_mid = 0.5 * (np.asarray(kpts[11]) + np.asarray(kpts[12]))
+            hist = self._hip_history.setdefault(track_id, deque())
+            hist.append((float(timestamp), hip_mid))
+            cutoff = float(timestamp) - self._hip_window_seconds
+            while hist and hist[0][0] < cutoff:
+                hist.popleft()
+            if self._max_body_speed_px_per_sec > 0.0 and label.startswith("point_") and len(hist) >= 2:
+                t0, xy0 = hist[0]
+                t1, xy1 = hist[-1]
+                dt = max(t1 - t0, 1e-3)
+                avg_speed = float(np.linalg.norm(xy1 - xy0)) / dt
+                if avg_speed > self._max_body_speed_px_per_sec:
+                    label = "neutral"
+                    res.debug_info["label"] = "neutral"
+                    res.debug_info["suppressed_by"] = f"walking ({avg_speed:.0f}px/s)"
             matcher = self._get_matcher(track_id)
             seq_state = matcher.feed(label, timestamp)
 
@@ -328,10 +379,112 @@ def _smoke_test(pose_backend_override: str | None) -> None:
     print(f"Annotated images       -> {eval_dir}/smoke_*.jpg")
 
 
+def _video_test(video_path: Path, pose_backend_override: str | None) -> None:
+    feat = REPO / "features" / "safety-point_and_call"
+    config_path = feat / "configs" / "10_inference.yaml"
+    eval_dir = feat / "eval"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+
+    if not video_path.exists():
+        print(f"Video not found: {video_path}", file=sys.stderr)
+        sys.exit(1)
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        print(f"Could not open video: {video_path}", file=sys.stderr)
+        sys.exit(1)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    print(f"Video       : {video_path}  ({width}x{height} @ {fps:.2f} fps, {n_frames} frames)")
+    print(f"Config      : {config_path}")
+    if pose_backend_override:
+        print(f"Pose backend override: {pose_backend_override}")
+
+    orchestrator = PointAndCallOrchestrator(
+        config_path, pose_backend_override=pose_backend_override
+    )
+
+    out_mp4 = eval_dir / f"smoke_{video_path.stem}.mp4"
+    out_json = eval_dir / f"smoke_{video_path.stem}.json"
+
+    # OpenCV's libx264 is unavailable on this host; pipe BGR frames straight to
+    # the ffmpeg binary instead.
+    ff = subprocess.Popen(
+        [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "rawvideo", "-pix_fmt", "bgr24",
+            "-s", f"{width}x{height}", "-r", f"{fps}",
+            "-i", "-",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            str(out_mp4),
+        ],
+        stdin=subprocess.PIPE,
+    )
+
+    timeline: list[dict] = []
+    label_hist: dict[str, int] = {}
+    first_done_frame: int | None = None
+
+    frame_idx = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        timestamp = frame_idx / fps
+        out = orchestrator.process_frame(frame, timestamp=timestamp)
+
+        label = out.current_label or "no_person"
+        label_hist[label] = label_hist.get(label, 0) + 1
+        if first_done_frame is None and "point_and_call_done" in out.alerts:
+            first_done_frame = frame_idx
+
+        timeline.append(
+            {
+                "frame": frame_idx,
+                "t": round(timestamp, 3),
+                "label": label,
+                "progress": out.sequence_progress,
+                "alerts": out.alerts,
+                "latency_ms": round(out.latency_ms, 2),
+            }
+        )
+
+        ff.stdin.write(orchestrator.draw(frame, out).tobytes())
+
+        if frame_idx % 60 == 0:
+            print(
+                f"  f={frame_idx:4d}  t={timestamp:5.2f}s  label={label:<13}  "
+                f"progress={[p.replace('point_', '') for p in out.sequence_progress]}"
+                + (f"  ALERT={out.alerts}" if out.alerts else "")
+            )
+        frame_idx += 1
+
+    cap.release()
+    ff.stdin.close()
+    ff.wait()
+    out_json.write_text(json.dumps(timeline, indent=2))
+
+    print(f"\nFrames processed         : {frame_idx}")
+    print(f"Label histogram          : {label_hist}")
+    print(
+        "First point_and_call_done: "
+        + (f"frame {first_done_frame} (t={first_done_frame / fps:.2f}s)"
+           if first_done_frame is not None else "no match")
+    )
+    print(f"Annotated video          : {out_mp4}")
+    print(f"Per-frame timeline       : {out_json}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Point-and-call orchestrator (shisa-kanko)")
     parser.add_argument("--smoke-test", action="store_true",
-                        help="Run smoke test on sample images")
+                        help="Run smoke test on sample images in samples/")
+    parser.add_argument("--video", type=Path, default=None,
+                        help="Run on a video file; writes annotated mp4 + per-frame JSON to eval/")
     parser.add_argument(
         "--pose-backend",
         choices=["dwpose_onnx", "rtmpose", "mediapipe", "hf_keypoint"],
@@ -339,7 +492,9 @@ def main() -> None:
         help="Override the pose backend chosen by 10_inference.yaml",
     )
     args = parser.parse_args()
-    if args.smoke_test:
+    if args.video is not None:
+        _video_test(args.video, pose_backend_override=args.pose_backend)
+    elif args.smoke_test:
         _smoke_test(pose_backend_override=args.pose_backend)
     else:
         parser.print_help()

@@ -25,14 +25,26 @@ pose:
 # ── Pose-rule parameters ──────────────────────────────────────────────────────
 pose_rules:
   point_and_call:
-    elbow_angle_min_deg: 160     # arm must be nearly straight (shoulder-elbow-wrist angle)
-    arm_elevation_max_deg: 30    # arm roughly horizontal — reject "pointing up at sky"
-    front_half_angle_deg: 30     # ±30° around body forward axis classifies as front
-    side_half_angle_deg: 45      # 30°..(180-30)° on each side splits left vs right
-    min_keypoint_score: 0.3      # ignore frames with shoulder/elbow/wrist score below this
-    hold_frames: 6               # each direction must be sustained for >= 6 frames (~0.2s @30fps)
+    # Geometry thresholds tuned for casual industrial-video pointing (not formal
+    # Japanese stiff-arm shisa-kanko). Bent elbows and slightly diagonal arms count.
+    elbow_angle_min_deg: 45      # arm extended; tolerate tight L-shape (hand-at-eye-level Japanese-style point)
+    arm_elevation_max_deg: 60    # forearm within 60° of horizontal (allows raised pointing)
+    front_half_angle_deg: 35     # ±35° around body forward axis classifies as front
+    side_half_angle_deg: 55      # ±55° around body left/right axis classifies as left/right
+    min_keypoint_score: 0.25     # accept slightly lower keypoint scores (small-in-frame actors)
+    min_wrist_ear_distance_ratio: 0.35  # reject phone-CONTACT-ear (wrist actually touching ear); allow hand-at-eye-level points
+    max_body_speed_px_per_sec: 35       # smoothed-over-1.5s hip speed; > N px/s ⇒ walking ⇒ suppress pointing labels; 0 disables
+    hold_frames: 3               # each direction sustained ≥ 3 frames (0.1s @30fps); brief gestures count
     window_seconds: 5.0          # full sequence must complete within 5s wall-clock
-    sequence_modes: [LR, RL, LRF, RLF]   # accepted ordered sequences (L=left, R=right, F=front)
+    # Sequence acceptance — TWO ways to fire `point_and_call_done`:
+    #   (a) one of the strict ordered permutations below matches, OR
+    #   (b) `min_distinct_directions` distinct directions accumulate in the window.
+    # In real-world video, 2-D pose can't reliably distinguish "front" from
+    # "vertically up the body" when the actor faces the camera, so treat
+    # min_distinct_directions: 2 as the robust default — fires when the actor
+    # demonstrably points in 2+ different directions within window_seconds.
+    sequence_modes: [LRF, LFR, RLF, RFL, FLR, FRL]
+    min_distinct_directions: 2   # 0=disabled; 2/3=OR-condition (any sustained pointing while stationary)
 
 # ── Per-behavior alert config ─────────────────────────────────────────────────
 # Keys consumed by core.p10_inference.video_inference.load_alert_config.
