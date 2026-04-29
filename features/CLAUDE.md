@@ -18,6 +18,7 @@
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi` | Orchestrator | 🔧 Pretrained only | dwpose_384_pose (det_rate=1.0) | — | 🔄 pipelines done |
 | `safety-poketenashi-phone-usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |
+| `safety-point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 v1 rule-based MVP (DWPose + per-frame direction classifier + L→R→F sequence matcher) |
 | `ppe-helmet_detection` | Detection | 🎯 Fine-tune | melihuzunoglu_yolov11_ppe.pt | 0.105 | ⬜ not started |
 | `ppe-shoes_detection` | Detection | 🎯 Fine-tune | none (no foot detector) | 0.000 | ⬜ not started |
 | `access-face_recognition` | Face recognition | 🔧 Pretrained only | yunet + sface (rank-1=1.0) | — | 🔄 pipelines done |
@@ -109,6 +110,24 @@ Multiple training iterations ran on fire_detection exploring arch choice (YOLOX-
 - **Code fixes made during the investigation** (still in the codebase): YOLOX `+ 0.5` decode bug removed; p08 evaluator preprocessing parity with training val; HF `cls_loss=0.0` logging artefact (key filter now matches `loss_vfl` / `loss_dfl`); `id2label`/`label2id` auto-populated from 05_data `names:` dict in `build_hf_model`.
 
 Current Phase B plan restarts on all 5 detection features from scratch at 20% data, comparing YOLOX-M / RT-DETRv2-R50 / D-FINE-M — see each feature's CLAUDE.md.
+
+---
+
+### Iteration 9 — 2026-04-29 (new feature: safety-point_and_call)
+
+New feature folder `features/safety-point_and_call/` for the Japanese 指差呼称 (shisa-kanko / point-and-call) crosswalk gesture: worker stops at the curb, points right (右ヨシ!), points left (左ヨシ!), optionally points front (前ヨシ!), then crosses. Distinct from `safety-poketenashi/code/pointing_calling_detector.py`, which only detects whether *any* arm is extended horizontally (binary, non-directional, no L→R→F sequence).
+
+**v1 design (this iteration):**
+- Pretrained-only — no own training set, no `06_training_*.yaml`, no `00_data_preparation.yaml`.
+- Swappable pose backend (DWPose ONNX / RTMPose / MediaPipe / HF ViTPose) behind a thin `PoseBackend` Protocol in `code/pose_backend.py`. Default backend is DWPose for parity with `safety-poketenashi`.
+- Per-frame direction classifier (`PointingDirectionDetector`): COCO-17 keypoints → torso-frame arm azimuth → label ∈ {point_left, point_right, point_front, neutral, invalid}.
+- Temporal `CrosswalkSequenceMatcher`: emits `point_and_call_done` when an ordered subsequence (LR / RL / LRF / RLF) is held within `window_seconds`, each direction sustained ≥ `hold_frames`. Optional `cross_zone:` polygon triggers `missing_directions` when person crosses without a recent successful match.
+
+**v2 roadmap** (not implemented):
+- Bootstrap dataset from DP Dataset (Kyoto U, ~2M frames, 3D pointing direction) + Roboflow `wayceys-workspace/hand-pointing-directions` (1.7k images). Self-collect ~200 crosswalk clips for fine-tune.
+- Replace per-frame geometric rule with a 5-class MLP head on (kpt, kpt_score) features.
+- Upgrade to ST-GCN / 1D-TCN if rule recall < 90% in field testing.
+- Full pipeline: `06_training_*.yaml`, ONNX export, release packaging.
 
 ---
 
