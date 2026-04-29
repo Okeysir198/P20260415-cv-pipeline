@@ -31,10 +31,10 @@ Aggregate: **4 TP, 67 FP, 3 FN**. Precision **0.056**, Recall **0.571**, F1 **0.
 
 ### B. Known failure modes (open until resolved)
 
-- [ ] **Lecture FPs** — `POKETENASHI_anzen_daiichi_lecture.mp4` fires 51 times. Root cause: `elbow_angle_min_deg=45` + `min_distinct_directions=2` accept any raised + bent arm in two distinct azimuth bins; presenter's normal hand gestures while speaking pass the gate. Proposed fix: gesture-onset temporal pattern (rest → raise → hold → lower state machine on wrist velocity) — see Phase 2 Intervention A.
-- [ ] **Phone-on-ear FP in `POKETENASHI.mp4`** — first match fires at t=82.9 s during the KE phone-usage section, not the SHI section at 174–217 s. Root cause: `min_wrist_ear_distance_ratio=0.35` is too loose; phone holders' wrist is near forehead/cheek but not directly at the ear. Proposed fix: two-tier confidence gate — Phase 2 Intervention B.
-- [ ] **Far-field FN in `SHI_point_and_call_spkepcmwi.mp4`** — actor at < 15 % of frame height; wrist scores 0.16–0.45 fall below `min_keypoint_score=0.25`. Proposed fix: pre-pose crop upscale — Phase 2 Intervention C.
-- [ ] **Pose-jitter FPs (suspected)** — could be contributing to the lecture / outro FPs. Random-azimuth flicker may pass `min_distinct_directions: 2` if successive frames bin to L vs R noisily. Proposed fix: sequence transition-shape filter — Phase 2 Intervention D.
+- [ ] **Lecture FPs (root cause refined)** — `POKETENASHI_anzen_daiichi_lecture.mp4` fires 51 times because the lecturer holds his arm in *sustained static poses* across the matcher's 5 s window, accumulating ≥ 2 distinct direction labels. Wrist is **stationary** at FP-time (median 73 px/s) — the original "lecturer waves continuously" hypothesis is rejected by the data. Real fix (**A'**): require a "wrist returns to rest" event between successive direction holds in `CrosswalkSequenceMatcher`. See `eval/failure_mode_analysis.md` for confirmed numbers.
+- [ ] **POKETENASHI walking-with-phone FPs (root cause refined)** — t=82.9 s match isn't phone-on-ear; the actor is walking with phone in hand and his ambient arm position fires the rule. Wrist-ear ratio overlaps cleanly with TPs (FP 1.46 vs TP 1.67 medians; ranges overlap fully). The structural fix is the per-track APPROACH→CROSSING FSM (zone polygons + ByteTrack); pose-only thresholds cannot fix this. Palliative (**B'**): tighten `max_body_speed_px_per_sec` 35→20.
+- [ ] **Far-field FN — actually a "hand-at-face" pose problem** — `SHI_point_and_call_spkepcmwi.mp4` actor performs the Japanese stiff-arm hand-at-eye-level point. DWPose's wrist heatmap confuses with head; wrist scores median 0.10–0.13 (below 0.25 gate); 91 % of in-window frames are `invalid`. Shoulder is 22.8 % of frame width — not actually far. Real fix (**C**): minimum 192 px crop upscale before DWPose; if that's not enough, switch to a larger pose model.
+- [x] ~~Pose-jitter FPs~~ — REJECTED. Lecture FP windows show sustained labels (`left × 13`), not L↔R jitter. Intervention D not warranted; skipped.
 - [x] **AV1 codec silent failure** — `shisa_kanko_railway_toyota.mp4` was originally AV1-encoded; OpenCV's bundled FFmpeg can't decode AV1 without HW accel and returned 0 frames silently. Fixed by re-encoding to H.264 (commit on `main`).
 - [ ] *(deferred)* **Cartoon-character handling** — DWPose is photographic-only. `shisa_kanko_correct_demo.mp4` (animated mascot) is unevaluable. No fix planned in v1.x.
 
@@ -42,6 +42,7 @@ Aggregate: **4 TP, 67 FP, 3 FN**. Precision **0.056**, Recall **0.571**, F1 **0.
 
 - **2026-04-29** — Audited the orchestrator on the expanded 9-video sample set. Hand-tabulated F1 ≈ 0.5. Identified 3 actionable failure modes (lecture FPs, phone-on-ear FP, far-field FN) plus the AV1 codec bug (fixed in-place). Investigation plan filed at `~/.claude/plans/with-this-home-ct-admin-documents-langgr-federated-dewdrop.md`. Goal: lift F1 to ≥ 0.8 via 4 rule-based interventions before considering the ML head escalation on the v2 roadmap.
 - **2026-04-29 (Phase 0 done)** — Built `code/eval_robustness.py` + `eval/ground_truth.json` and ran the first reproducible baseline. **Real event-level F1 = 0.103** (P=0.056, R=0.571), much worse than the hand-tabulated 0.5: cooldown re-fires count individually so the lecture's 51 matches all count as FPs. New issues surfaced: (a) `shisa_kanko_railway_toyota` has 3 FPs *outside* the 148–203 s GT window plus the 1 TP inside; (b) `autotech_indonesia_senam` is currently classified FN — 3 matches fired at t=37.6 s but my GT window guess of [100, 130] is probably wrong, refine the GT next time someone watches the clip. Baseline locked at `eval/robustness_baseline.json`. Phase 1 next: per-cluster failure dump.
+- **2026-04-29 (Phase 1 done)** — Built `code/dump_debug.py` + `code/analyze_failures.py`, dumped per-frame CSVs for 4 priority videos (lecture, POKETENASHI, SHI_spkepcmwi, 05_SHI as TP reference), generated `eval/failure_mode_analysis.md` with stats. **2 of 4 hypotheses rejected**: (A) lecture FPs are NOT from waving — wrist is stationary at FP-time (median 73 px/s) vs TP (172 px/s); lecturer holds sustained static poses across the 5 s matcher window. (B) phone-on-ear ratio doesn't separate FP from TP — overlap is total. (C) confirmed but the cause is hand-at-face pose confusing DWPose, not far-field. (D) pose-jitter rejected — labels are sustained, not jittery. Refined Phase 2: only A' (rest-between-directions in matcher) + C (crop upscaling) + B' (tighten velocity gate) — D dropped. Expected F1 lift from A' alone: 0.10 → ~0.6.
 
 ### Next steps (in order)
 
@@ -51,12 +52,15 @@ Aggregate: **4 TP, 67 FP, 3 FN**. Precision **0.056**, Recall **0.571**, F1 **0.
 4. After each intervention: re-run harness, append a section C log entry, tick the section B checkbox if resolved.
 5. Phase 3 gate: ship rule-based v1.2 if F1 ≥ 0.8, else escalate to ML head (v2).
 
-### Re-running the harness
+### Tools
 
-```
-uv run python features/safety-poketenashi_point_and_call/code/eval_robustness.py
-```
-Takes ~9 min on GPU (DWPose ONNX over 9 videos × ~30 fps). Auto-rewrites section A above and writes a timestamped report to `eval/robustness_<ts>.json`. Add `--against eval/robustness_baseline.json` to print a delta vs the locked baseline. **Do not run two of these in parallel** — single GPU contention will hang the desktop.
+| Script | Purpose | Cost |
+|---|---|---|
+| `code/eval_robustness.py` | Reproducible event-level scoring; auto-rewrites section A above; writes a timestamped report. Pass `--baseline` once to lock the baseline; pass `--against eval/robustness_baseline.json` on later runs to print a delta. | ~9 min on GPU (full 9-video set) |
+| `code/dump_debug.py` | Per-frame CSV with all rule debug fields + extra (wrist-ear ratio, hip mid, kp scores). Default 4 priority videos for Phase 1; pass video filenames to dump a subset. | ~7 min on GPU for the 4-video default; ~12 s for `05_SHI_point_and_call.mp4` alone |
+| `code/analyze_failures.py` | Reads the dump CSVs + baseline JSON and writes `eval/failure_mode_analysis.md` with confirmed/rejected hypotheses and recommended thresholds. | ~1 s (CPU only) |
+
+**Do not run two GPU jobs in parallel** — single-GPU contention will hang the desktop. The dump and harness should run sequentially.
 
 ## Overview
 
