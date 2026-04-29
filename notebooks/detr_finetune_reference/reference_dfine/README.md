@@ -15,28 +15,44 @@ byte-for-byte original `.ipynb` files in the same folder.
 
 ## Status
 
-**D-FINE reference has hyperparameter adjustments** relative to qubvel's
-raw recipe. The naïve port (lr=5e-5) plateaus val mAP at ep3 ≈ 0.20
-because `ustc-community/dfine-large-coco` is ~3× the parameter count
-of `rtdetr_v2_r50vd` — the same LR is too hot for the larger backbone.
+`finetune.py` is a byte-for-byte port of qubvel's reference recipe — no
+hyperparameter adjustments. An earlier "fix" (lr=2e-5 / cosine / WD=1e-4 /
+bf16) was tried and **reverted**: it stalled val mAP at 0.22 / test 0.37,
+worse than qubvel's published 0.4485. D-FINE requires fp32 (bf16 stalls
+the distribution-focused loss; fp16 overflows decoder).
 
-Applied fix (baked into `finetune.py`):
+| Knob | Value | Note |
+|---|---|---|
+| `learning_rate` | 5e-5 | qubvel default |
+| `warmup_steps` | 300 | qubvel default |
+| `lr_scheduler` | linear (default) | qubvel default |
+| `weight_decay` | 0 (default) | qubvel default |
+| `bf16` | **False** | required for D-FINE — DFL stalls under bf16 |
+| `num_train_epochs` | 30 | qubvel default; we recommend 50 elsewhere |
+| `metric_for_best_model` | `eval_map` | torchmetrics emits `map` → HF prepends `eval_` |
 
-| Knob | qubvel | **this script** | Why |
-|---|---|---|---|
-| `learning_rate` | 5e-5 | **2e-5** | halved for the larger backbone |
-| `warmup_steps` | 300 | **500** | gentler rampup |
-| `lr_scheduler` | linear (default) | **cosine** | |
-| `weight_decay` | 0 (default) | **1e-4** | DETR canonical |
-| `bf16` | — | **True** | RTX 5090 tensor cores |
+Only additions over qubvel's notebook: early `set_seed(SEED)` + cuDNN
+deterministic flags (`warn_only=True`) for reproducibility — no
+optimization-math changes.
 
 ## Run
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 .venv-notebook/bin/python \
   notebooks/detr_finetune_reference/reference_dfine/finetune.py \
-  --seed 42 --tag lr2e5_warmup500_cosine_wd_bf16
+  --seed 42 --tag qubvel_lr5e5_warmup300_linear
 ```
 
-Target val mAP: should climb past 0.25 (vs 0.20 ceiling of naïve port).
-Target test mAP: somewhere in 0.35-0.45 (qubvel's published: 0.4485).
+Output dir: `runs/dfine_large_cppe5_seed{SEED}{_TAG}/`.
+
+## Reproduced numbers (seed=42)
+
+| Source | test_mAP | test_mAP_50 |
+|---|---|---|
+| qubvel published | 0.4485 | — |
+| this repro (`runs/dfine_large_cppe5_seed42_qubvel_lr5e5_warmup300_linear/`) | **0.4294** | **0.6289** |
+
+The ~0.02 gap vs qubvel's 0.4485 is within the expected D-FINE per-seed
+spread (`warn_only=True` lets non-deterministic deformable-attention
+backward kernels run). See parent `CLAUDE.md` for cross-arch comparisons
+and the dfine-n recommendation for production CPPE-5-scale runs.
