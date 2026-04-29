@@ -47,8 +47,12 @@ import os
 from pathlib import Path
 
 # Parse args (and SEED env) before torch import — matches the RT-DETRv2 port's
-# determinism convention.
-_argp = argparse.ArgumentParser(add_help=False)
+# determinism convention. `add_help=True` so `--help` short-circuits *before*
+# the module-level dataset load / image_processor / trainer construction
+# block runs (otherwise `--help` would silently start the EuroSAT download).
+_argp = argparse.ArgumentParser(
+    description="Swin-tiny fine-tune on EuroSAT (HF cookbook reference port).",
+)
 _argp.add_argument("--seed", type=int, default=int(os.environ.get("SEED", 42)))
 _argp.add_argument("--tag", type=str, default=os.environ.get("RUN_TAG", ""),
                    help="optional suffix on the run dir, e.g. 'swin_tiny_eurosat'")
@@ -56,7 +60,7 @@ _argp.add_argument("--epochs", type=int, default=None,
                    help="override upstream default of 3 epochs")
 _argp.add_argument("--output-dir", type=str, default=None,
                    help="override default runs/<tag>_seed<SEED>/ location")
-_args, _ = _argp.parse_known_args()
+_args = _argp.parse_args()
 SEED = _args.seed
 TAG = _args.tag
 EPOCHS_OVERRIDE = _args.epochs
