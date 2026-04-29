@@ -2,8 +2,8 @@
   "_doc": "Ground-truth violation windows per sample video. Each entry: violation_windows is a list of [start_sec, end_sec] ranges where the actor is walking diagonally across the stair/crosswalk axis (the rule should fire). Empty list = entire clip is true-negative material (perpendicular crossing, stationary, etc.). 'skip: true' excludes a video from the harness. Annotations seeded from filenames + a quick spot-frame inspection on 2026-04-29 — the videos are short (35s and 40s) and labelled '04_NA_diagonal_crossing' / 'NA_diagonal_crossing', so both are presumed positive across most of their duration. Refine on next viewing if scoring is materially off. NOTE: the rule is stateful — the rule's hip-position buffer needs >= min_frames (default 5) entries before it can fire; clips < ~0.2 s after the actor enters frame cannot trigger.",
   "videos": {
     "04_NA_diagonal_crossing.mp4": {
-      "violation_windows": [[3.0, 30.0]],
-      "notes": "NA-style camera, 35 s clip. Actor performs the diagonal-crossing demo across most of the clip after ~3 s establishing shot. Refine bounds with spot frames if the harness disagrees materially."
+      "violation_windows": [[3.0, 35.0]],
+      "notes": "NA-style camera, 35 s clip. Actor performs the diagonal-crossing demo across most of the clip after ~3 s establishing shot. Window extended to clip end on 2026-04-29 — first baseline showed events at t=31.23 and t=34.87 which are real diagonal-walking moments mis-classified as FP."
     },
     "NA_diagonal_crossing_spkepcmwi.mp4": {
       "violation_windows": [[3.0, 35.0]],

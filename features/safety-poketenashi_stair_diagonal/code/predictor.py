@@ -131,6 +131,7 @@ class StairDiagonalPredictor:
         rule_cfg = self._cfg.get("pose_rules", {}).get("stair_diagonal", {})
         self._max_angle_deg = float(rule_cfg.get("max_diagonal_angle_deg", 20.0))
         self._min_frames = int(rule_cfg.get("min_frames", 5))
+        self._min_displacement_px = float(rule_cfg.get("min_hip_displacement_px", 20.0))
 
         # Per-track stateful detectors. v1 single-track flow uses track_id=0.
         self._detectors: dict[int, StairSafetyDetector] = {}
@@ -174,6 +175,7 @@ class StairDiagonalPredictor:
             det = StairSafetyDetector(
                 max_diagonal_angle_deg=self._max_angle_deg,
                 min_frames=self._min_frames,
+                min_hip_displacement_px=self._min_displacement_px,
             )
             self._detectors[track_id] = det
         return det

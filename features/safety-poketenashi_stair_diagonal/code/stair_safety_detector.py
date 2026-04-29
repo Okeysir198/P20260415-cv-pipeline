@@ -36,9 +36,14 @@ class StairSafetyDetector(PoseRule):
         self,
         max_diagonal_angle_deg: float = 20.0,
         min_frames: int = _MIN_FRAMES,
+        min_hip_displacement_px: float = 20.0,
     ) -> None:
         self._angle_threshold = max_diagonal_angle_deg
         self._min_frames = min_frames
+        # Below this oldest→newest displacement, the rule is "stationary, no
+        # angle to compute" — protects against sub-pixel pose jitter on a
+        # standing actor producing arbitrary near-vertical angles.
+        self._min_displacement_px = float(min_hip_displacement_px)
         self._hip_positions: list[np.ndarray] = []
 
     def check(
@@ -75,6 +80,17 @@ class StairSafetyDetector(PoseRule):
         end = self._hip_positions[-1]
         dx = float(end[0] - start[0])
         dy = float(end[1] - start[1])
+        displacement = math.hypot(dx, dy)
+
+        if displacement < self._min_displacement_px:
+            # Slide window even when stationary so the buffer doesn't pile up.
+            if len(self._hip_positions) > 30:
+                self._hip_positions.pop(0)
+            return RuleResult(
+                False, 0.0, self.behavior,
+                {"reason": f"stationary ({displacement:.1f}px < {self._min_displacement_px:.0f})",
+                 "displacement_px": round(displacement, 1)},
+            )
 
         # Angle from horizontal (stair axis assumed roughly horizontal).
         trajectory_angle_deg = abs(math.degrees(math.atan2(dy, dx + 1e-9)))

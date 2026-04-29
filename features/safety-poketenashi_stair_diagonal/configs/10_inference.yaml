@@ -31,6 +31,7 @@ pose_rules:
   stair_diagonal:
     max_diagonal_angle_deg: 20   # crossing angle > this from horizontal stair axis = diagonal
     min_frames: 5                # min hip positions buffered before evaluating trajectory
+    min_hip_displacement_px: 20  # below this oldest→newest hip displacement, treat as "stationary, no angle"
 
 # ── Tracking (REQUIRED for multi-person — see CLAUDE.md) ──────────────────────
 tracker:
