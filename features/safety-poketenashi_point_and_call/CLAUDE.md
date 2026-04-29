@@ -24,9 +24,9 @@ image_bgr ─► person detector ─► pose backend ─► COCO-17 keypoints
                               alerts: [point_and_call_done | missing_directions]
 ```
 
-Distinct from `features/safety-poketenashi/code/pointing_calling_detector.py`,
-which only checks whether *any* arm is extended horizontally (binary,
-non-directional, no L→R→F sequence).
+Replaces the binary `pointing_calling_detector` that previously lived in the
+now-removed `safety-poketenashi/` umbrella (which only checked whether *any*
+arm was extended horizontally — binary, non-directional, no L→R→F sequence).
 
 ## Pose backend (swappable)
 
@@ -45,15 +45,14 @@ Adding a fifth backend = one ~50-LOC adapter + one branch in
 `build_pose_backend()`. No orchestrator or rule changes.
 
 Person detector (top-down crops): `pretrained/access-zone_intrusion/yolo11n.pt`,
-shared across backends. Same constraint as `safety-poketenashi`: never use bare
-`YOLO("model.pt")` (Ultralytics auto-downloads to cwd) — always pass an explicit
-absolute path from `pretrained/`.
+shared across backends. Never use bare `YOLO("model.pt")` (Ultralytics
+auto-downloads to cwd) — always pass an explicit absolute path from `pretrained/`.
 
 ## Quick Start
 
 ```bash
 # Smoke-test the orchestrator on sample images (default DWPose backend)
-cp features/safety-poketenashi/samples/*.jpg features/safety-poketenashi_point_and_call/samples/
+# Place a few worker JPGs under features/safety-poketenashi_point_and_call/samples/ first.
 uv run features/safety-poketenashi_point_and_call/code/orchestrator.py --smoke-test
 # Writes eval/orchestrator_smoke_test.json + eval/smoke_*.jpg
 
@@ -254,11 +253,10 @@ exceeded), upgrade in this order:
   `05_data.yaml` is **snake** (`safety_poketenashi_point_and_call`).
 - DWPose ONNX is shared with `safety-poketenashi` and
   `safety-fall_pose_estimation` — reuse the same checkpoint, do not duplicate.
-- `code/_base.py` redefines `PoseRule` + `RuleResult` locally instead of
-  importing from `safety-poketenashi` (project rule: `code/` may import
-  `core/` + `utils/` only, never another feature's `code/`).
-- `_DWPoseAdapter` is a ~60-LOC copy from `safety-poketenashi/code/orchestrator.py`
-  for the same reason — same project rule applies.
+- `code/_base.py` defines `PoseRule` + `RuleResult` locally (project rule:
+  `code/` may import `core/` + `utils/` only, never another feature's `code/`).
+- `_DWPoseAdapter` (~60 LOC) was inlined from the now-removed
+  `safety-poketenashi/` umbrella for the same reason.
 - The geometric direction classifier consumes COCO-17 keypoints (not
   WholeBody-133): shoulders 5/6, elbows 7/8, wrists 9/10, hips 11/12.
   DWPose returns 133 wholebody points; the adapter slices the first 17 (body).

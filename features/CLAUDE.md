@@ -67,7 +67,7 @@ Each feature's CLAUDE.md carries the Phase-B plan: 20% train + 20% val (full tes
 1. `safety-fire_detection` — 2 classes, 17k imgs (fastest signal)
 2. `safety-fall-detection` — 2 classes, 12k imgs
 3. `ppe-helmet_detection` — 4 classes, 22k imgs (multi-class stress)
-4. `safety-poketenashi-phone-usage` — 2 classes, 23k imgs, 94.6/5.4 imbalance (class-collapse stress)
+4. `safety-poketenashi_phone_usage` — 2 classes, 23k imgs, 94.6/5.4 imbalance (class-collapse stress)
 5. `ppe-shoes_detection` — 3 classes, 37k imgs (largest; may short-circuit if winner is obvious)
 6. `safety-fall_pose_estimation` — keypoints, after detection models done; blocked on mmpose + no training_ready data
 

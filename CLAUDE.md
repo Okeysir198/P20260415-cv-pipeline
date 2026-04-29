@@ -103,7 +103,7 @@ features/              Self-contained per-use-case folders (see features/README.
                        docs/03_platform/: access-, ppe-, safety-, traffic-
                        (e.g. safety-fire_detection, safety-fall-detection,
                        ppe-helmet_detection, ppe-shoes_detection,
-                       safety-poketenashi-phone-usage, access-face_recognition,
+                       safety-poketenashi_phone_usage, access-face_recognition,
                        access-zone_intrusion, detect_vehicle). Uniform layout:
                        configs/, code/, samples/, notebooks/, tests/, runs/,
                        eval/, export/, predict/, release/

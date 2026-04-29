@@ -4,7 +4,7 @@
 
 ## Overview
 
-Detects the act of using a phone while walking — a behavioral action class, not a physical object. COCO has `cell phone` as an object but not `phone_usage` as a walking behavior. Feeds `safety-poketenashi/code/orchestrator.py`.
+Detects the act of using a phone while walking — a behavioral action class, not a physical object. COCO has `cell phone` as an object but not `phone_usage` as a walking behavior. The bbox output fuses with the pose-rule features in the `safety-poketenashi_*` family at the post-processing layer (per-track event sink).
 
 ## Classes
 

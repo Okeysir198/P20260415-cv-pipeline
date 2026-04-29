@@ -10,9 +10,9 @@ frames, then computes the trajectory angle from the oldest to the newest
 position. If the deviation from horizontal (assumed stair axis) exceeds
 `max_diagonal_angle_deg` (default 20°), the rule fires.
 
-Source: split from `features/safety-poketenashi/code/stair_safety_detector.py`
-(`StairSafetyDetector`, behavior=`stair_diagonal`). The detector class is copied
-verbatim — the umbrella feature still owns the original until U11 retires it.
+Source: split from the now-removed `safety-poketenashi/` umbrella's
+`stair_safety_detector.py` (`StairSafetyDetector`, behavior=`stair_diagonal`).
+The detector class lives here verbatim.
 
 ## Pipeline Checklist
 
@@ -61,7 +61,6 @@ tests/test_stair_safety.py       — synthetic trajectory tests (4 cases)
 ## Notes
 
 - `code/` may import from `core/` and `utils/` only — never another feature's `code/`.
-- The detector source remains in `features/safety-poketenashi/code/stair_safety_detector.py`. U11 owns retiring the umbrella.
 - Pose model is shared with the other `safety-poketenashi_*` rule splits — load once if running them together.
 - Person detector path: `pretrained/access-zone_intrusion/yolo11n.pt` (falls back to whole-frame if absent).
 - Never use bare `YOLO("model.pt")` — Ultralytics auto-downloads to cwd; always use an absolute path from `pretrained/`.

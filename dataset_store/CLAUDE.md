@@ -193,7 +193,7 @@ uv run core/p00_data_prep/run.py --config features/<feature>/configs/00_data_pre
 | ppe-helmet_detection | `helmet_detection` | 22,323 | train/val/test |
 | ppe-shoes_detection | `shoes_detection` | 37,026 | train/val/test |
 | safety-fall-detection | `fall_detection` | 12,402 | train/val/test |
-| safety-poketenashi-phone-usage | `safety_poketenashi_phone_usage` | 22,975 | train/val/test |
+| safety-poketenashi_phone_usage | `safety_poketenashi_phone_usage` | 22,975 | train/val/test |
 
 ### Phase 1 v1 — planned distribution (dry-run verified)
 
@@ -243,7 +243,7 @@ Canonical class `head_with_nitto_hat` — now has 926 instances from bump-cap da
 | `helmet_detection/rf_chemical_ppe_11class` | ~200 | Shoes/NO-Shoes + Person |
 | `shoes_detection/keremberke_ppe` | ~200 | 1,361 shoe anns |
 
-#### Model H — Phone Usage (`safety-poketenashi-phone-usage`)
+#### Model H — Phone Usage (`safety-poketenashi_phone_usage`)
 **22,975 samples · phone_usage 91% (25,631 anns) / person 9% (1,449 anns) ⚠️**
 | Source | Imgs contributed | Why |
 |---|---|---|

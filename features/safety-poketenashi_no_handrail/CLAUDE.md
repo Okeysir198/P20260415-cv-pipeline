@@ -69,9 +69,8 @@ eval/                       Smoke-test outputs (gitignored except .gitkeep)
 - `code/_base.py` redefines `PoseRule` + `RuleResult` locally instead of
   importing from `safety-poketenashi` (project rule: `code/` may import
   `core/` + `utils/` only, never another feature's `code/`).
-- `handrail_detector.py` is copied verbatim from
-  `features/safety-poketenashi/code/handrail_detector.py`. The umbrella
-  source is preserved until U11 deletes it during umbrella consolidation.
+- `handrail_detector.py` was copied verbatim from the now-removed
+  `safety-poketenashi/` umbrella during the per-rule split.
 - `access-zone_intrusion/code/zone_intrusion.py` has a polygon evaluator
   using `matplotlib.path.Path`; this feature keeps the umbrella's
   `cv2.pointPolygonTest` to avoid cross-feature imports. Consolidation can

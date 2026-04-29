@@ -50,7 +50,7 @@ Pose estimation on 10 sample images — latency + detection rate metrics:
 > (see `safety-poketenashi_point_and_call` U3 smoke). Re-run the shared
 > benchmark or add an independent one once `training_ready/` data lands.
 
-Full results shared with the `safety-poketenashi_*` family — historical numbers under the pre-split `safety-poketenashi/eval/benchmark_results.json`.
+Full results shared with the `safety-poketenashi_*` family. Historical numbers were captured in the pre-split umbrella's eval directory before its retirement; current per-feature benchmarks live in each `safety-poketenashi_*/eval/`.
 
 ## Key Files
 

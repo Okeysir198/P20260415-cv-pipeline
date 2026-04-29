@@ -63,6 +63,6 @@ eval/                       gitignored; smoke-test + benchmark output (.gitkeep)
 ## Notes
 
 - **Folder is kebab + underscore** (`safety-poketenashi_hands_in_pockets`); `dataset_name` in `05_data.yaml` is **snake** (`safety_poketenashi_hands_in_pockets`).
-- `code/_base.py` and `code/hands_in_pockets_detector.py` are duplicated (not imported) from `safety-poketenashi/code/` — project rule: `code/` may import from `core/` and `utils/` only, never another feature's `code/`.
-- The DWPose adapter in `code/predictor.py` follows the cleaner pattern from `safety-point_and_call/code/pose_backend.py`.
+- `code/_base.py` and `code/hands_in_pockets_detector.py` are self-contained; project rule: `code/` may import from `core/` and `utils/` only, never another feature's `code/`.
+- The DWPose adapter in `code/predictor.py` follows the cleaner pattern from `safety-poketenashi_point_and_call/code/pose_backend.py`.
 - Person detector path is hard-coded to `pretrained/access-zone_intrusion/yolo11n.pt`; falls back to whole-frame box if missing. Never use bare `YOLO("model.pt")` (Ultralytics auto-downloads to cwd).
