@@ -95,8 +95,8 @@ def main() -> None:
     p.add_argument("--n", type=int, default=16, help="number of samples in the grid")
     p.add_argument("--sample-seed", type=int, default=42,
                    help="RNG for index sampling (reproducible grids)")
-    p.add_argument("--dataset", type=str, default="segments/sidewalk-semantic-2",
-                   help="HF dataset id; match finetune.py's choice")
+    p.add_argument("--dataset", type=str, default="segments/sidewalk-semantic",
+                   help="HF dataset id; match finetune.py's choice (gated — needs HF_TOKEN)")
     p.add_argument("--split-seed", type=int, default=1,
                    help="seed used by finetune.py's ds.shuffle() — 1 matches upstream")
     p.add_argument("--test-size", type=float, default=0.2,

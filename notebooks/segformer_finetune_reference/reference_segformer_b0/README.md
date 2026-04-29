@@ -9,7 +9,7 @@ against our in-repo semantic-segmentation training path.
 | File | Purpose |
 |---|---|
 | `semantic_segmentation.ipynb` | Upstream original — frozen reference, never edited. Download command below. |
-| `finetune.py` | SegFormer-B0 fine-tune on `segments/sidewalk-semantic-2`. Takes `--seed`, `--tag`, `--epochs`, `--output-dir`. Writes to `runs/seed{SEED}/` (or `runs/{TAG}_seed{SEED}/`). |
+| `finetune.py` | SegFormer-B0 fine-tune on `segments/sidewalk-semantic` (gated — needs HF_TOKEN). Takes `--seed`, `--tag`, `--epochs`, `--output-dir`, `--batch-size`, `--num-workers`, `--bf16`. Writes to `runs/seed{SEED}/` (or `runs/{TAG}_seed{SEED}/`). |
 | `inference.py` | Post-training viz — loads best checkpoint, overlays pred + GT masks for N val samples in a single PNG. |
 
 Upstream sources:
@@ -37,14 +37,25 @@ curl -L -o semantic_segmentation.ipynb \
   --n 16
 ```
 
-Headline numbers: **pending full run — see CLAUDE.md.**
+Headline numbers (seed42, 50 epochs, bs=8, bf16, fp32 cookbook recipe otherwise unchanged):
+
+| Metric | Value | Step / Epoch |
+|---|---|---|
+| best `eval_loss` (drives `load_best_model_at_end`) | 0.604 | step 1800 / ep 36 |
+| `eval_mean_iou` at best ckpt | 0.310 | step 1800 / ep 36 |
+| `eval_overall_accuracy` at best ckpt | 0.842 | step 1800 / ep 36 |
+| final `eval_mean_iou` | 0.311 | step 2500 / ep 50 |
+
+Note: `metric_for_best_model` is unset, so HF Trainer selects on `eval_loss`,
+not mIoU. Set `metric_for_best_model="mean_iou", greater_is_better=True` if
+you want mIoU-driven checkpoint selection.
 
 ## Hyperparameter recipe (upstream, baked into `finetune.py`)
 
 | Knob | Value | Note |
 |---|---|---|
 | `model` | `nvidia/mit-b0` | SegFormer-B0 |
-| `dataset` | `segments/sidewalk-semantic-2` | public variant (non-gated) |
+| `dataset` | `segments/sidewalk-semantic` | gated — requires HF_TOKEN |
 | `epochs` | 50 | upstream default |
 | `lr` | 6e-5 | |
 | `per_device_train_batch_size` | 2 | |
@@ -64,5 +75,5 @@ Applied edits when porting to runnable `.py`:
 - `SegformerFeatureExtractor` → `SegformerImageProcessor` (upstream alias is deprecated).
 - `feature_extractor.reduce_labels` → `feature_extractor.do_reduce_labels`
   (attribute rename in current transformers).
-- Dataset swapped from gated `segments/sidewalk-semantic` to the public
-  `segments/sidewalk-semantic-2` so the script runs anonymously.
+- Dataset kept as gated `segments/sidewalk-semantic` (matches CLAUDE.md;
+  `runs/seed42/` was trained on this). Set `HF_TOKEN` in the env before running.
