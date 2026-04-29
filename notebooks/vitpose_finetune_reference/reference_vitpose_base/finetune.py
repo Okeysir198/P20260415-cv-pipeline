@@ -46,7 +46,11 @@ import argparse
 import os
 from pathlib import Path
 
-_argp = argparse.ArgumentParser(add_help=False)
+# When run as `__main__`, expose `--help` (argparse will print + sys.exit(0)
+# before any dataset/model side-effects). When imported (e.g. by inference.py),
+# keep `add_help=False` + `parse_known_args` so unknown CLI args from the
+# importer don't crash module load.
+_argp = argparse.ArgumentParser(add_help=(__name__ == "__main__"))
 _argp.add_argument("--seed", type=int, default=int(os.environ.get("SEED", 42)))
 _argp.add_argument("--tag", type=str, default=os.environ.get("RUN_TAG", ""))
 _argp.add_argument("--epochs", type=int, default=30)
