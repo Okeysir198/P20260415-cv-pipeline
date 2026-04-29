@@ -40,7 +40,6 @@ from core.p08_evaluation.visualization import (
     plot_threshold_curves,
 )
 from utils.config import load_config  # noqa: E402
-from loguru import logger
 from utils.device import get_device
 
 

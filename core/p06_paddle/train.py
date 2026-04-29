@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -36,7 +35,8 @@ from core.p06_paddle._translator import (  # noqa: E402
     load_our_yaml,
     ppdet_base_config_path,
 )
-from utils.paddle_bridge import yolo_to_coco  # noqa: E402  (existing converter)
+from utils.config import merge_configs, parse_overrides  # noqa: E402
+from utils.paddle_bridge import yolo_to_coco  # noqa: E402
 
 
 def _parse_args() -> argparse.Namespace:
@@ -49,69 +49,36 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _apply_overrides(config: dict, overrides: list[str]) -> None:
-    """In-place dotted-path overrides (mirrors utils.config.apply_overrides convention)."""
-    for kv in overrides:
-        if "=" not in kv:
-            raise ValueError(f"Bad override (missing '='): {kv!r}")
-        path, value = kv.split("=", 1)
-        # Coerce simple types
-        if value.lower() in {"true", "false"}:
-            v: object = value.lower() == "true"
-        elif value.lstrip("-").replace(".", "", 1).isdigit():
-            v = float(value) if "." in value else int(value)
-        else:
-            v = value
-        node = config
-        keys = path.split(".")
-        for k in keys[:-1]:
-            node = node.setdefault(k, {})
-        node[keys[-1]] = v
-
-
 def _ensure_coco_annotations(our: dict) -> dict[str, Path]:
-    """Convert YOLO-format labels to COCO JSON. Idempotent — `yolo_to_coco`
-    skips writing if the cache already exists in our patched annotation block,
-    but here we always invoke it (the helper is fast on cache hit).
-    """
     data_dir = (our["_data_path"].parent / our["_data_resolved"]["path"]).resolve()
     cache = {split: data_dir / f"{split}_paddle_coco.json" for split in ("train", "val")}
-    # Skip if all caches exist; otherwise regenerate everything (the helper
-    # writes all splits at once).
-    if not all(p.exists() for p in cache.values()):
-        out_files = yolo_to_coco(
-            data_config_path=str(our["_data_path"]),
-            output_dir=str(data_dir),
-            splits=["train", "val"],
-        )
-        for split, p in out_files.items():
-            target = cache[split] if split in cache else (data_dir / f"{split}_paddle_coco.json")
-            if Path(p).resolve() != target.resolve():
-                target.write_bytes(Path(p).read_bytes())
-            print(f"  converted {split}: {target.name}", flush=True)
+    if all(p.exists() for p in cache.values()):
+        return cache
+    out_files = yolo_to_coco(
+        data_config_path=str(our["_data_path"]),
+        output_dir=str(data_dir),
+        splits=["train", "val"],
+    )
+    for split, src in out_files.items():
+        target = cache[split]
+        if Path(src).resolve() != target.resolve():
+            target.write_bytes(Path(src).read_bytes())
+        print(f"  converted {split}: {target.name}", flush=True)
     return cache
 
 
 def _train_detection(our: dict) -> dict:
-    """Run upstream PaddleDetection Trainer for detection archs."""
-    # Lazy paddle imports — only available in .venv-paddle/.
     import paddle
     from ppdet.core.workspace import load_config, merge_config
     from ppdet.engine import Trainer
 
-    base_yml = ppdet_base_config_path(our["model"]["arch"])
-    base_path = _find_ppdet_config(base_yml)
+    base_path = _find_ppdet_config(ppdet_base_config_path(our["model"]["arch"]))
     cfg = load_config(str(base_path))
-
-    patches = detection_overrides(our)
-    merge_config(patches)
+    merge_config(detection_overrides(our))
 
     save_dir = Path(cfg["save_dir"]).resolve()
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # Optional pretrained weights — let ppdet handle the URL/path; if our config
-    # sets pretrained: null, blank it on the merged config so train-from-scratch
-    # works for tests.
     pretrained = our.get("model", {}).get("pretrained")
     if pretrained is not None:
         cfg["pretrain_weights"] = str(pretrained)
@@ -123,19 +90,12 @@ def _train_detection(our: dict) -> dict:
         trainer.load_weights(pretrained)
     trainer.train()
 
-    # ppdet writes checkpoint files keyed by epoch under save_dir. The "best"
-    # checkpoint (per save_prediction_only convention) is `best_model.pdparams`
-    # for newer ppdet, or the last-epoch snapshot otherwise. Symlink/copy to
-    # the canonical name our downstream phases expect: `best.pdparams`.
-    best = _resolve_best_checkpoint(save_dir, trainer)
+    best = _resolve_best_checkpoint(save_dir)
     canonical = save_dir / "best.pdparams"
     if best is not None and best != canonical:
         canonical.write_bytes(best.read_bytes())
 
-    # Run upstream eval to fill test_results.json
-    metrics = _evaluate_after_train(cfg, trainer) if canonical.exists() else {}
-
-    # Skeleton observability tree — main-venv ONNX path fills it later.
+    metrics = _evaluate_after_train(trainer) if canonical.exists() else {}
     _ensure_observability_tree(save_dir)
 
     summary = {
@@ -175,33 +135,31 @@ def _find_ppdet_config(rel_path: str) -> Path:
     )
 
 
-def _resolve_best_checkpoint(save_dir: Path, trainer) -> Path | None:
-    """Return the path of the canonical best/last checkpoint produced by ppdet."""
+def _resolve_best_checkpoint(save_dir: Path) -> Path | None:
     for name in ("best_model.pdparams", "model_final.pdparams"):
         p = save_dir / name
         if p.exists():
             return p
-    # Fall back to highest-epoch snapshot
     snaps = sorted(save_dir.glob("*.pdparams"))
     return snaps[-1] if snaps else None
 
 
-def _evaluate_after_train(cfg, trainer) -> dict:
-    """Run trainer.evaluate() and pull numeric metrics out of the result."""
-    try:
-        trainer.evaluate()
-    except Exception as exc:  # eval failures shouldn't kill the train run
-        print(f"  warning: evaluate after train raised: {exc}", flush=True)
-        return {}
-    # ppdet's Trainer keeps stats on _eval_metrics, but the API has changed
-    # across versions. Best-effort scrape:
-    metrics = {}
+def _scrape_ppdet_metrics(trainer) -> dict:
+    """ppdet keeps eval stats on different attrs across versions — try each."""
     for attr in ("_eval_metrics", "metric_results", "_metrics"):
         v = getattr(trainer, attr, None)
         if isinstance(v, dict) and v:
-            metrics.update({str(k): float(v[k]) for k in v if isinstance(v[k], (int, float))})
-            break
-    return metrics
+            return {str(k): float(v[k]) for k in v if isinstance(v[k], (int, float))}
+    return {}
+
+
+def _evaluate_after_train(trainer) -> dict:
+    try:
+        trainer.evaluate()
+    except Exception as exc:
+        print(f"  warning: evaluate after train raised: {exc}", flush=True)
+        return {}
+    return _scrape_ppdet_metrics(trainer)
 
 
 def _ensure_observability_tree(save_dir: Path) -> None:
@@ -213,10 +171,8 @@ def _ensure_observability_tree(save_dir: Path) -> None:
 
 
 _TASK_DISPATCH = {
-    # Detection — canonical path for v1
     "paddle-picodet-": _train_detection,
     "paddle-ppyoloe-": _train_detection,
-    # Other task families — implement when needed; raise a clear error for now.
 }
 
 
@@ -237,16 +193,16 @@ def main() -> int:
     args = _parse_args()
     our = load_our_yaml(args.config)
     if args.override:
-        _apply_overrides(our, args.override)
+        our = merge_configs(our, parse_overrides(args.override))
 
     print(f"[paddle] config: {args.config}", flush=True)
     print(f"[paddle] arch:   {our['model']['arch']}", flush=True)
-    print(f"[paddle] task:   detection (v1)", flush=True)
+    print("[paddle] task:   detection (v1)", flush=True)
 
     _ensure_coco_annotations(our)
     summary = _dispatch(our)
 
-    print(f"\n[paddle] training complete. summary:", flush=True)
+    print("\n[paddle] training complete. summary:", flush=True)
     print(f"  best_checkpoint: {summary.get('best_checkpoint')}", flush=True)
     print(f"  best_metric:     {summary.get('best_metric')}", flush=True)
     print(f"  output_dir:      {summary.get('output_dir')}", flush=True)

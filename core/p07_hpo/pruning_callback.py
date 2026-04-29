@@ -7,8 +7,8 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 import optuna
-
 from loguru import logger
+
 from core.p06_training.callbacks import Callback
 
 

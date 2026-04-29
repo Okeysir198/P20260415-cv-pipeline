@@ -50,9 +50,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # pipeli
 
 import requests
 from label_studio_sdk import Client as LSClient
-from tqdm import tqdm
-
 from loguru import logger
+from tqdm import tqdm
 
 from utils.config import load_config, resolve_path
 

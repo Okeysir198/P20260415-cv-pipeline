@@ -827,7 +827,7 @@ class DatasetStatsLogger(Callback):
                 subset_pct=subset_pct,
             )
             stats_path = out_dir / "01_dataset_stats.png"
-            wb_cb = next((c for c in trainer.callback_runner.callbacks if isinstance(c, WandBLogger)), None)
+            wb_cb = trainer.callback_runner.get_callback(WandBLogger)
             if wb_cb is not None and wb_cb._enabled:
                 wb_cb._wandb.log({"viz/dataset_stats": wandb.Image(str(stats_path))})
         except Exception as e:
@@ -903,7 +903,9 @@ class DataLabelGridLogger(Callback):
                 targets = ds._load_label(ds.img_paths[idx])
                 if targets is None or len(targets) == 0:
                     targets = np.zeros((0, 5), dtype=np.float32)
-                annotated.append(_draw_gt_boxes(img, targets, class_names, self.thickness, self.text_scale))
+                annotated.append(
+                    _draw_gt_boxes(img, targets, class_names, self.thickness, self.text_scale)
+                )
 
             if not annotated:
                 continue
@@ -963,8 +965,12 @@ class AugLabelGridLogger(Callback):
         from core.p05_data.transforms import build_transforms
 
         class_names = {int(k): str(v) for k, v in self.data_config.get("names", {}).items()}
-        mean = np.array(self.data_config.get("mean", [0.485, 0.456, 0.406]), dtype=np.float32).reshape(1, 1, 3)
-        std = np.array(self.data_config.get("std", [0.229, 0.224, 0.225]), dtype=np.float32).reshape(1, 1, 3)
+        mean_arr = np.array(
+            self.data_config.get("mean", [0.485, 0.456, 0.406]), dtype=np.float32
+        ).reshape(1, 1, 3)
+        std_arr = np.array(
+            self.data_config.get("std", [0.229, 0.224, 0.225]), dtype=np.float32
+        ).reshape(1, 1, 3)
         input_size = tuple(trainer._model_cfg["input_size"])
 
         # Two passes: simple (no mosaic/mixup) and mosaic (full augmentation).
@@ -1017,10 +1023,18 @@ class AugLabelGridLogger(Callback):
                         logger.warning("AugLabelGridLogger: failed idx %d — %s", i, e)
                         continue
                     aug_np = aug_tensor.numpy().transpose(1, 2, 0)
-                    aug_np = np.clip(aug_np * std + mean, 0, 1)
+                    aug_np = np.clip(aug_np * std_arr + mean_arr, 0, 1)
                     aug_bgr = (aug_np[:, :, ::-1] * 255).astype(np.uint8)
-                    targets_np = targets_tensor.numpy() if len(targets_tensor) > 0 else np.zeros((0, 5), dtype=np.float32)
-                    annotated.append(_draw_gt_boxes(aug_bgr, targets_np, class_names, self.thickness, self.text_scale))
+                    targets_np = (
+                        targets_tensor.numpy()
+                        if len(targets_tensor) > 0
+                        else np.zeros((0, 5), dtype=np.float32)
+                    )
+                    annotated.append(
+                        _draw_gt_boxes(
+                            aug_bgr, targets_np, class_names, self.thickness, self.text_scale
+                        )
+                    )
 
                 if not annotated:
                     continue
@@ -1039,7 +1053,9 @@ class AugLabelGridLogger(Callback):
                 if cb_runner is not None:
                     wb_cb = cb_runner.get_callback(WandBLogger)
                     if wb_cb is not None and wb_cb._enabled:
-                        wb_cb._wandb.log({f"viz/aug_labels_{split}_{label}": wandb.Image(str(out_path))})
+                        wb_cb._wandb.log(
+                            {f"viz/aug_labels_{split}_{label}": wandb.Image(str(out_path))}
+                        )
 
 
 class HFCallbackAdapter(Callback):

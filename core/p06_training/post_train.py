@@ -31,23 +31,16 @@ import cv2
 import numpy as np
 import supervision as sv
 import torch
+from loguru import logger
 
-from core.p06_training._common import (
-    task_from_output_format as _task_from_output_format,
-)
-from core.p06_training._common import (
-    unwrap_subset as _unwrap_subset,
-)
-from core.p06_training._common import (
-    yolo_targets_to_xyxy as _gt_xyxy_from_yolo,
-)
+from core.p06_training._common import task_from_output_format as _task_from_output_format
+from core.p06_training._common import unwrap_subset as _unwrap_subset
+from core.p06_training._common import yolo_targets_to_xyxy as _gt_xyxy_from_yolo
 from core.p10_inference.supervision_bridge import (
     VizStyle,
     annotate_gt_pred,
 )
-from loguru import logger
 from utils.viz import annotate_keypoints, classification_banner
-
 
 # ---------------------------------------------------------------------------
 # Shared forward + GT/Pred extraction per task.
@@ -235,10 +228,14 @@ def render_prediction_grid(
             orig_h, orig_w = orig_image.shape[:2]
             pm = pred_masks[i]
             if pm.shape != (orig_h, orig_w):
-                pm = cv2.resize(pm.astype(np.int32), (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+                pm = cv2.resize(
+                    pm.astype(np.int32), (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
+                )
             gm = gt_mask if isinstance(gt_mask, np.ndarray) else None
             if gm is not None and gm.shape != (orig_h, orig_w):
-                gm = cv2.resize(gm.astype(np.int32), (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+                gm = cv2.resize(
+                    gm.astype(np.int32), (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
+                )
             overlay = _blend_seg_masks(orig_image, gm, pm, class_names, style)
             rows.append(overlay)
 
@@ -259,7 +256,9 @@ def render_prediction_grid(
             if isinstance(gt_raw, dict) and "keypoints" in gt_raw:
                 gt_kp = np.asarray(gt_raw["keypoints"], dtype=np.float32).reshape(-1, 3)
             annotated = _draw_keypoints(annotated, gt_kp, style.gt_color_rgb, style.gt_thickness)
-            annotated = _draw_keypoints(annotated, pred_kp, style.pred_color_rgb, style.pred_thickness)
+            annotated = _draw_keypoints(
+                annotated, pred_kp, style.pred_color_rgb, style.pred_thickness
+            )
             rows.append(annotated)
 
     if not rows:
@@ -485,7 +484,6 @@ def run_post_train_artifacts(
                 logger.warning("test error analysis skipped: %s", e, exc_info=True)
 
     val_ea_dir = save_dir / "val_predictions" / "error_analysis"
-    test_ea_dir = save_dir / "test_predictions" / "error_analysis"
 
     # -------- Distribution Mismatch (train vs val drift) ----
     if train_dataset is not None and val_dataset is not None:
@@ -943,6 +941,7 @@ def _append_section(
     if not summary_md.exists():
         return
     import os
+
     from core.p08_evaluation.chart_annotations import (
         CHART_META,
         evaluate_next_step,

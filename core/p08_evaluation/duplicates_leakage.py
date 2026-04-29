@@ -37,11 +37,10 @@ from typing import Any
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from loguru import logger
 from PIL import Image
 
 from utils.viz import apply_plot_style
-
-from loguru import logger
 
 matplotlib.use("Agg")
 

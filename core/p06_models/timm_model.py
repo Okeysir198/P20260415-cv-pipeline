@@ -10,10 +10,10 @@ import timm as timm_lib
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from loguru import logger
 from transformers.utils import ModelOutput
 
 from core.p06_models.base import DetectionModel
-from loguru import logger
 from core.p06_models.registry import register_model
 
 # Keys that belong to our pipeline, NOT to timm

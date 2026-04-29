@@ -15,7 +15,7 @@ uv run -m pytest tests/test_p06_training.py -v
 
 ## Test Layout
 
-40 files in two groups: independent **utils** (fast) and **sequential pipeline** (p00→p12). **No mocks** — real data only. Full `run_all.py` takes ~17 min on one RTX-class GPU (verified 2026-04-14, 1021s).
+52 files in two groups: independent **utils + viz** (fast) and **sequential pipeline** (p00→p12). **No mocks** — real data only. Full `run_all.py` takes ~17 min on one RTX-class GPU (verified 2026-04-14, 1021s).
 
 ### Utils (independent, always fast)
 
@@ -31,6 +31,9 @@ uv run -m pytest tests/test_p06_training.py -v
 | `test_utils07_paddle_bridge.py` | YOLO → COCO JSON converter (end-to-end on synthetic tree) |
 | `test_utils08_release.py` | Version bump, use-case detection, full release promotion |
 | `test_utils09_yolo_io.py` | `pil_to_b64` round-trip, YOLO label parsing edge cases |
+| `test_viz_helpers.py` | Smoke tests for `utils.viz` helpers (synthetic data, no GPU) |
+| `test_data_preview_fidelity.py` | `generate_dataset_stats` + `write_dataset_info` fidelity across det/cls/seg/kpt on tmp_path fixtures |
+| `test_transform_pipeline_viz.py` | `04_transform_pipeline.png` renderer + denormalize inverse invariant |
 | `test_p06_aug_benchmark.py` | CPU vs GPU augmentation throughput — **standalone perf benchmark, not in `run_all.py`**; run with `uv run tests/test_p06_aug_benchmark.py` |
 
 ### Pipeline (sequential — run in order via `run_all.py`)
@@ -54,9 +57,15 @@ uv run -m pytest tests/test_p06_training.py -v
 | `test_p06_model_variants.py` | YOLOX/D-FINE/RT-DETRv2 — 3-epoch train, loss decreases | — | `outputs/07_model_variants/` |
 | `test_p06_training.py` | `DetectionTrainer` — 2-epoch real training, checkpoint | — | **`outputs/08_training/`** ← p08/p09/p10 read from here |
 | `test_p06_training_features.py` | Schedulers, grad accumulation, loss, metrics | — | — |
+| `test_p06_training_hf_detection.py` | HF Trainer backend — 1 epoch end-to-end (validator, collator, viz bridge, test eval) | — | — |
 | `test_p06_classification_training.py` | timm + HF classification training | — | — |
 | `test_p06_segmentation_metrics.py` | mIoU, per-class metrics | — | — |
 | `test_p06_segmentation_training.py` | Segmentation training (SegFormer) | — | — |
+| `test_p06_training_paddle_det.py` | Paddle PicoDet-S full chain (setup -> train -> eval -> export -> infer) | — | — |
+| `test_p06_training_paddle_cls.py` | Paddle PP-LCNet — **skipped in v1** (paddle backend = detection only) | — | — |
+| `test_p06_training_paddle_seg.py` | Paddle PP-LiteSeg — **skipped in v1** | — | — |
+| `test_p06_training_paddle_kpt.py` | Paddle PP-TinyPose — **skipped in v1** | — | — |
+| `test_p06_val_prediction_logger.py` | `ValPredictionLogger` — grid viz of GT vs predictions | — | — |
 | `test_p07_hpo.py` | Optuna HPO — 2 trials × 1 epoch | — | `outputs/06_hpo/` |
 | `test_p08_evaluation.py` | `ModelEvaluator` — mAP, per-class AP | — | `outputs/10_evaluation/metrics.json` |
 | `test_p08_error_analysis.py` | `ErrorAnalyzer` — FP/FN/localization breakdown | — | `outputs/11_error_analysis/` |
@@ -65,6 +74,8 @@ uv run -m pytest tests/test_p06_training.py -v
 | `test_p10_inference.py` | `DetectionPredictor` (.pt / .pth + .onnx), batch predict | — | `outputs/14_inference/` |
 | `test_p10_video_inference.py` | `VideoProcessor`, frame counter, alert config | — | — |
 | `test_p10_face_recognition.py` | Face registry, gallery, predictor (optional ONNX weights) | — | — |
+| `test_p10_zone_intrusion.py` | Zone Intrusion detector — geometry helpers, dataclasses, full detect+draw | — | — |
+| `test_p10_poketenashi.py` | Poketenashi pose rules (hands-in-pockets, stair safety, handrail, pointing-calling) on real COCO-17 keypoints | — | — |
 | `test_p11_e2e_pipeline.py` | Full chain: train → eval → export → infer | — | `outputs/15_e2e_pipeline/` |
 | `test_p12_raw_pipeline.py` | **Raw dataset → annotate → QA → LS roundtrip → p00 merge+split → train → HPO → eval → export → infer** | :18104, :18105, :18100, :18103 | `outputs/16_raw_pipeline/` |
 

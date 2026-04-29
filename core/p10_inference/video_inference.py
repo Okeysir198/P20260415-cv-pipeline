@@ -15,16 +15,14 @@ from typing import Any
 import av
 import cv2
 import numpy as np
-
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from core.p10_inference.predictor import DetectionPredictor
-
 import supervision as sv
 
 import core.p10_inference.supervision_bridge as _sv_bridge
+from core.p10_inference.predictor import DetectionPredictor
 
 # ---------------------------------------------------------------------------
 # Helpers

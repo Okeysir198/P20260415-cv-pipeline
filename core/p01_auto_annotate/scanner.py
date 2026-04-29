@@ -6,6 +6,7 @@ and flat directory structures. Filter modes control which images are selected.
 
 import sys
 from pathlib import Path
+
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root

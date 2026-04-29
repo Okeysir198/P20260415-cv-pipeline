@@ -79,6 +79,83 @@ Each feature's CLAUDE.md carries the Phase-B plan: 20% train + 20% val (full tes
 
 ---
 
+## Phase-B recipe (detection feature)
+
+Shared 20% smoke recipe used by every Phase-B detection feature CLAUDE.md (fall, helmet, shoes, phone-usage). Each leaf file lists only its classes, dataset, baseline, and unique risk callout — commands and PASS criteria live here.
+
+**Goal:** Sanity-check each arch can learn on the dataset. 20% train + 20% val (full test) × {YOLOX-M, RT-DETRv2-R50, D-FINE-M}.
+
+**PASS criteria (all 4 must hold):**
+1. `train/loss` drops >= 50% between epoch 1 and final epoch (no divergence, no NaN)
+2. `val mAP@0.5` exceeds the pretrained baseline (or > 0.05 if no usable baseline exists)
+3. Confusion matrix diagonal > 0.5 for each class (no class collapse)
+4. `error_breakdown.png` shows FP mix != 100% background
+
+### Commands
+
+Replace `<feature>` with the feature folder name (e.g. `safety-fall-detection`).
+
+```bash
+# YOLOX-M (config defaults: impl=official, library=torchvision, mosaic=true,
+# mixup=false, normalize=false, lr=0.0025, val_full_interval=0 — Phase B only
+# overrides epochs->30 + subset)
+CUDA_VISIBLE_DEVICES=0 .venv-yolox-official/bin/python core/p06_training/train.py \
+  --config features/<feature>/configs/06_training_yolox.yaml \
+  --override training.epochs=30 \
+    data.subset.train=0.2 data.subset.val=0.2 \
+    training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
+
+# RT-DETRv2-R50 (config defaults: arch=r50, pretrained=r50vd, bf16=true, amp=false,
+# mosaic=false, warmup_steps=300, lr=1e-4 — Phase B overrides lr->5e-5 + bs->8 + epochs->30)
+CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+  --config features/<feature>/configs/06_training_rtdetr.yaml \
+  --override training.lr=5e-5 training.epochs=30 \
+    data.batch_size=8 data.subset.train=0.2 data.subset.val=0.2 \
+    training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
+
+# D-FINE-M (config defaults: arch=dfine-m, pretrained=dfine_m_coco, bf16=false, amp=false,
+# weight_decay=0, lr=5e-5, bs=8 — match the reference recipe; Phase B only overrides epochs->30)
+CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+  --config features/<feature>/configs/06_training_dfine.yaml \
+  --override training.epochs=30 \
+    data.subset.train=0.2 data.subset.val=0.2 \
+    training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
+```
+
+### Error analysis (run after each training)
+
+```bash
+CUDA_VISIBLE_DEVICES=0 uv run core/p08_evaluation/evaluate.py \
+  --model features/<feature>/runs/<ts>/best.pth \
+  --config features/<feature>/configs/05_data.yaml \
+  --split test --conf 0.3 --iou 0.5
+```
+
+Outputs: `metrics.json`, `confusion_matrix.png`, per-class PR curves, `error_breakdown.png`, `size_recall.png`, `optimal_thresholds.json`.
+
+### OOM notes
+- 30 epochs at bs=8/16 -> ~15-80 min/arch on RTX 5090 depending on dataset size; consider 15 epochs for the largest (~37k img) features.
+- Pre-flight: `nvidia-smi --query-gpu=memory.free --format=csv` -> need >=20 GB free.
+- Kill if first-epoch VRAM > 24 GB or `train/loss` NaNs -> halve `data.batch_size` and retry.
+- **bf16 policy**: YOLOX `amp=true`; RT-DETRv2 `bf16=true amp=false`; D-FINE `bf16=false amp=false`.
+- **Never launch two trainings on the same GPU** — system hang risk.
+
+### Results table template (fill after each run)
+
+| Arch | epochs | best val mAP@0.5 | train loss drop | Class collapse? | PASS? | runs/ dir | eval/ dir |
+|---|---|---|---|---|---|---|---|
+| YOLOX-M | | | | | | | |
+| RT-DETRv2-R50 | | | | | | | |
+| D-FINE-M | | | | | | | |
+
+### Error analysis summary template (per arch, fill after p08)
+- Dominant FP type (background / class confusion / localization / duplicate)
+- Worst class + per-class AP gap
+- Size bucket where recall collapses
+- Top 3 failure cases
+
+---
+
 ## Future: Unified Multi-Task Model (Phase 2)
 
 After individual models are trained and validated, develop a single shared-backbone model covering all use cases in one forward pass.

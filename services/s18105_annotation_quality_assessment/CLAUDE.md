@@ -74,6 +74,8 @@ s18105_annotation_quality_assessment/
 ├── tests/
 │   ├── conftest.py         # Shared fixtures, skip_no_service/sam3/ollama, visualization helpers
 │   ├── test_endpoints.py   # Full endpoint coverage (validate, verify, fix, jobs, report)
+│   ├── test_real_data.py   # End-to-end on real images per use case (tests/data/<use_case>/), structural + SAM3 verification across fire/helmet/mask/glove/phone
+│   ├── test_rule_aware.py  # Rule-aware /verify features: class_rules (overlap/no_overlap conditions) + VLM budget enforcement
 │   └── test_vlm.py         # VLM unit tests (parsers, crop) + integration tests
 ├── Dockerfile              # ubuntu:24.04 + uv, CPU-only
 ├── docker-compose.yaml     # Port 18105, SAM3/Ollama via host.docker.internal

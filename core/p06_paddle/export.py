@@ -51,10 +51,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _export_inference_model(our: dict, ckpt: Path, work_dir: Path) -> Path:
-    """Run ppdet's tools/export_model to write model.pdmodel + model.pdiparams."""
-    # Materialize the merged ppdet config to a temp YAML, then drive the
-    # upstream tools/export_model.py via subprocess (it's a CLI tool).
-    import yaml as _yaml  # available in .venv-paddle/
+    import yaml as _yaml
     from ppdet.core.workspace import load_config, merge_config
 
     base_path = _find_ppdet_config(ppdet_base_config_path(our["model"]["arch"]))
@@ -65,12 +62,11 @@ def _export_inference_model(our: dict, ckpt: Path, work_dir: Path) -> Path:
     tmp_yaml = work_dir / "exported.yml"
     tmp_yaml.write_text(_yaml.safe_dump(dict(cfg)))
 
-    # ppdet ships tools/export_model.py — locate it next to the package.
     import ppdet
     pkg_root = Path(ppdet.__file__).resolve().parent
     candidates = [
-        pkg_root.parent / "tools" / "export_model.py",  # source install
-        pkg_root / "tools" / "export_model.py",         # wheel install
+        pkg_root.parent / "tools" / "export_model.py",
+        pkg_root / "tools" / "export_model.py",
     ]
     export_tool = next((c for c in candidates if c.exists()), None)
     if export_tool is None:

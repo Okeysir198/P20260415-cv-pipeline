@@ -13,7 +13,6 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 import torch
-
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root

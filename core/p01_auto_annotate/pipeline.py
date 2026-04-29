@@ -19,7 +19,6 @@ from typing import Any
 from langgraph.func import entrypoint, task
 from loguru import logger
 
-
 # ---------------------------------------------------------------------------
 # Tasks
 # ---------------------------------------------------------------------------

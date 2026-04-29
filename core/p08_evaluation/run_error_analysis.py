@@ -40,7 +40,6 @@ import torch.nn as nn  # noqa: E402
 
 from utils.config import load_config  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Shim: bridges ModelAdapter → error_analysis_runner's 3-step pipeline
 # ---------------------------------------------------------------------------
@@ -203,8 +202,6 @@ def main() -> None:
     logger.remove()
     logger.add(sys.stderr, level="INFO")
     args = _parse_args()
-
-    project_root = Path(__file__).resolve().parent.parent.parent
 
     data_config: dict = load_config(args.data_config)
     training_config: dict | None = load_config(args.training_config) if args.training_config else None

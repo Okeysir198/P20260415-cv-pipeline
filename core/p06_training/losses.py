@@ -19,7 +19,8 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from loguru import logger
+from loguru import logger  # noqa: E402
+
 from utils.registry import Registry  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -257,7 +258,9 @@ class IoULoss(nn.Module):
 
         # Union — clamp dims to ≥0 so degenerate predictions don't produce NaN
         pred_area = (pred[:, 2] - pred[:, 0]).clamp(min=0) * (pred[:, 3] - pred[:, 1]).clamp(min=0)
-        target_area = (target[:, 2] - target[:, 0]).clamp(min=0) * (target[:, 3] - target[:, 1]).clamp(min=0)
+        target_area = (target[:, 2] - target[:, 0]).clamp(min=0) * (
+            target[:, 3] - target[:, 1]
+        ).clamp(min=0)
         union_area = pred_area + target_area - inter_area + self.eps
 
         iou = inter_area / union_area
@@ -684,8 +687,12 @@ class YOLOXLoss(DetectionLoss):
 
         inter_area = (inter_x2 - inter_x1).clamp(min=0) * (inter_y2 - inter_y1).clamp(min=0)
 
-        area_a = (boxes_a[:, 2] - boxes_a[:, 0]).clamp(min=0) * (boxes_a[:, 3] - boxes_a[:, 1]).clamp(min=0)
-        area_b = (boxes_b[:, 2] - boxes_b[:, 0]).clamp(min=0) * (boxes_b[:, 3] - boxes_b[:, 1]).clamp(min=0)
+        area_a = (boxes_a[:, 2] - boxes_a[:, 0]).clamp(min=0) * (
+            boxes_a[:, 3] - boxes_a[:, 1]
+        ).clamp(min=0)
+        area_b = (boxes_b[:, 2] - boxes_b[:, 0]).clamp(min=0) * (
+            boxes_b[:, 3] - boxes_b[:, 1]
+        ).clamp(min=0)
 
         union = area_a.unsqueeze(1) + area_b.unsqueeze(0) - inter_area + eps
 

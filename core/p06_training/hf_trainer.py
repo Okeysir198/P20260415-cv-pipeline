@@ -17,22 +17,16 @@ Usage:
                             overrides={"training": {"lr": 0.0005}})
 """
 
+import os as _os
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import torch
 import yaml
-
-_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-
-import os as _os
-from types import SimpleNamespace
-
 from transformers import (
     EarlyStoppingCallback,
     Trainer,
@@ -41,12 +35,21 @@ from transformers import (
 )
 from transformers.image_transforms import center_to_corners_format
 
-from core.p06_training.hf_callbacks import (
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from loguru import logger  # noqa: E402
+
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD  # noqa: E402
+from core.p06_models import build_model  # noqa: E402
+from core.p06_training.hf_callbacks import (  # noqa: E402
     HFAugLabelGridCallback,
     HFDataLabelGridCallback,
     HFDatasetStatsCallback,
     HFValPredictionCallback,
 )
+from utils.config import generate_run_dir, load_config, merge_configs  # noqa: E402
 
 
 class FreezeBackboneCallback(TrainerCallback):
@@ -235,7 +238,6 @@ class _DetectionTrainer(Trainer):
         if lr_bb is None:
             return super().create_optimizer()
 
-        import torch  # local — matches _save's convention
         opt_model = self.model
         decay_names = set(self.get_decay_parameter_names(opt_model))
         lr_head = self.args.learning_rate
@@ -271,11 +273,6 @@ class _DetectionTrainer(Trainer):
         self.optimizer = cls(param_groups, **kwargs)
         return self.optimizer
 
-
-from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
-from core.p06_models import build_model
-from loguru import logger
-from utils.config import generate_run_dir, load_config, merge_configs
 
 # Mapping: our optimizer names → HF optim names
 _OPTIM_MAP = {
@@ -334,7 +331,9 @@ def _hf_detection_collate(batch):
     return {"pixel_values": images, "labels": labels}
 
 
-def _build_detection_compute_metrics(image_processor, input_size, id2label=None, score_threshold=0.0):
+def _build_detection_compute_metrics(
+    image_processor, input_size, id2label=None, score_threshold=0.0
+):
     """Real `compute_metrics` for HF Trainer, detection task.
 
     Mirrors qubvel's reference `MAPEvaluator`
@@ -1004,7 +1003,9 @@ def _config_to_training_args(
         save_total_limit=3,
         load_best_model_at_end=ckpt_cfg.get("save_best", False),
         metric_for_best_model=hf_metric if ckpt_cfg.get("save_best", False) else None,
-        greater_is_better=ckpt_cfg.get("mode", "max") == "max" if ckpt_cfg.get("save_best", False) else None,
+        greater_is_better=(
+            ckpt_cfg.get("mode", "max") == "max" if ckpt_cfg.get("save_best", False) else None
+        ),
         report_to=report_to_resolved,
         run_name=log_cfg.get("run_name"),
         seed=config.get("seed", 42),

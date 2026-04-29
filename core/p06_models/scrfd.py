@@ -21,9 +21,9 @@ Typical usage::
 import cv2
 import numpy as np
 import onnxruntime as ort
+from loguru import logger
 
 from core.p06_models.face_base import FaceDetector
-from loguru import logger
 from core.p06_models.face_registry import _FACE_DETECTOR_VARIANT_MAP, register_face_detector
 
 # Default ONNX paths per variant

@@ -21,9 +21,8 @@ sys.path.insert(0, str(ROOT))
 import cv2
 import numpy as np
 import torch
-from torchvision.ops import batched_nms
-
 from loguru import logger
+from torchvision.ops import batched_nms
 
 INPUT_SIZE = 640
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)

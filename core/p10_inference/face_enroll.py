@@ -10,7 +10,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
@@ -18,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # projec
 from core.p06_models.face_registry import build_face_detector, build_face_embedder
 from core.p10_inference.face_gallery import FaceGallery
 from utils.config import load_config
-
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 

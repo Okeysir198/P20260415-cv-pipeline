@@ -37,9 +37,9 @@ from typing import Any
 
 import numpy as np
 import torch
+from loguru import logger
 from torchvision.ops import nms
 
-from loguru import logger
 from utils.registry import Registry
 
 # ---------------------------------------------------------------------------
@@ -249,24 +249,11 @@ def _postprocess_detr(
     _nms_threshold: float = 0.45,
     _target_sizes: Any | None = None,
 ) -> list[dict[str, np.ndarray]]:
-    """Decode HF DETR-family outputs into a list of result dicts.
+    """Fallback for DETR-style models that don't expose `model.postprocess()`.
 
-    This is a fallback path for DETR-style models that do NOT implement their
-    own ``model.postprocess()`` method.  In practice, :class:`HFDetectionModel`
-    exposes ``postprocess()`` so the registry is not reached for those models.
-    This registration ensures an explicit, informative error is never raised
-    for ``output_format="detr"`` in future custom models.
-
-    Args:
-        predictions: Raw model output (implementation-defined).
-        conf_threshold: Minimum score to keep.
-        nms_threshold: IoU threshold for NMS (informational — DETR outputs
-            are already NMS-free; kept for signature uniformity).
-        target_sizes: Passed through to model-level postprocessors when
-            called indirectly.
-
-    Returns:
-        List of result dicts (empty when predictions cannot be decoded here).
+    HFDetectionModel implements postprocess() so the registry isn't reached
+    for those. Registered here so `output_format="detr"` doesn't raise on
+    future custom models — emits a warning and returns empty detections.
     """
     batch_size = (
         predictions.shape[0] if hasattr(predictions, "shape") else len(predictions)

@@ -22,9 +22,9 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 import torch
+from loguru import logger
 
 from core.p06_models.pose_base import COCO_KEYPOINT_NAMES, COCO_SKELETON, PoseModel
-from loguru import logger
 from core.p06_models.pose_registry import _POSE_VARIANT_MAP, register_pose_model
 
 # Default ONNX paths per variant

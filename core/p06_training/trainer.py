@@ -3,10 +3,6 @@
 Handles end-to-end training: model construction, optimizer/scheduler setup,
 data loading, train/val loops, checkpointing, logging, and early stopping.
 All hyperparameters are read from YAML config — no hardcoded values.
-
-Usage:
-    trainer = DetectionTrainer(config_path="features/safety-fire_detection/configs/06_training.yaml")
-    trainer.train()
 """
 
 import copy
@@ -19,6 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from loguru import logger
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
@@ -26,11 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # projec
 from core.p05_data.detection_dataset import build_dataloader as _build_detection_dataloader
 from core.p05_data.transforms import build_gpu_transforms
 from core.p06_models import build_model
+from core.p06_training._common import task_from_output_format as _task_from_output
 from core.p06_training.callbacks import (
-    AugLabelGridLogger,
     CallbackRunner,
     CheckpointSaver,
-    DataLabelGridLogger,
     DatasetStatsLogger,
     EarlyStopping,
     ValPredictionLogger,
@@ -40,10 +36,8 @@ from core.p06_training.losses import build_loss
 from core.p06_training.lr_scheduler import build_scheduler
 from core.p06_training.metrics_registry import compute_metrics
 from core.p06_training.postprocess import postprocess as _postprocess_registry
-from core.p06_training._common import task_from_output_format as _task_from_output
 from utils.config import feature_name_from_config_path, load_config, merge_configs, validate_config
 from utils.device import get_device, set_seed
-from loguru import logger
 from utils.progress import TrainingProgress
 
 _LOSS_ZERO = torch.tensor(0.0)
@@ -201,12 +195,16 @@ class DetectionTrainer:
                 # Load with strict=False to handle num_classes mismatch
                 missing, unexpected = model.load_state_dict(state, strict=False)
                 if missing:
-                    logger.info("Pretrained weights: %d missing keys (expected for head).", len(missing))
+                    logger.info(
+                        "Pretrained weights: %d missing keys (expected for head).", len(missing)
+                    )
                 if unexpected:
                     logger.info("Pretrained weights: %d unexpected keys.", len(unexpected))
                 logger.info("Loaded pretrained weights from %s", pretrained_path)
             else:
-                logger.warning("Pretrained weights not found at %s. Training from scratch.", pretrained_path)
+                logger.warning(
+                    "Pretrained weights not found at %s. Training from scratch.", pretrained_path
+                )
 
         model = model.to(self.device)
 
@@ -375,10 +373,16 @@ class DetectionTrainer:
         val_subset_fraction = self._train_cfg.get("val_subset_fraction", 0.2)
         if val_full_interval > 0 and val_subset_fraction is not None:
             quick_config = copy.deepcopy(self.config)
-            quick_config.setdefault("data", {}).setdefault("subset", {})["val"] = val_subset_fraction
-            val_loader = build_fn(data_config, split="val", training_config=quick_config, base_dir=base_dir)
+            quick_config.setdefault("data", {}).setdefault("subset", {})["val"] = (
+                val_subset_fraction
+            )
+            val_loader = build_fn(
+                data_config, split="val", training_config=quick_config, base_dir=base_dir
+            )
         else:
-            val_loader = build_fn(data_config, split="val", training_config=self.config, base_dir=base_dir)
+            val_loader = build_fn(
+                data_config, split="val", training_config=self.config, base_dir=base_dir
+            )
 
         self._loaded_data_cfg = data_config
         return train_loader, val_loader
@@ -865,9 +869,15 @@ class DetectionTrainer:
             input_size = tuple(data_cfg_resolved.get("input_size", (640, 640)))
             style = VizStyle.from_config(self.config)
 
-            val_ds = getattr(self.val_loader, "dataset", None) if hasattr(self, "val_loader") else None
+            val_ds = (
+                getattr(self.val_loader, "dataset", None) if hasattr(self, "val_loader") else None
+            )
             test_ds = getattr(test_loader, "dataset", None) if test_loader is not None else None
-            train_ds = getattr(self.train_loader, "dataset", None) if hasattr(self, "train_loader") else None
+            train_ds = (
+                getattr(self.train_loader, "dataset", None)
+                if hasattr(self, "train_loader")
+                else None
+            )
 
             training_config = self._build_pytorch_training_config(
                 data_cfg_resolved=data_cfg_resolved, test_metrics=test_metrics,
@@ -878,7 +888,8 @@ class DetectionTrainer:
                 for k in ("mAP50", "map_50", "mAP@0.5", "map"):
                     if k in test_metrics:
                         try:
-                            test_map = float(test_metrics[k]); break
+                            test_map = float(test_metrics[k])
+                            break
                         except (TypeError, ValueError):
                             pass
             run_post_train_artifacts(
@@ -976,46 +987,47 @@ class DetectionTrainer:
         ``YOLOXDataset(split="test")`` raises ``FileNotFoundError`` cleanly
         when the split is absent, so no pre-existence check is needed.
         """
-        from torch.utils.data import DataLoader
-
         output_format = getattr(self.model, "output_format", "yolox")
         try:
             if output_format in {"detr", "yolox"}:
                 from core.p05_data.detection_dataset import YOLOXDataset
                 from core.p05_data.transforms import build_transforms
                 from utils.config import resolve_tensor_prep
+
                 tp = resolve_tensor_prep(self.config, backend="pytorch") or None
                 input_size = tuple(
                     (tp or {}).get("input_size") or data_cfg.get("input_size", (640, 640))
                 )
                 eval_transforms = build_transforms(
                     config=self.config.get("augmentation", {}),
-                    is_train=False, input_size=input_size,
-                    mean=data_cfg.get("mean"), std=data_cfg.get("std"),
+                    is_train=False,
+                    input_size=input_size,
+                    mean=data_cfg.get("mean"),
+                    std=data_cfg.get("std"),
                     tensor_prep=tp,
                 )
                 ds = YOLOXDataset(
-                    data_cfg, split="test",
-                    transforms=eval_transforms,
-                    base_dir=base_dir,
+                    data_cfg, split="test", transforms=eval_transforms, base_dir=base_dir
                 )
             elif output_format == "classification":
                 from core.p05_data.classification_dataset import (
-                    ClassificationDataset, build_classification_transforms,
+                    ClassificationDataset,
+                    build_classification_transforms,
                 )
-                transforms = build_classification_transforms(
-                    self.config, data_cfg, is_train=False)
+
+                transforms = build_classification_transforms(self.config, data_cfg, is_train=False)
                 ds = ClassificationDataset(
-                    data_cfg, split="test", transforms=transforms, base_dir=base_dir,
+                    data_cfg, split="test", transforms=transforms, base_dir=base_dir
                 )
             elif output_format == "segmentation":
                 from core.p05_data.segmentation_dataset import (
-                    SegmentationDataset, build_segmentation_transforms,
+                    SegmentationDataset,
+                    build_segmentation_transforms,
                 )
-                transforms = build_segmentation_transforms(
-                    self.config, data_cfg, is_train=False)
+
+                transforms = build_segmentation_transforms(self.config, data_cfg, is_train=False)
                 ds = SegmentationDataset(
-                    data_cfg, split="test", transform=transforms, base_dir=base_dir,
+                    data_cfg, split="test", transform=transforms, base_dir=base_dir
                 )
             else:
                 return None
@@ -1026,12 +1038,17 @@ class DetectionTrainer:
             logger.warning("test dataset build failed: %s", e)
             return None
 
-        batch_size = (self.config.get("data", {}) or {}).get("batch_size", 8)
+        data_cfg_yaml = self.config.get("data", {}) or {}
+        collate_fn = (
+            getattr(self.val_loader, "collate_fn", None) if hasattr(self, "val_loader") else None
+        )
         return DataLoader(
-            ds, batch_size=batch_size, shuffle=False,
-            num_workers=(self.config.get("data", {}) or {}).get("num_workers", 2),
+            ds,
+            batch_size=data_cfg_yaml.get("batch_size", 8),
+            shuffle=False,
+            num_workers=data_cfg_yaml.get("num_workers", 2),
             pin_memory=True,
-            collate_fn=getattr(self.val_loader, "collate_fn", None) if hasattr(self, "val_loader") else None,
+            collate_fn=collate_fn,
         )
 
     def _train_one_epoch(
@@ -1207,8 +1224,9 @@ class DetectionTrainer:
         running_reg = 0.0
         num_batches = 0
 
-        all_predictions: list = []    # Detection: list of dicts; Classification/Segmentation: list of tensors
-        all_ground_truths: list = []  # Detection: list of dicts; Classification/Segmentation: list of tensors
+        # Detection: list of dicts; Classification/Segmentation: list of tensors
+        all_predictions: list = []
+        all_ground_truths: list = []
 
         amp_device_type = "cuda" if self.device.type == "cuda" else "cpu"
         use_amp = self._train_cfg.get("amp", True) and self.device.type == "cuda"
@@ -1492,7 +1510,9 @@ class DetectionTrainer:
                     torch.cuda.set_rng_state_all(cuda_states)
                 logger.info("Restored RNG states for reproducibility.")
             except (TypeError, RuntimeError) as e:
-                logger.warning("Could not restore RNG states (%s) — continuing with current RNG.", e)
+                logger.warning(
+                    "Could not restore RNG states (%s) — continuing with current RNG.", e
+                )
 
         # Restore callback states (best metric tracking, early stopping counter)
         cb_states = checkpoint.get("callback_states", {})

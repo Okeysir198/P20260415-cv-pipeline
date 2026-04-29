@@ -57,7 +57,9 @@ class _WarmupMixin:
             factor = _warmup_factor(
                 self._current_epoch, self.warmup_epochs, self.warmup_start_factor,
             )
-            for param_group, base_lr in zip(self.optimizer.param_groups, self._base_lrs, strict=True):
+            for param_group, base_lr in zip(
+                self.optimizer.param_groups, self._base_lrs, strict=True
+            ):
                 param_group["lr"] = base_lr * factor
             return True
         return False
@@ -145,7 +147,9 @@ class WarmupScheduler(LRScheduler):
 
         if self.last_epoch < self.warmup_epochs:
             factor = _warmup_factor(self.last_epoch, self.warmup_epochs, self.warmup_start_factor)
-            for param_group, base_lr in zip(self.optimizer.param_groups, self._base_lrs, strict=True):
+            for param_group, base_lr in zip(
+                self.optimizer.param_groups, self._base_lrs, strict=True
+            ):
                 param_group["lr"] = base_lr * factor
         else:
             if metrics is not None:

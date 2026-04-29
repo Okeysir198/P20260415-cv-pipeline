@@ -17,6 +17,7 @@ from utils.device import auto_select_gpu  # noqa: E402
 auto_select_gpu()
 
 from loguru import logger  # noqa: E402
+
 from utils.config import parse_overrides  # noqa: E402
 
 

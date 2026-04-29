@@ -17,12 +17,11 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 import torch
+from loguru import logger
 from onnxsim import simplify as onnxsim_simplify
 from thop import profile
 
 from core.p06_models.hf_model import HFDetectionModel
-
-from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 

@@ -41,6 +41,14 @@ Pose estimation on 10 sample images — latency + detection rate metrics:
 
 **Interim recommendation:** Use `dwpose_384_pose` (ONNX) until RTMPose fine-tuning is complete.
 
+> **Note (2026-04-29):** numbers above are sourced from the
+> `safety-poketenashi` benchmark (this feature has no `eval/benchmark_results.json`
+> of its own yet). The latest poketenashi run shows `dwpose_384_pose` with
+> `status="error"` (transient CUDA alloc failure); production smoke tests on
+> the same ONNX checkpoint still pass at ~10 ms/frame
+> (see `safety-point_and_call` U3 smoke). Re-run the shared benchmark or add
+> an independent one once `training_ready/` data lands.
+
 Full results shared with `safety-poketenashi/eval/benchmark_results.json`.
 
 ## Key Files

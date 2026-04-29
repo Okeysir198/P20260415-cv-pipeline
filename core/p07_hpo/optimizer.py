@@ -8,13 +8,13 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 import optuna
+from loguru import logger
 from optuna.pruners import HyperbandPruner, MedianPruner, PercentilePruner
 from optuna.samplers import CmaEsSampler, RandomSampler, TPESampler
 
 from core.p06_training.trainer import DetectionTrainer
 from core.p07_hpo.pruning_callback import OptunaPruningCallback
 from core.p07_hpo.search_space import SearchSpace
-from loguru import logger
 from utils.config import load_config, merge_configs
 
 

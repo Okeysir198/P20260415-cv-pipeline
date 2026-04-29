@@ -50,6 +50,13 @@ Pose backend: `dwpose_384_pose` ONNX (best: det_rate=1.0, 13ms). Falls back to M
 
 **Recommendation:** `dwpose_384_pose` (ONNX, det_rate=1.0, 13ms, no extra dependencies).
 
+> **Note (2026-04-29):** the latest `eval/benchmark_results.json` shows
+> `dwpose_384_pose` with `status="error"` (CUDA alloc failure during batched
+> benchmark — likely transient memory pressure). The model itself works in
+> production: `safety-point_and_call` U3 smoke test confirmed ~10 ms/frame on
+> the same ONNX. Re-run the benchmark on a less-loaded GPU to refresh the
+> table. The recommendation stands.
+
 Full results: `eval/benchmark_results.json`
 
 ## Key Files

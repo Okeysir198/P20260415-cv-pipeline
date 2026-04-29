@@ -25,7 +25,11 @@ from core.p06_paddle._translator import (  # noqa: E402
     load_our_yaml,
     ppdet_base_config_path,
 )
-from core.p06_paddle.train import _find_ppdet_config, _ensure_coco_annotations  # noqa: E402
+from core.p06_paddle.train import (  # noqa: E402
+    _ensure_coco_annotations,
+    _find_ppdet_config,
+    _scrape_ppdet_metrics,
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -60,13 +64,7 @@ def main() -> int:
     trainer.load_weights(str(args.checkpoint))
     trainer.evaluate()
 
-    # Best-effort metric scrape (ppdet API varies by version)
-    metrics = {}
-    for attr in ("_eval_metrics", "metric_results", "_metrics"):
-        v = getattr(trainer, attr, None)
-        if isinstance(v, dict):
-            metrics.update({str(k): float(v[k]) for k in v if isinstance(v[k], (int, float))})
-            break
+    metrics = _scrape_ppdet_metrics(trainer)
     print(json.dumps({"metrics": metrics, "checkpoint": str(args.checkpoint)}, indent=2))
     return 0
 

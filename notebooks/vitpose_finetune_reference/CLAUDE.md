@@ -68,7 +68,7 @@ which is fine. Older pins (< 4.45) 404 on `from_pretrained`.
 seed: 42
 
 model:
-  arch: hf_keypoint                # ⚠ NOT YET REGISTERED — see our_vitpose_base/README.md
+  arch: hf_keypoint                # registered: @register_model("hf_keypoint") in core/p06_models/hf_model.py
   pretrained: usyd-community/vitpose-base-simple
   num_keypoints: 17
   input_size: [256, 192]           # ViTPose default (H, W) — non-square

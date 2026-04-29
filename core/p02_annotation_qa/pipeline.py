@@ -21,7 +21,6 @@ import numpy as np
 from langgraph.func import entrypoint, task
 from loguru import logger
 
-
 # ---------------------------------------------------------------------------
 # Helpers (same as nodes.py but standalone so tasks are self-contained)
 # ---------------------------------------------------------------------------

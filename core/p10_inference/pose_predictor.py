@@ -11,7 +11,6 @@ from typing import Any
 import cv2
 import numpy as np
 import supervision as sv
-
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -19,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.p06_models.pose_base import PoseModel
 from core.p10_inference.predictor import DetectionPredictor
 from utils.viz import VizStyle, annotate_detections, annotate_keypoints
-
 
 
 class PosePredictor:

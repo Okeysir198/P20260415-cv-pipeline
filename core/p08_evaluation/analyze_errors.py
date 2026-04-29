@@ -65,8 +65,6 @@ from core.p08_evaluation.error_analysis_runner import (  # noqa: E402
 from utils.config import load_config  # noqa: E402
 from utils.device import get_device  # noqa: E402
 
-
-
 # ---------------------------------------------------------------------------
 # Checkpoint loading — handles YOLOX .pt and HF pytorch_model.bin formats
 # ---------------------------------------------------------------------------

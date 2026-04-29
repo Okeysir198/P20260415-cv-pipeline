@@ -8,7 +8,8 @@ against future HF Trainer API changes.
 
 Four callbacks, one per viz we emit:
 
-- :class:`HFDatasetStatsCallback`   — on_train_begin: `00_dataset_info.{md,json}` + `01_dataset_stats.{png,json}`
+- :class:`HFDatasetStatsCallback`   — on_train_begin: `00_dataset_info.{md,json}` +
+  `01_dataset_stats.{png,json}`
 - :class:`HFDataLabelGridCallback`  — on_train_begin: `02_data_labels_<split>.png` per split
 - :class:`HFAugLabelGridCallback`   — on_train_begin: `03_aug_labels_train.png`
 - :class:`HFValPredictionCallback`  — on_epoch_end: `val_predictions/epoch_<N>.png`
@@ -20,7 +21,6 @@ there are pure (no trainer dependency).
 """
 from __future__ import annotations
 
-import math
 import random
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +29,7 @@ from typing import Any
 import cv2
 import numpy as np
 import supervision as sv
+from loguru import logger
 from transformers import TrainerCallback
 
 from core.p05_data.transforms import build_transforms
@@ -40,7 +41,6 @@ from core.p06_training._common import (
 from utils.viz import (
     VizStyle,
     annotate_detections,
-    annotate_keypoints,
     classification_banner,
     save_image_grid,
 )
@@ -159,10 +159,15 @@ def _run_topdown_keypoint_post_train(
     heatmap decoder used by the per-epoch grid + compute_metrics.
     """
     import json
+
     import torch
+
     from core.p08_evaluation.keypoint_metrics import (
-        decode_heatmaps_to_xy, compute_pck, compute_oks, compute_oks_ap,
         COCO_KP_SIGMAS,
+        compute_oks,
+        compute_oks_ap,
+        compute_pck,
+        decode_heatmaps_to_xy,
     )
 
     inner = getattr(val_ds, "dataset", val_ds)
@@ -223,7 +228,7 @@ def _run_topdown_keypoint_post_train(
     ap_dict = compute_oks_ap(oks)
 
     # ---- 2) best.png — top-N samples ranked by OKS (best first). ----
-    best_indices_topn = sorted_idx = np.argsort(-oks).tolist()[:best_num_samples]
+    best_indices_topn = np.argsort(-oks).tolist()[:best_num_samples]
     pick = [sample_idx[i] for i in best_indices_topn]
     best_path = save_dir / "val_predictions" / "best.png"
     _render_topdown_keypoint_grid(
@@ -362,7 +367,8 @@ def _render_topdown_keypoint_error_analysis(
               color=["#7e22ce", "#9333ea", "#a855f7"])
     for i, v in enumerate(pck_vals):
         ax[0].text(i, v + 0.01, f"{v:.3f}", ha="center", fontsize=9)
-    ax[0].set_ylim(0, 1.05); ax[0].set_ylabel("Recall")
+    ax[0].set_ylim(0, 1.05)
+    ax[0].set_ylabel("Recall")
     ax[0].set_title("Headline accuracy")
     order = np.argsort(err_per_joint)
     ax[1].barh([kp_names[i] for i in order], err_per_joint[order], color="#9333ea")
@@ -381,7 +387,8 @@ def _render_topdown_keypoint_error_analysis(
     ax.barh([kp_names[i] for i in order10], pck10_per_joint[order10], color="#9333ea")
     for i, v in enumerate(pck10_per_joint[order10]):
         ax.text(v + 0.005, i, f"{v:.3f}", va="center", fontsize=8)
-    ax.set_xlim(0, 1.05); ax.set_xlabel("PCK@0.1")
+    ax.set_xlim(0, 1.05)
+    ax.set_xlabel("PCK@0.1")
     ax.set_title("Per-joint PCK@0.1 (sorted ascending — worst at top)")
     fig.tight_layout()
     fig.savefig(ea_dir / "07_per_joint_performance.png", dpi=dpi, bbox_inches="tight")
@@ -393,15 +400,16 @@ def _render_topdown_keypoint_error_analysis(
     pair_names = ["eyes", "ears", "shoulders", "elbows", "wrists", "hips", "knees", "ankles"]
     if K >= 17:
         thr = 0.1 * ref_size
-        cnt = np.zeros((len(coco_lr_pairs), 4), dtype=np.float32)  # both_ok, swapped, L_only, R_only
-        for pi, (l, r) in enumerate(coco_lr_pairs):
-            both_vis = (vis[:, l] > 0) & (vis[:, r] > 0)
+        # cols: both_ok, swapped, L_only, R_only
+        cnt = np.zeros((len(coco_lr_pairs), 4), dtype=np.float32)
+        for pi, (li, ri) in enumerate(coco_lr_pairs):
+            both_vis = (vis[:, li] > 0) & (vis[:, ri] > 0)
             if not both_vis.any():
                 continue
-            d_ll = np.linalg.norm(pred_xy[both_vis, l] - gt_xy[both_vis, l], axis=-1)
-            d_rr = np.linalg.norm(pred_xy[both_vis, r] - gt_xy[both_vis, r], axis=-1)
-            d_lr = np.linalg.norm(pred_xy[both_vis, l] - gt_xy[both_vis, r], axis=-1)
-            d_rl = np.linalg.norm(pred_xy[both_vis, r] - gt_xy[both_vis, l], axis=-1)
+            d_ll = np.linalg.norm(pred_xy[both_vis, li] - gt_xy[both_vis, li], axis=-1)
+            d_rr = np.linalg.norm(pred_xy[both_vis, ri] - gt_xy[both_vis, ri], axis=-1)
+            d_lr = np.linalg.norm(pred_xy[both_vis, li] - gt_xy[both_vis, ri], axis=-1)
+            d_rl = np.linalg.norm(pred_xy[both_vis, ri] - gt_xy[both_vis, li], axis=-1)
             ll_ok = d_ll < thr
             rr_ok = d_rr < thr
             swap = (d_lr < thr) & (d_rl < thr) & ~ll_ok & ~rr_ok
@@ -494,7 +502,10 @@ def _render_topdown_keypoint_error_analysis(
             pred_score[m, k], pixel_err[m, k],
             s=8, alpha=0.4, color=cmap(k), label=kp_names[k] if K <= 17 else None,
         )
-    ax.axhline(0.1 * ref_size, ls="--", color="0.4", lw=0.8, label=f"PCK@0.1 = {0.1 * ref_size:.0f}px")
+    ax.axhline(
+        0.1 * ref_size, ls="--", color="0.4", lw=0.8,
+        label=f"PCK@0.1 = {0.1 * ref_size:.0f}px",
+    )
     ax.set_xlabel("Heatmap-peak score (pred)")
     ax.set_ylabel("Pixel error vs GT (px)")
     ax.set_title("Per-joint confidence vs error")
@@ -607,30 +618,30 @@ def _render_topdown_keypoint_error_analysis(
     if K >= 17:
         sp_dir = gallery_dir / "swapped_pair"
         coco_lr_pairs = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12), (13, 14), (15, 16)]
-        for l, r in coco_lr_pairs:
-            both = (vis[:, l] > 0) & (vis[:, r] > 0)
+        for li, ri in coco_lr_pairs:
+            both = (vis[:, li] > 0) & (vis[:, ri] > 0)
             if not both.any():
                 continue
-            d_lr = np.linalg.norm(pred_xy[:, l] - gt_xy[:, r], axis=-1)
-            d_rl = np.linalg.norm(pred_xy[:, r] - gt_xy[:, l], axis=-1)
-            d_ll = np.linalg.norm(pred_xy[:, l] - gt_xy[:, l], axis=-1)
-            d_rr = np.linalg.norm(pred_xy[:, r] - gt_xy[:, r], axis=-1)
+            d_lr = np.linalg.norm(pred_xy[:, li] - gt_xy[:, ri], axis=-1)
+            d_rl = np.linalg.norm(pred_xy[:, ri] - gt_xy[:, li], axis=-1)
+            d_ll = np.linalg.norm(pred_xy[:, li] - gt_xy[:, li], axis=-1)
+            d_rr = np.linalg.norm(pred_xy[:, ri] - gt_xy[:, ri], axis=-1)
             swap_mask = both & (d_lr < thr10) & (d_rl < thr10) & ((d_ll >= thr10) | (d_rr >= thr10))
             if not swap_mask.any():
                 continue
             sample_indices = np.where(swap_mask)[0][:n_gallery_per_class]
-            pdir = sp_dir / f"{kp_names[l]}__{kp_names[r]}"
+            pdir = sp_dir / f"{kp_names[li]}__{kp_names[ri]}"
             pdir.mkdir(parents=True, exist_ok=True)
             panels = []
             for i in sample_indices:
-                ann = _annotated_crop(int(i), f"swap {kp_names[l]}↔{kp_names[r]}")
+                ann = _annotated_crop(int(i), f"swap {kp_names[li]}↔{kp_names[ri]}")
                 if ann is not None:
                     panels.append(ann)
             if panels:
                 save_image_grid(
                     panels, pdir / "gallery.png",
                     cols=min(3, len(panels)),
-                    header=f"L↔R swap — {kp_names[l]}↔{kp_names[r]}",
+                    header=f"L↔R swap — {kp_names[li]}↔{kp_names[ri]}",
                 )
 
 
@@ -646,8 +657,12 @@ def _topdown_eval_pass(
     corruptions in input space.
     """
     import torch
+
     from core.p08_evaluation.keypoint_metrics import (
-        decode_heatmaps_to_xy, compute_pck, compute_oks, compute_oks_ap,
+        compute_oks,
+        compute_oks_ap,
+        compute_pck,
+        decode_heatmaps_to_xy,
     )
 
     device = next(model.parameters()).device
@@ -696,6 +711,7 @@ def _chart_14_robustness_sweep(
 ) -> None:
     """AP/PCK vs corruption (gaussian_blur, jpeg, brightness) at 3 severities."""
     import json
+
     import torch
     import torch.nn.functional as F
 
@@ -744,7 +760,8 @@ def _chart_14_robustness_sweep(
                 bgr = _cv2.cvtColor(arr, _cv2.COLOR_RGB2BGR)
                 ok, buf = _cv2.imencode(".jpg", bgr, [_cv2.IMWRITE_JPEG_QUALITY, quality])
                 if not ok:
-                    out.append(rgb[i]); continue
+                    out.append(rgb[i])
+                    continue
                 dec = _cv2.imdecode(buf, _cv2.IMREAD_COLOR)
                 rgb_dec = _cv2.cvtColor(dec, _cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
                 out.append(torch.from_numpy(rgb_dec).permute(2, 0, 1).to(rgb.device))
@@ -810,7 +827,6 @@ def _chart_20_bbox_padding_sweep(
     when the crop becomes too loose or tight.
     """
     import json
-    from copy import copy as _copy
 
     inner = getattr(val_ds, "dataset", val_ds)
     if type(inner).__name__ != "KeypointTopDownDataset":
@@ -892,6 +908,7 @@ def _render_topdown_keypoint_grid(
     skeletons on the denormalized crop (GT in purple, pred in green).
     """
     import torch
+
     from core.p08_evaluation.keypoint_metrics import decode_heatmaps_to_xy
 
     inner = getattr(ds, "dataset", ds)
@@ -1107,8 +1124,6 @@ def _save_image_grid(
         header=title,
     )
 
-from loguru import logger
-
 
 def _build_class_names(data_config: dict) -> dict[int, str]:
     return {int(k): str(v) for k, v in data_config.get("names", {}).items()}
@@ -1256,7 +1271,9 @@ class HFDatasetStatsCallback(TrainerCallback):
                 s: (len(idxs) if idxs is not None else int(self.full_sizes.get(s, 0)))
                 for s, idxs in self.subsets.items()
             }
-            full_sizes = {s: int(v) for s, v in self.full_sizes.items()} if self.full_sizes else None
+            full_sizes = (
+                {s: int(v) for s, v in self.full_sizes.items()} if self.full_sizes else None
+            )
             write_dataset_info(
                 out_dir,
                 feature_name=self.feature_name,
@@ -1606,7 +1623,8 @@ class HFValPredictionCallback(TrainerCallback):
             if state.log_history:
                 for entry in reversed(state.log_history):
                     if "eval_AP" in entry:
-                        ap_val = float(entry["eval_AP"]); break
+                        ap_val = float(entry["eval_AP"])
+                        break
             out_path = (
                 self.save_dir / "val_predictions" / "epochs"
                 / f"epoch_{epoch_idx:03d}.png"
@@ -1631,7 +1649,8 @@ class HFValPredictionCallback(TrainerCallback):
         if state.log_history:
             for entry in reversed(state.log_history):
                 if "eval_map_50" in entry:
-                    map_val = float(entry["eval_map_50"]); break
+                    map_val = float(entry["eval_map_50"])
+                    break
 
         from core.p06_training.post_train import render_prediction_grid
         from core.p10_inference.supervision_bridge import VizStyle
@@ -1755,7 +1774,8 @@ def _build_hf_training_config(args, state, model, best_map: float, test_map: flo
     best_epoch = None
     for e in state.log_history:
         if "eval_map_50" in e and float(e["eval_map_50"]) >= best_map - 1e-9:
-            best_epoch = e.get("epoch"); break
+            best_epoch = e.get("epoch")
+            break
     return {
         "model": {"arch": arch, "trainable_params": params,
                   "input_size": getattr(args, "_input_size", None)},

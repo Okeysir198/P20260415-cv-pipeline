@@ -47,6 +47,8 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from loguru import logger
+
 from core.p06_training._common import (
     unwrap_subset as _unwrap,
 )
@@ -64,7 +66,6 @@ from core.p10_inference.supervision_bridge import (
     render_gt_pred_side_by_side,
 )
 from utils.viz import apply_plot_style, fit_figsize, new_figure, shorten_label
-from loguru import logger
 
 apply_plot_style()
 

@@ -12,13 +12,15 @@ algebra sanity check on ``v2.Normalize``.
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import cv2
 import numpy as np
 import torch
 import torchvision.transforms.v2 as v2
+from loguru import logger
 from torchvision import tv_tensors
 
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
@@ -27,9 +29,7 @@ from core.p05_data.transforms import (
     _to_v2_sample,
     build_transforms,
 )
-from loguru import logger
 from core.p10_inference.supervision_bridge import VizStyle
-
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -878,8 +878,9 @@ def _render_task_walker(
 
     try:
         if is_topdown_kpt:
-            from core.p05_data.keypoint_dataset import KeypointTopDownDataset
             from transformers import AutoImageProcessor
+
+            from core.p05_data.keypoint_dataset import KeypointTopDownDataset
             model_cfg = training_config.get("model") or {}
             pretrained = model_cfg.get("pretrained") or model_cfg.get("hf_model_id")
             processor = AutoImageProcessor.from_pretrained(pretrained) if pretrained else None

@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from loguru import logger
 from transformers import (
     AutoImageProcessor,
     AutoModelForObjectDetection,
@@ -19,7 +20,6 @@ from transformers import (
 )
 
 from core.p06_models.base import DetectionModel
-from loguru import logger
 from core.p06_models.registry import register_model
 
 # arch name → (ModelClass, ConfigClass, default_pretrained)

@@ -32,7 +32,6 @@ from utils.langgraph_common import (
 )
 from utils.yolo_io import image_to_label_path, parse_yolo_label
 
-
 # ---------------------------------------------------------------------------
 # LangGraph state schema
 # ---------------------------------------------------------------------------

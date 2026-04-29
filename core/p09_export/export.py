@@ -22,12 +22,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
 import torch
+from loguru import logger
 
 from core.p05_data.detection_dataset import build_dataloader
 from core.p06_models import build_model
 from core.p09_export.exporter import ModelExporter
 from core.p09_export.quantize import ModelQuantizer
-from loguru import logger
 from utils.config import load_config
 from utils.device import get_device
 
@@ -485,7 +485,7 @@ def main():
     print(f"  ONNX size      : {onnx_size_mb:.2f} MB")
     print(f"  ONNX path      : {onnx_path}")
     if optimized_path:
-        print(f"  Optimized      : {optimized_path} ({onnx_size_mb:.2f} MB, level={optimize_level})")
+        print(f"  Optimized      : {optimized_path} ({onnx_size_mb:.2f} MB)")
     if quant_path:
         quant_size_mb = Path(quant_path).stat().st_size / (1024 * 1024)
         print(f"  Quantized      : {quant_path} ({quant_size_mb:.2f} MB, mode={quant_mode})")

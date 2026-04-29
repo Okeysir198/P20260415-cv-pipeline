@@ -20,10 +20,11 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent.parent)
 )  # project root
 
+from loguru import logger
+
 from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, BaseDataset  # noqa: E402
 from core.p05_data.detection_dataset import collate_fn  # noqa: E402
 from core.p05_data.transforms import build_transforms  # noqa: E402
-from loguru import logger
 from utils.config import resolve_path  # noqa: E402
 
 # Image file extensions to search for

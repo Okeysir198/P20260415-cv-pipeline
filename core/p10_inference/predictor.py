@@ -17,7 +17,6 @@ import numpy as np
 import onnxruntime as ort
 import torch
 import torch.nn as nn
-
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
@@ -26,7 +25,6 @@ from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
 from core.p06_models import build_model
 from core.p06_training.postprocess import postprocess as _postprocess_registry
 from utils.device import get_device
-
 
 
 def _remap_megvii_state_dict(

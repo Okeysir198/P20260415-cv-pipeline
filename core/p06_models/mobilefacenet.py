@@ -21,9 +21,9 @@ Typical usage::
 import cv2
 import numpy as np
 import onnxruntime as ort
+from loguru import logger
 
 from core.p06_models.face_base import ARCFACE_REF_LANDMARKS, FaceEmbedder
-from loguru import logger
 from core.p06_models.face_registry import _FACE_EMBEDDER_VARIANT_MAP, register_face_embedder
 
 # Default ONNX path

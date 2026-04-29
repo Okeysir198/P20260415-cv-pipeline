@@ -151,8 +151,13 @@ class HFAdapter(ModelAdapter):
 
     def __init__(self, model_path, data_config, training_config, conf_threshold,
                  iou_threshold, device) -> None:
+        import shutil  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
         import torch  # noqa: PLC0415
         from transformers import AutoImageProcessor, AutoModelForObjectDetection  # noqa: PLC0415
+
+        from utils.checkpoint import strip_hf_prefix  # noqa: PLC0415
 
         self._conf = conf_threshold
         self._device = torch.device(device) if isinstance(device, str) else (
@@ -160,22 +165,20 @@ class HFAdapter(ModelAdapter):
         )
         self._processor = AutoImageProcessor.from_pretrained(model_path)
 
-        # Our HF Trainer saves pytorch_model.bin with "hf_model." prefix
-        # (HFModelWrapper.state_dict()). from_pretrained() silently reinitialises
-        # all weights when keys don't match. Strip the prefix first, write a
-        # temp bin, then load — avoids touching the original checkpoint.
+        # HF Trainer saves pytorch_model.bin with "hf_model." prefix (see
+        # HFModelWrapper.state_dict()). from_pretrained silently reinits any
+        # mismatched keys, so strip into a temp dir before loading.
         p = Path(model_path)
         bin_path = p / "pytorch_model.bin" if p.is_dir() else None
         if bin_path and bin_path.exists():
             sd = torch.load(bin_path, map_location="cpu", weights_only=False)
             if any(k.startswith("hf_model.") for k in sd):
-                import tempfile, shutil  # noqa: PLC0415, E401
-                sd_clean = {k.removeprefix("hf_model."): v for k, v in sd.items()}
                 tmp_dir = Path(tempfile.mkdtemp())
                 shutil.copy(p / "config.json", tmp_dir / "config.json")
-                if (p / "preprocessor_config.json").exists():
-                    shutil.copy(p / "preprocessor_config.json", tmp_dir / "preprocessor_config.json")
-                torch.save(sd_clean, tmp_dir / "pytorch_model.bin")
+                preproc = p / "preprocessor_config.json"
+                if preproc.exists():
+                    shutil.copy(preproc, tmp_dir / preproc.name)
+                torch.save(strip_hf_prefix(sd), tmp_dir / "pytorch_model.bin")
                 logger.info("Stripped hf_model. prefix — loading from temp dir {}", tmp_dir)
                 self._model = AutoModelForObjectDetection.from_pretrained(str(tmp_dir))
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -256,16 +259,8 @@ class TorchScriptAdapter(ModelAdapter):
 
 
 
-# ---------------------------------------------------------------------------
-# Lazy import guard — keeps the module importable without heavy dependencies
-# until resolve_adapter() is actually called.
-# ---------------------------------------------------------------------------
-
-_builtins_loaded = False
-
-
 def _load_builtin_adapters() -> None:
-    """No-op: built-in adapters self-register via @register_adapter at import
-    time.  Add third-party adapter imports here so they register before
-    resolve_adapter() runs its loop."""
+    """Built-in adapters self-register via @register_adapter at import time.
+    Hook for adding third-party adapter imports before resolve_adapter() runs.
+    """
     pass

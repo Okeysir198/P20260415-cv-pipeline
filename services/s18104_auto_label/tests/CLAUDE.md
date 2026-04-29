@@ -37,19 +37,25 @@ uv run pytest tests/test01_annotate.py -v
 uv run pytest tests/test02_jobs.py -v
 uv run pytest tests/test03_video.py -v
 uv run pytest tests/test04_convert.py -v
+uv run pytest tests/test05_parallel_batch.py -v
+uv run pytest tests/test06_rule_classify_vlm.py -v
+uv run pytest tests/test_real_data.py -v
 ```
 
 Tests auto-skip if the service is not running.
 
 ## Test Files
 
-| File | Endpoints Covered |
-|------|-------------------|
+| File | Endpoints / Coverage |
+|------|----------------------|
 | `test00_health.py` | `GET /health` |
 | `test01_annotate.py` | `POST /annotate` (text mode, all 4 output formats, invalid mode/format, overlay) |
 | `test02_jobs.py` | `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `DELETE /jobs/{id}` |
 | `test03_video.py` | `POST /video/sessions`, `POST /video/sessions/{id}/frames`, `POST /video/sessions/{id}/propagate`, `DELETE /video/sessions/{id}` |
 | `test04_convert.py` | `POST /convert` (all 4 formats, empty, invalid, roundtrip from annotate) |
+| `test05_parallel_batch.py` | Parallel batch annotation throughput / job-queue concurrency |
+| `test06_rule_classify_vlm.py` | Rule-based classification + VLM-assisted annotation modes |
+| `test_real_data.py` | End-to-end smoke against real `data/` images (not a synthetic fixture) |
 
 ## Endpoint Coverage
 

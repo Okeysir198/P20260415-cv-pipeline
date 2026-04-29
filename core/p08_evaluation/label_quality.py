@@ -38,14 +38,13 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from loguru import logger
 
 from core.p10_inference.supervision_bridge import (
     VizStyle,
     render_gt_pred_side_by_side,
 )
 from utils.viz import save_image_grid
-
-from loguru import logger
 
 matplotlib.use("Agg")
 
@@ -443,7 +442,6 @@ def _analyze_detection(
     else:
         idxs = list(range(n))
 
-    device = next(model.parameters()).device
     h_in, w_in = int(input_size[0]), int(input_size[1])
     per_image: list[dict] = []
 

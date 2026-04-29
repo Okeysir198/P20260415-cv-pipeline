@@ -36,17 +36,17 @@ import supervision as sv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from loguru import logger
+
 from core.p05_data.detection_dataset import YOLOXDataset
 from core.p05_data.transforms import build_transforms
 from utils.config import feature_name_from_config_path, generate_run_dir, load_config
-from loguru import logger
 from utils.viz import (
     VizStyle,
     annotate_detections,
     apply_plot_style,
     safe_colorbar,
     save_image_grid,
-    truncate_label,
     wrap_suptitle,
 )
 
@@ -1898,9 +1898,9 @@ def _stats_keypoint(
                 "vis_counts": stats[sp]["vis_counts"],
                 "labeled_counts": stats[sp]["labeled_counts"],
                 "visibility_rate_per_joint": [
-                    round(v / max(l, 1), 4)
-                    for v, l in zip(stats[sp]["vis_counts"],
-                                    stats[sp]["labeled_counts"], strict=True)
+                    round(v / max(lab, 1), 4)
+                    for v, lab in zip(stats[sp]["vis_counts"],
+                                      stats[sp]["labeled_counts"], strict=True)
                 ],
                 "skeleton_edge_lengths": {
                     f"{a}-{b}": {

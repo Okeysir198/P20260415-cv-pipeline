@@ -10,8 +10,8 @@ Supports three backends selected via ``training.backend`` in the config YAML:
 
 Usage:
     python train.py --config features/safety-fire_detection/configs/06_training.yaml
-    python train.py --config features/safety-fire_detection/configs/06_training.yaml --resume runs/fire_detection/last.pth
-    python train.py --config features/safety-fire_detection/configs/06_training.yaml --override training.lr=0.005 training.epochs=100
+    python train.py --config <cfg> --resume runs/fire_detection/last.pth
+    python train.py --config <cfg> --override training.lr=0.005 training.epochs=100
 """
 
 import argparse
@@ -51,7 +51,7 @@ torch.use_deterministic_algorithms(True, warn_only=True)
 # Silence two harmless warnings that each fire once per CUDA op selection /
 # eval batch and bloat training logs without signaling anything actionable.
 # Neither hides real errors — both are narrow, specific messages.
-import warnings as _warnings
+import warnings as _warnings  # noqa: E402
 
 _warnings.filterwarnings(
     "ignore",
@@ -70,6 +70,7 @@ _warnings.filterwarnings(
 )
 
 from loguru import logger  # noqa: E402
+
 from utils.config import load_config, parse_overrides  # noqa: E402
 
 
@@ -83,7 +84,10 @@ def main() -> None:
         "--config",
         type=str,
         required=True,
-        help="Path to the training YAML config file (e.g. features/safety-fire_detection/configs/06_training.yaml).",
+        help=(
+            "Path to the training YAML config file "
+            "(e.g. features/safety-fire_detection/configs/06_training.yaml)."
+        ),
     )
     parser.add_argument(
         "--resume",
@@ -137,7 +141,6 @@ def main() -> None:
         overrides["device"] = args.device
 
     overrides_or_none = overrides or None
-
     config = load_config(str(config_path))
     training_cfg = config.get("training", {})
     backend = training_cfg.get("backend", "pytorch")
@@ -197,7 +200,10 @@ def main() -> None:
             _maybe_resume(trainer)
             summary = trainer.train()
             logger.info("Training complete (pytorch).")
-            logger.info("  Best metric: %.4f at epoch %d", summary["best_metric"] or 0.0, summary["best_epoch"])
+            logger.info(
+                "  Best metric: %.4f at epoch %d",
+                summary["best_metric"] or 0.0, summary["best_epoch"],
+            )
             logger.info("  Total epochs: %d", summary["total_epochs"])
         else:
             logger.error(

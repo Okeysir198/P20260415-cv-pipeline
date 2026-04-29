@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -46,12 +47,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from loguru import logger
 from PIL import Image
 from torchvision.transforms import v2
 
 from utils.viz import apply_plot_style
-
-from loguru import logger
 
 matplotlib.use("Agg")
 

@@ -17,8 +17,9 @@ from torch.utils.data import DataLoader, Dataset
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, IMG_EXTENSIONS
 from loguru import logger
+
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, IMG_EXTENSIONS
 from utils.config import resolve_path
 
 

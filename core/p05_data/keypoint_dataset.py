@@ -20,8 +20,9 @@ from torchvision.transforms import v2
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
-from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, BaseDataset  # noqa: F401
 from loguru import logger
+
+from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD, BaseDataset  # noqa: F401
 from utils.config import resolve_path
 
 # Image file extensions to search for

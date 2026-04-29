@@ -17,6 +17,8 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
+from loguru import logger
+
 from core.p05_data.base_dataset import (  # noqa: F401
     IMAGENET_MEAN,
     IMAGENET_STD,
@@ -24,9 +26,7 @@ from core.p05_data.base_dataset import (  # noqa: F401
     BaseDataset,
 )
 from core.p05_data.transforms import build_transforms
-from loguru import logger
 from utils.config import resolve_path
-
 
 # ---------------------------------------------------------------------------
 # Dataset
