@@ -200,7 +200,7 @@ class HandsInPocketsPredictor:
         self.cfg = load_config(self.config_path)
         cfg_dir = self.config_path.parent
 
-        pose_cfg = self._cfg.get("pose", {}) or {}
+        pose_cfg = self.cfg.get("pose", {}) or {}
         if pose_cfg.get("backend") not in (None, "dwpose_onnx"):
             raise ValueError(
                 f"Only 'dwpose_onnx' backend is supported in v1; "
@@ -219,7 +219,7 @@ class HandsInPocketsPredictor:
         person_detector = _PersonDetector(weights_path=det_weights_path, conf=det_conf)
         self._pose = _DWPoseAdapter(onnx_path=onnx_path, person_detector=person_detector)
 
-        rule_cfg = (self._cfg.get("pose_rules", {}) or {}).get("hands_in_pockets", {}) or {}
+        rule_cfg = (self.cfg.get("pose_rules", {}) or {}).get("hands_in_pockets", {}) or {}
         self._rule = HandsInPocketsDetector(
             wrist_below_hip_ratio=float(rule_cfg.get("wrist_below_hip_ratio", 0.05)),
             wrist_inside_torso_margin=float(rule_cfg.get("wrist_inside_torso_margin", 0.08)),
