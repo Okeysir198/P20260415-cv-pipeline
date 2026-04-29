@@ -350,7 +350,7 @@ def run_post_train_artifacts(
     style: VizStyle | None = None,
     best_num_samples: int = 16,
     best_conf_threshold: float = 0.1,
-    error_analysis_conf_threshold: float = 0.05,
+    error_analysis_conf_threshold: float | None = None,
     error_analysis_iou_threshold: float = 0.5,
     error_analysis_max_samples: int | None = 500,
     error_analysis_hard_images_per_class: int = 20,
@@ -388,6 +388,15 @@ def run_post_train_artifacts(
     style = style or VizStyle()
     if task is None:
         task = _task_from_output_format(getattr(model, "output_format", None))
+
+    # YOLOX scores are obj*cls (sigmoid×sigmoid) — TPs sit ~0.5+, FPs flood
+    # at 0.05 and overwhelm the analyzer (137k FPs vs 207 GTs observed on
+    # CPPE-5 → baseline mAP=0 in summary.md while test_results.json=0.74).
+    # DETR-family scores rarely exceed 0.2 even for TPs, so 0.05 is correct
+    # there. Pick a sane default per output_format; explicit caller value wins.
+    if error_analysis_conf_threshold is None:
+        output_format = (getattr(model, "output_format", "") or "").lower()
+        error_analysis_conf_threshold = 0.25 if output_format == "yolox" else 0.05
 
     was_training = bool(getattr(model, "training", False))
     model.eval()

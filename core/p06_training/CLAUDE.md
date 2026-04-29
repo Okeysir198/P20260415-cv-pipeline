@@ -270,14 +270,17 @@ Gotchas
   in `build_hf_model`; any new HF detection wrapper MUST do the same or wire
   a custom preprocess path. YOLOX (`output_format == "yolox"`) bypasses this
   and feeds raw [0, 255] to match the Megvii recipe.
-- **Default `error_analysis_conf_threshold = 0.05`, not 0.3** — DETR-family
-  models (RT-DETRv2, D-FINE) routinely produce correct predictions at scores
-  in the 0.05–0.20 range; on CPPE-5 RT-DETRv2's max score on a typical val
-  image was 0.176. Using 0.3 as the analyzer threshold dropped virtually
-  every prediction, leaving TP≈0 / FN≈all in summary.json even when HF
-  Trainer's own eval reported mAP50=0.82. With 0.05, TP counts land in the
-  100s and PR curves / mAP-vs-IoU reflect real model behavior. Override via
-  `training.post_train.error_conf_threshold` if you need different ops calibration.
+- **`error_analysis_conf_threshold` is per-arch auto-defaulted** —
+  `run_post_train_artifacts` defaults it to `None` and resolves at runtime
+  based on `model.output_format`: **0.05 for DETR-family / HF detection**
+  (RT-DETRv2, D-FINE produce TPs in the 0.05–0.20 range; on CPPE-5 RT-DETRv2's
+  max score on a typical val image was 0.176, so 0.3 dropped almost every
+  prediction and left TP≈0 in summary.json even when HF Trainer's own eval
+  reported mAP50=0.82) and **0.25 for YOLOX** (scores are `obj_sigmoid * cls_sigmoid`,
+  TPs sit at ~0.5+, FPs flood at 0.05 — observed 137k FPs vs 207 GTs on
+  CPPE-5, baseline mAP=0 in summary.md while test_results.json=0.74). Override
+  via `training.post_train.error_conf_threshold` if you need different ops
+  calibration; an explicit value always wins over the per-arch default.
 - **Failure-mode Δ mAP is a counterfactual simulation, not a ground-truth gain**
   — `error_analysis_runner._compute_recoverable_map` iterates each of the 5
   modes, mutates the detection list (inject synthetic TPs for `missed`, flip
