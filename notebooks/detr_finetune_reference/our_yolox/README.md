@@ -97,73 +97,49 @@ separate `our_yolox_torchvision/` variant.
   (`backbone.backbone.*`) and remaps to the adapter's convention. No
   manual key renaming.
 
-## Result (seed=42, 50 epochs, GPU 1, 2026-04-20)
-
-### Wall time — **1.55× faster than RT-DETRv2 on the same GPU**
-
-| axis | value |
-|---|---|
-| `train_runtime` (50 ep) | **553.7 s** (~9 min 14 s) |
-| per-epoch | 11.1 s |
-| RT-DETRv2 sibling (40 ep, same GPU) | 857.3 s (21.4 s/ep) |
-
-YOLOX-M beats RT-DETRv2-R50 on wall time by **~2× per epoch** here —
-smaller encoder, no transformer self-attention overhead, and AMP is
-enabled where DETR requires fp32.
+## Result (seed=42, 50 epochs, 2026-04-22 rerun)
 
 ### Accuracy — val (full CPPE-5 val, bs=16, no TTA)
 
-| metric | val (best ep26) | val (final ep50) |
-|---|---|---|
-| mAP@0.5 | **0.6561** | 0.6408 |
-| Coverall AP₅₀ | 0.8163 | 0.7998 |
-| Face_Shield AP₅₀ | 0.6796 | 0.6344 |
-| Gloves AP₅₀ | 0.5583 | 0.5422 |
-| Goggles AP₅₀ | 0.5179 | 0.5232 |
-| Mask AP₅₀ | 0.7084 | 0.7043 |
-
-### Accuracy — test (29 imgs, p08 evaluate.py, conf=0.05, IoU=0.5)
+Final `runs/seed42/test_results.json`:
 
 | metric | value |
 |---|---|
-| **Test mAP@0.5** | **0.5718** |
-| Coverall AP | 0.6991 |
-| Face_Shield AP | 0.7218 |
-| Gloves AP | 0.4419 |
-| Goggles AP | 0.2960 |
-| Mask AP | 0.7000 |
+| **val/mAP50** | **0.7388** |
+| Coverall AP₅₀ (cls0) | 0.7983 |
+| Face_Shield AP₅₀ (cls1) | 0.9274 |
+| Gloves AP₅₀ (cls2) | 0.5283 |
+| Goggles AP₅₀ (cls3) | 0.6802 |
+| Mask AP₅₀ (cls4) | 0.7596 |
+| precision | 0.8520 |
+| recall | 0.7299 |
 
-### Comparison vs RT-DETRv2-R50 sibling (same GPU 1, same data split)
+Matches the `notebooks/detr_finetune_reference/CLAUDE.md` head-to-head
+table (`our_yolox` row, val mAP₅₀ 0.7388).
 
-| axis | YOLOX-M (this) | RT-DETRv2-R50 (`../our_rtdetr_v2_albumentations/`) |
-|---|---|---|
-| epochs | 50 | 40 |
-| `train_runtime` | **553.7 s** (1.55× faster) | 857.3 s |
-| per-epoch | 11.1 s (1.93× faster) | 21.4 s |
-| val mAP@0.5 | 0.6561 | — |
-| test mAP₅₀ | **0.5718** (−0.200) | 0.7714 |
-| test mAP (COCO) | ≈ 0.35¹ | 0.5309 |
+### Comparison vs DETR-family siblings (CPPE-5 val, same data split)
 
-¹ YOLOX was evaluated via `core/p08_evaluation/evaluate.py` which
-reports single-IoU AP@0.5, not the COCO-style `mAP@[0.5:0.95]`. The
-0.35 is inferred from the usual ~0.60 × mAP₅₀ relationship on
-CPPE-5; for a strict apples-to-apples torchmetrics MAP, re-evaluate
-with the HF Trainer test loop or wire torchmetrics into `evaluator.py`.
+| run | arch | aug | epochs | val mAP₅₀ |
+|---|---|---|---|---|
+| **our_yolox (this)** | yolox-m (official) | Albumentations | 50 | **0.7388** |
+| our_yolox_torchvision | yolox-m (official) | TV + Mosaic + MixUp | 100 | 0.8668 |
+| our_rtdetr_v2_albumentations | RT-DETRv2-R50 | Albumentations | 40 | 0.8264 |
+| our_rtdetr_v2_torchvision | RT-DETRv2-R50 | torchvision v2 | 40 | 0.8231 |
+| our_dfine_albumentations | dfine-n | Albumentations | 30 | 0.6778 |
+| our_dfine_torchvision | dfine-n | torchvision v2 | 30 | 0.6828 |
 
 ### Interpretation
 
-- **YOLOX is faster but weaker on mAP₅₀ here (−0.20 vs RT-DETRv2).**
-  Root cause is the Albumentations constraint — CPPE-5 with Mosaic
-  typically closes ~0.05-0.10 of that gap (YOLOX's training recipe
-  assumes Mosaic provides scale/context augmentation; removing it
-  starves the backbone).
-- **Goggles is the weakest class (0.30 test AP)** — smallest support
-  in CPPE-5 and most sensitive to aug richness. This tracks the pattern
-  in `features/safety-fire_detection/` where rare-class AP is the first
-  thing Mosaic regularisation protects.
-- **YOLOX beats RT-DETRv2 on Face_Shield (0.72 vs 0.67)** —
-  low-variance class where simpler IoU-based matching (SimOTA) converges
-  faster than bipartite.
+- **YOLOX is weaker on mAP₅₀ here (−0.09 vs RT-DETRv2-R50, −0.13 vs
+  our_yolox_torchvision).** Root cause is the no-Mosaic constraint —
+  the Albumentations backend can't do dataset-level Mosaic/MixUp, so
+  this run is YOLOX-without-its-training-recipe. The `our_yolox_torchvision/`
+  sibling at 100 ep with TV + Mosaic + MixUp closes the gap and beats
+  RT-DETRv2.
+- **Gloves is the weakest class (val AP₅₀ 0.53)** — smallest objects
+  on average; YOLOX without Mosaic loses scale-augmentation richness.
+- **Face_Shield strongest at 0.93** — low-variance class where SimOTA's
+  IoU-based matching converges quickly.
 
 ### If you want the full YOLOX recipe
 
