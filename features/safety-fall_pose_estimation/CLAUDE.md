@@ -4,7 +4,7 @@
 
 ## Overview
 
-Estimates human pose keypoints tuned for detecting dangerous fall angles in industrial settings. Shared pose backend with `safety-poketenashi`. **Verified path**: `hf_keypoint` arch (top-down ViTPose-base) — see `notebooks/vitpose_finetune_reference/our_vitpose_base/` for the working recipe + COCO AP smoke. RTMPose-S/M remain a future option but require `mmpose` (not in main venv).
+Estimates human pose keypoints tuned for detecting dangerous fall angles in industrial settings. Shared pose backend with the `safety-poketenashi_*` feature family (per-rule features split out of the old umbrella). **Verified path**: `hf_keypoint` arch (top-down ViTPose-base) — see `notebooks/vitpose_finetune_reference/our_vitpose_base/` for the working recipe + COCO AP smoke. RTMPose-S/M remain a future option but require `mmpose` (not in main venv).
 
 ## Dataset
 
@@ -42,14 +42,15 @@ Pose estimation on 10 sample images — latency + detection rate metrics:
 **Interim recommendation:** Use `dwpose_384_pose` (ONNX) until RTMPose fine-tuning is complete.
 
 > **Note (2026-04-29):** numbers above are sourced from the
-> `safety-poketenashi` benchmark (this feature has no `eval/benchmark_results.json`
-> of its own yet). The latest poketenashi run shows `dwpose_384_pose` with
-> `status="error"` (transient CUDA alloc failure); production smoke tests on
-> the same ONNX checkpoint still pass at ~10 ms/frame
-> (see `safety-point_and_call` U3 smoke). Re-run the shared benchmark or add
-> an independent one once `training_ready/` data lands.
+> original `safety-poketenashi` umbrella benchmark (this feature has no
+> `eval/benchmark_results.json` of its own yet). After the umbrella split into
+> the `safety-poketenashi_*` family, the latest run shows `dwpose_384_pose`
+> with `status="error"` (transient CUDA alloc failure); production smoke
+> tests on the same ONNX checkpoint still pass at ~10 ms/frame
+> (see `safety-poketenashi_point_and_call` U3 smoke). Re-run the shared
+> benchmark or add an independent one once `training_ready/` data lands.
 
-Full results shared with `safety-poketenashi/eval/benchmark_results.json`.
+Full results shared with the `safety-poketenashi_*` family — historical numbers under the pre-split `safety-poketenashi/eval/benchmark_results.json`.
 
 ## Key Files
 
@@ -63,5 +64,5 @@ code/benchmark.py                 — pose benchmark on samples
 
 - mmpose must be installed to run RTMPose-S/M — not in the main venv; use `uv add mmpose` or a separate venv. RTMPose models are skipped in benchmarks until installed.
 - DWPose ONNX checkpoint lives in `pretrained/safety-poketenashi/` — symlink or copy for use here
-- This feature shares its trained model with `safety-poketenashi` orchestrator
+- This feature shares its trained model with the `safety-poketenashi_*` feature family (umbrella retired; per-rule features `safety-poketenashi_phone_usage`, `safety-poketenashi_point_and_call`, etc. all consume the same pose backend)
 - OKS (Object Keypoint Similarity) and PCK (Percentage of Correct Keypoints) are the target metrics
