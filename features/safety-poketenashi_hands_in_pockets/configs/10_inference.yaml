@@ -1,0 +1,53 @@
+# Inference + alert config — safety-poketenashi_hands_in_pockets
+# Loaded by core.p10_inference.video_inference.load_alert_config
+#
+# Rule: wrist y is below hip y AND wrist x is near the torso centerline.
+# Either side triggers the alert. Pretrained-only — DWPose ONNX (shared with
+# other safety-poketenashi_* features) + per-frame pose-rule check.
+
+# ── Pose backend (swappable) ──────────────────────────────────────────────────
+pose:
+  backend: dwpose_onnx                                                     # dwpose_onnx | rtmpose | mediapipe | hf_keypoint
+  weights: ../../../pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx     # used by dwpose_onnx
+  config: null                                                             # YAML path used by rtmpose/mediapipe/hf_keypoint backends
+  person_detector: ../../../pretrained/access-zone_intrusion/yolo11n.pt   # top-down crop source
+  person_conf: 0.35                                                        # YOLO person-class confidence threshold
+  person_class: 0                                                          # COCO person id
+
+# ── Pose-rule parameters ──────────────────────────────────────────────────────
+pose_rules:
+  hands_in_pockets:
+    # Wrists must be below hip and within torso horizontal band.
+    wrist_below_hip_ratio: 0.05      # wrist y > hip y + 5% of torso height
+    wrist_inside_torso_margin: 0.08  # wrist x within 8% of torso centerline
+
+# ── Per-behavior alert config ─────────────────────────────────────────────────
+alerts:
+  confidence_thresholds:
+    hands_in_pockets: 0.0      # rule-based — no ML score; threshold unused
+
+  # Frames the violation must persist before alert fires
+  frame_windows:
+    hands_in_pockets: 20       # ~0.7 s @30fps — walking posture must be sustained
+
+  window_ratio: 0.7            # fraction of window frames where violation must hold
+  cooldown_frames: 90          # ~3 s @30fps between repeated alerts per person
+
+# ── Tracking ──────────────────────────────────────────────────────────────────
+# Stub: only wired into core/p10_inference/video_inference.py when the caller
+# passes VideoProcessor(enable_tracking=True, tracker_config=cfg["tracker"]).
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.25
+  lost_track_buffer: 30
+  minimum_iou_threshold: 0.1
+  frame_rate: 30
+
+# ── Sample media for smoke tests ──────────────────────────────────────────────
+# Reuse safety-poketenashi worker-stance samples until rule-specific media is collected.
+samples:
+  images:
+    - ../../safety-poketenashi/samples/01_factory_worker_a.jpg
+    - ../../safety-poketenashi/samples/02_factory_worker_b.jpg
+    - ../../safety-poketenashi/samples/07_pexels_a.jpg
+  videos: []

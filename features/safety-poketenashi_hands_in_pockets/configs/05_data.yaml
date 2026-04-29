@@ -1,0 +1,22 @@
+# Dataset config — safety-poketenashi_hands_in_pockets
+#
+# Single behavior class — pose-rule based, no training data required for v1.
+# DWPose ONNX (shared) + this rule produces the `hands_in_pockets` flag.
+# Pretrained-only feature; this YAML primarily declares the behavior class
+# for downstream demo + alert wiring.
+
+dataset_name: "safety_poketenashi_hands_in_pockets"
+path: "../../../dataset_store/training_ready/safety_poketenashi_hands_in_pockets"
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+# Single behavior class for this rule.
+names:
+  0: hands_in_pockets
+num_classes: 1
+input_size: [640, 640]
+
+# Normalization (unused at v1 — rule-based only; kept for downstream parity).
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
