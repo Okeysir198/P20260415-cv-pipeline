@@ -18,9 +18,9 @@
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi_phone_usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |
 | `safety-poketenashi_point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🟡 v1.1 calibrated to one clip; **F1 ≈ 0.5** on 9-video set (audit 2026-04-29). Robustness investigation active — see feature CLAUDE.md "Status & investigation log" |
-| `safety-poketenashi_hands_in_pockets` | Pose rule | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |
-| `safety-poketenashi_stair_diagonal` | Pose rule (stateful) | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |
-| `safety-poketenashi_no_handrail` | Pose rule + zone | 🔧 Pretrained only | dwpose_384_pose | — | 🔄 split from umbrella |
+| `safety-poketenashi_hands_in_pockets` | Pose rule | 🔧 Pretrained only | dwpose_384_pose | — | 🟢 baseline F1=0.800 (2026-04-29) — at v1.2 target |
+| `safety-poketenashi_stair_diagonal` | Pose rule (stateful) | 🔧 Pretrained only | dwpose_384_pose | — | 🟡 baseline F1=0.571 (2026-04-29) — 3 FPs to investigate |
+| `safety-poketenashi_no_handrail` | Pose rule + zone | 🔧 Pretrained only | dwpose_384_pose | — | 🟡 BLOCKED — eval needs handrail polygons annotated per video |
 | `ppe-helmet_detection` | Detection | 🎯 Fine-tune | melihuzunoglu_yolov11_ppe.pt | 0.105 | ⬜ not started |
 | `ppe-shoes_detection` | Detection | 🎯 Fine-tune | none (no foot detector) | 0.000 | ⬜ not started |
 | `access-face_recognition` | Face recognition | 🔧 Pretrained only | yunet + sface (rank-1=1.0) | — | 🔄 pipelines done |

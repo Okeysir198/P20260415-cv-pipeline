@@ -1,7 +1,7 @@
 # safety-poketenashi_hands_in_pockets
 
 **Type:** Pose rule (single behavior) | **Training:** 🔧 Pretrained only — rule on top of DWPose ONNX
-**Robustness status (2026-04-29):** 🟡 baseline pending — harness scaffolded but not yet run on a GPU.
+**Robustness status (2026-04-29 baseline):** 🟢 v1 — F1 = 0.800 (P=0.667, R=1.000) on the 2-video set. At v1.2 target. One FP in `01_PO_hands_in_pockets.mp4`; no FNs.
 
 ## Status & investigation log
 
@@ -12,14 +12,14 @@
 > Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
 
 <!-- AUTO:section_a:begin -->
-<!-- last auto-run: pending — run `code/eval_robustness.py` on a GPU to populate -->
+<!-- last auto-run: 2026-04-29 11:58 UTC -->
 
-Aggregate: **pending** — no baseline run has executed yet.
+Aggregate: **2 TP, 1 FP, 0 FN**. Precision **0.667**, Recall **1.000**, F1 **0.800**.
 
 | Video | Duration | GT windows | Events (count, first) | Verdict |
 |---|---|---|---|---|
-| `01_PO_hands_in_pockets.mp4` | — | 3–22 s | — | ⏳ pending |
-| `PO_hands_in_pockets_spkepcmwi.mp4` | — | 2–22 s | — | ⏳ pending |
+| `01_PO_hands_in_pockets.mp4` | 26 s | 3–22 s | 2 (first @ 9.0 s) | ⚠️ TP 1 / FP 1 / FN 0 |
+| `PO_hands_in_pockets_spkepcmwi.mp4` | 24 s | 2–22 s | 1 (first @ 6.3 s) | ✅ TP × 1 |
 <!-- AUTO:section_a:end -->
 
 ### B. Known failure modes (open until resolved)
@@ -29,6 +29,7 @@ Aggregate: **pending** — no baseline run has executed yet.
 ### C. Investigation log (append-only)
 
 - **2026-04-29** — Phase 0: scaffolded the robustness eval harness (`code/eval_robustness.py`, `code/dump_debug.py`), seeded `eval/ground_truth.json` with violation windows for the 2 videos in `samples/`, and added the AUTO marker block in section A above. Baseline run pending — must execute on a GPU and not in parallel with another GPU job.
+- **2026-04-29 (baseline locked)** — Fixed the `self._cfg`→`self.cfg` bug in `predictor.py` (would have crashed at construction). Ran first baseline: **F1 = 0.800** (P=0.667, R=1.000) on the 2-video set. Already at the v1.2 target. Recall is perfect; one FP cluster in `01_PO_hands_in_pockets.mp4`. Phase 1 dump optional — could investigate the single FP, but the feature is shippable as-is.
 
 ### Next steps (in order)
 

@@ -1,7 +1,7 @@
 # safety-poketenashi_stair_diagonal
 
 **Type:** Pose orchestrator (single-rule) | **Training:** Pretrained only (no own model)
-**Robustness status (2026-04-29):** 🟡 baseline pending — harness scaffolded, awaiting first GPU run.
+**Robustness status (2026-04-29 baseline):** 🟡 v1 — F1 = 0.571 (P=0.400, R=1.000). Recall perfect; 3 FPs need investigation (events firing outside the GT windows). Below v1.2 target of 0.8.
 
 ## Status & investigation log
 
@@ -12,7 +12,14 @@
 > Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
 
 <!-- AUTO:section_a:begin -->
-_baseline pending — run `code/eval_robustness.py --baseline` on a free GPU to populate this table._
+<!-- last auto-run: 2026-04-29 11:59 UTC -->
+
+Aggregate: **2 TP, 3 FP, 0 FN**. Precision **0.400**, Recall **1.000**, F1 **0.571**.
+
+| Video | Duration | GT windows | Events (count, first) | Verdict |
+|---|---|---|---|---|
+| `04_NA_diagonal_crossing.mp4` | 35 s | 3–30 s | 10 (first @ 6.1 s) | ⚠️ TP 1 / FP 2 / FN 0 |
+| `NA_diagonal_crossing_spkepcmwi.mp4` | 40 s | 3–35 s | 8 (first @ 0.1 s) | ⚠️ TP 1 / FP 1 / FN 0 |
 <!-- AUTO:section_a:end -->
 
 ### B. Known failure modes (open until resolved)
@@ -22,6 +29,7 @@ _None confirmed yet — populate after the first baseline run + per-cluster fail
 ### C. Investigation log (append-only)
 
 - **2026-04-29** — Phase 0 scaffolded: `code/eval_robustness.py`, `code/dump_debug.py`, `eval/ground_truth.json`, and this status block landed. Harness mirrors the `safety-poketenashi_point_and_call` template. Two seed videos (`04_NA_diagonal_crossing.mp4`, `NA_diagonal_crossing_spkepcmwi.mp4`) seeded with provisional violation windows derived from filename + duration; refine on first viewing if scoring is materially off. Baseline GPU run pending — single-GPU contention prevents the worker from running it directly.
+- **2026-04-29 (baseline locked)** — Ran first baseline: **F1 = 0.571** (P=0.400, R=1.000). Recall perfect; 3 FPs across the 2 videos (2 in `04_NA`, 1 in `spkepcmwi`). Looking at the event timestamps relative to GT windows: spkepcmwi's first event fires at t=0.1 s — before the GT window starts at 3 s. So the FP is "rule fires while actor is still walking in to frame, before reaching the curb." Likely candidate fixes: (a) refine GT windows after watching the clips, or (b) add a body-position constraint (require actor to be near the crosswalk pixel region). Phase 1 dump pending.
 
 ### Tools
 
