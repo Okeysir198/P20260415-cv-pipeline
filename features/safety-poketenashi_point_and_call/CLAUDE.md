@@ -1,7 +1,7 @@
 # safety-poketenashi_point_and_call
 
 **Type:** Pose orchestrator | **Training:** 🔧 Pretrained only (v1) — rule-based on top of pose keypoints
-**Robustness status (2026-04-29 baseline):** 🔴 v1.1 — event-level **F1 = 0.103** (P=0.056, R=0.571) on the labeled 8-video set. Hand-tabulated estimate of "≈ 0.5" was way too generous — at the event level, every cooldown re-fire outside a GT window counts as FP. Investigation plan active; see "Status & investigation log" below.
+**Robustness status (2026-04-29 v1.2-A'):** 🔴 F1 = 0.138 (Δ +0.035 vs locked baseline 0.103) after Intervention A' (rest-between-directions). FP count 67 → 47; lecture FPs 51 → 32. Recall unchanged. Below v1.2 target of 0.8; more interventions pending.
 
 ## Status & investigation log
 
@@ -12,20 +12,20 @@
 > Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
 
 <!-- AUTO:section_a:begin -->
-<!-- last auto-run: 2026-04-29 10:16 UTC -->
+<!-- last auto-run: 2026-04-29 12:21 UTC -->
 
-Aggregate: **4 TP, 67 FP, 3 FN**. Precision **0.056**, Recall **0.571**, F1 **0.103**.
+Aggregate: **4 TP, 47 FP, 3 FN**. Precision **0.078**, Recall **0.571**, F1 **0.138**.
 
 | Video | Duration | GT windows | Matches (count, first) | Verdict |
 |---|---|---|---|---|
-| `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 2 (first @ 30.0 s) | ✅ TP × 1 |
-| `POKETENASHI.mp4` | 266 s | 174–217 s | 11 (first @ 82.9 s) | ⚠️ TP 1 / FP 9 / FN 0 |
-| `POKETENASHI_anzen_daiichi_lecture.mp4` | 379 s | (none) | 51 (first @ 9.6 s) | ❌ FP × 51 |
+| `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 1 (first @ 31.3 s) | ✅ TP × 1 |
+| `POKETENASHI.mp4` | 266 s | 174–217 s | 9 (first @ 82.9 s) | ⚠️ TP 1 / FP 8 / FN 0 |
+| `POKETENASHI_anzen_daiichi_lecture.mp4` | 379 s | (none) | 32 (first @ 9.6 s) | ❌ FP × 32 |
 | `POKETENASHI_autotech_indonesia_senam.mp4` | 200 s | 100–130 s | 3 (first @ 37.6 s) | ❌ FN × 1 |
 | `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–228 s | 1 (first @ 278.0 s) | ❌ FN × 1 |
 | `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 0 | ❌ FN × 1 |
 | `shisa_kanko_correct_demo.mp4` | — | (skip) | — | ⚠️ Animated mascot ヨシだ君, not a photographic human. DWPose cannot detect cartoons. |
-| `shisa_kanko_promotion_method.mp4` | 180 s | 4–180 s | 11 (first @ 4.1 s) | ✅ TP × 1 |
+| `shisa_kanko_promotion_method.mp4` | 180 s | 4–180 s | 5 (first @ 17.9 s) | ✅ TP × 1 |
 | `shisa_kanko_railway_toyota.mp4` | 236 s | 148–203 s | 12 (first @ 148.8 s) | ⚠️ TP 1 / FP 3 / FN 0 |
 <!-- AUTO:section_a:end -->
 
@@ -43,6 +43,7 @@ Aggregate: **4 TP, 67 FP, 3 FN**. Precision **0.056**, Recall **0.571**, F1 **0.
 - **2026-04-29** — Audited the orchestrator on the expanded 9-video sample set. Hand-tabulated F1 ≈ 0.5. Identified 3 actionable failure modes (lecture FPs, phone-on-ear FP, far-field FN) plus the AV1 codec bug (fixed in-place). Investigation plan filed at `~/.claude/plans/with-this-home-ct-admin-documents-langgr-federated-dewdrop.md`. Goal: lift F1 to ≥ 0.8 via 4 rule-based interventions before considering the ML head escalation on the v2 roadmap.
 - **2026-04-29 (Phase 0 done)** — Built `code/eval_robustness.py` + `eval/ground_truth.json` and ran the first reproducible baseline. **Real event-level F1 = 0.103** (P=0.056, R=0.571), much worse than the hand-tabulated 0.5: cooldown re-fires count individually so the lecture's 51 matches all count as FPs. New issues surfaced: (a) `shisa_kanko_railway_toyota` has 3 FPs *outside* the 148–203 s GT window plus the 1 TP inside; (b) `autotech_indonesia_senam` is currently classified FN — 3 matches fired at t=37.6 s but my GT window guess of [100, 130] is probably wrong, refine the GT next time someone watches the clip. Baseline locked at `eval/robustness_baseline.json`. Phase 1 next: per-cluster failure dump.
 - **2026-04-29 (Phase 1 done)** — Built `code/dump_debug.py` + `code/analyze_failures.py`, dumped per-frame CSVs for 4 priority videos (lecture, POKETENASHI, SHI_spkepcmwi, 05_SHI as TP reference), generated `eval/failure_mode_analysis.md` with stats. **2 of 4 hypotheses rejected**: (A) lecture FPs are NOT from waving — wrist is stationary at FP-time (median 73 px/s) vs TP (172 px/s); lecturer holds sustained static poses across the 5 s matcher window. (B) phone-on-ear ratio doesn't separate FP from TP — overlap is total. (C) confirmed but the cause is hand-at-face pose confusing DWPose, not far-field. (D) pose-jitter rejected — labels are sustained, not jittery. Refined Phase 2: only A' (rest-between-directions in matcher) + C (crop upscaling) + B' (tighten velocity gate) — D dropped. Expected F1 lift from A' alone: 0.10 → ~0.6.
+- **2026-04-29 (Intervention A' merged — partial win)** — Implemented rest-between-directions in `CrosswalkSequenceMatcher` (`require_rest_between_directions: true`, `min_rest_frames: 3`). Re-baselined: **F1 0.103 → 0.138** (Δ +0.035). FPs 67 → 47 (-20). Lecture FPs 51 → 32 (-37 %). Remaining lecture FPs are cases where the lecturer briefly drops his arm between sustained pose-1 and pose-2 — the rest gate IS satisfied, just by a 0.1 s arm-drop rather than a true return-to-rest. Recall unchanged (TPs intact). Less than the predicted ~0.6 lift; the lecture's gestural rhythm includes neutral frames between distinct pose-bins more than expected. Considering Intervention C (crop upscale) next to address FNs while we think about a stronger lecture-FP filter.
 
 ### Next steps (in order)
 

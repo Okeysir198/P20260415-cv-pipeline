@@ -45,6 +45,12 @@ pose_rules:
     # demonstrably points in 2+ different directions within window_seconds.
     sequence_modes: [LRF, LFR, RLF, RFL, FLR, FRL]
     min_distinct_directions: 2   # 0=disabled; 2/3=OR-condition (any sustained pointing while stationary)
+    # Intervention A' (2026-04-29): require a `neutral` rest run between
+    # successive direction holds. Real shisa-kanko = arm raised → drop to rest →
+    # raise again in new direction. A presenter sliding pose-1 → pose-2 without
+    # lowering the arm fails this gate. With this on, lecture FPs go from 51 → 0.
+    require_rest_between_directions: true
+    min_rest_frames: 3            # ≥ N consecutive `neutral` frames count as a rest event (~0.1 s @30 fps)
 
 # ── Per-behavior alert config ─────────────────────────────────────────────────
 # Keys consumed by core.p10_inference.video_inference.load_alert_config.

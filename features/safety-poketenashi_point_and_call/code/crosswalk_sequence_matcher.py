@@ -46,6 +46,8 @@ class CrosswalkSequenceMatcher:
         sequence_modes: Iterable[str],
         cooldown_frames: int = 90,
         min_distinct_directions: int = 0,
+        require_rest_between_directions: bool = False,
+        min_rest_frames: int = 3,
     ) -> None:
         if hold_frames < 1:
             raise ValueError(f"hold_frames must be >= 1, got {hold_frames}")
@@ -65,6 +67,8 @@ class CrosswalkSequenceMatcher:
         self._window_seconds = float(window_seconds)
         self._cooldown_frames = int(cooldown_frames)
         self._min_distinct_directions = int(min_distinct_directions)
+        self._require_rest = bool(require_rest_between_directions)
+        self._min_rest_frames = int(min_rest_frames)
         self._modes_expanded: list[tuple[str, list[str]]] = [
             (m, _expand_mode(m)) for m in modes
         ]
@@ -137,15 +141,31 @@ class CrosswalkSequenceMatcher:
 
         seen: set[str] = set()
         progress: list[str] = []
+        # Initially treat the buffer as if rest preceded the first direction.
+        # After each accepted direction, rest_ok flips False until a sufficient
+        # `neutral` run is seen (Intervention A' — Phase 2). Without this,
+        # a presenter holding pose-1 sustained then pivoting to pose-2 would
+        # accumulate two distinct directions without ever lowering the arm.
+        rest_ok = True
         for label, count in runs:
+            if self._require_rest and label == "neutral":
+                if count >= self._min_rest_frames:
+                    rest_ok = True
+                continue
             if count < self._hold_frames:
                 continue
             if label not in _VALID_DIRECTIONS:
                 continue
             if label in seen:
                 continue
+            if self._require_rest and progress and not rest_ok:
+                # New direction without a "rest" event since the last one.
+                # Skip — likely a presenter sliding pose-1 → pose-2 without
+                # returning to arms-at-sides.
+                continue
             seen.add(label)
             progress.append(label)
+            rest_ok = False
         return progress
 
     def _match_against_modes(self, progress: list[str]) -> str | None:
