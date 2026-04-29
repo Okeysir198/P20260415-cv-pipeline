@@ -48,6 +48,7 @@ class CrosswalkSequenceMatcher:
         min_distinct_directions: int = 0,
         require_rest_between_directions: bool = False,
         min_rest_frames: int = 3,
+        max_hold_frames: int = 0,
     ) -> None:
         if hold_frames < 1:
             raise ValueError(f"hold_frames must be >= 1, got {hold_frames}")
@@ -69,6 +70,10 @@ class CrosswalkSequenceMatcher:
         self._min_distinct_directions = int(min_distinct_directions)
         self._require_rest = bool(require_rest_between_directions)
         self._min_rest_frames = int(min_rest_frames)
+        # 0 disables the cap. > 0 rejects "direction" runs longer than this many
+        # frames — a real shisa-kanko hold is brief; a presenter holds a pose
+        # for 3-5 s, which on 30 fps becomes a 90-150 frame run.
+        self._max_hold_frames = int(max_hold_frames)
         self._modes_expanded: list[tuple[str, list[str]]] = [
             (m, _expand_mode(m)) for m in modes
         ]
@@ -153,6 +158,10 @@ class CrosswalkSequenceMatcher:
                     rest_ok = True
                 continue
             if count < self._hold_frames:
+                continue
+            if self._max_hold_frames > 0 and count > self._max_hold_frames:
+                # Sustained too long — likely a presenter's static pose, not a
+                # brief shisa-kanko hold. Skip.
                 continue
             if label not in _VALID_DIRECTIONS:
                 continue

@@ -132,6 +132,7 @@ class PointAndCallOrchestrator:
                 pac_cfg.get("require_rest_between_directions", False)
             ),
             "min_rest_frames": int(pac_cfg.get("min_rest_frames", 3)),
+            "max_hold_frames": int(pac_cfg.get("max_hold_frames", 0)),
         }
         # Per-track matcher. v1 uses a single track id 0.
         self._matchers: dict[int, CrosswalkSequenceMatcher] = {}

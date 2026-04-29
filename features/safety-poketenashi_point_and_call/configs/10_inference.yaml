@@ -51,6 +51,11 @@ pose_rules:
     # lowering the arm fails this gate. With this on, lecture FPs go from 51 → 0.
     require_rest_between_directions: true
     min_rest_frames: 3            # ≥ N consecutive `neutral` frames count as a rest event (~0.1 s @30 fps)
+    # Reject sustained-pose FPs (lecturer holds arm in pose-1 for 3-5 s, slides to pose-2).
+    # Tested at 60 on 2026-04-29 — no effect. Real lecturer pose runs are already broken
+    # into < 60 frame chunks by pose-detector noise (brief invalid/neutral frames inside a
+    # sustained pose). Keeping the knob available; default 0 disables.
+    max_hold_frames: 0
 
 # ── Per-behavior alert config ─────────────────────────────────────────────────
 # Keys consumed by core.p10_inference.video_inference.load_alert_config.
