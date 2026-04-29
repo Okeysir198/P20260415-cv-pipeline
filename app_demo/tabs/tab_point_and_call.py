@@ -5,7 +5,7 @@ worker stops at curb -> points right -> points left -> (optional front) ->
 crosses. Pretrained-only — uses DWPose ONNX + yolo11n person detector.
 
 This tab has a SOFT dependency on the U3 orchestrator code at
-``features.safety_point_and_call.code.orchestrator.PointAndCallOrchestrator``.
+``features.safety_poketenashi_point_and_call.code.orchestrator.PointAndCallOrchestrator``.
 The orchestrator is imported lazily; if missing, the tab renders a warning
 placeholder so the rest of the app_demo still launches.
 """
@@ -61,7 +61,7 @@ def _load_orchestrator_class() -> tuple[Any | None, str | None]:
         reason for display.
     """
     try:
-        from features.safety_point_and_call.code.orchestrator import (
+        from features.safety_poketenashi_point_and_call.code.orchestrator import (
             PointAndCallOrchestrator,
         )
     except ImportError as exc:  # U3 not yet merged
@@ -275,7 +275,7 @@ def build_tab_point_and_call(manager: Any, config: dict) -> None:
         orch_cls, import_error = _load_orchestrator_class()
         if orch_cls is None:
             gr.Markdown(
-                "**safety-point_and_call code not yet on main; merge U3 first.**\n\n"
+                "**safety-poketenashi_point_and_call code not yet on main; merge U3/U5 first.**\n\n"
                 f"Import error: `{import_error}`"
             )
             return
