@@ -14,7 +14,9 @@ float32)`` in original-image coords.
 Project rule: ``code/`` may import from ``core/`` and ``utils/`` but NOT
 from another feature's ``code/`` directory. The DWPose / person-detector
 helpers below are deliberately copied (not imported) from the
-``safety-poketenashi`` reference implementation.
+``safety-poketenashi`` reference implementation. (Naming note: this feature is
+``safety-poketenashi_point_and_call``; the reference orchestrator lives in the
+sibling ``safety-poketenashi`` folder.)
 """
 
 from __future__ import annotations

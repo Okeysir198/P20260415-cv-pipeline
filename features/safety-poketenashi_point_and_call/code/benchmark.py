@@ -5,7 +5,7 @@ For each backend in ``{dwpose_onnx, rtmpose, mediapipe, hf_keypoint}``:
   2. Run inference over the sample images N times each.
   3. Record mean / std latency and the person-detection rate.
 
-Output: ``features/safety-point_and_call/eval/benchmark_results.json``.
+Output: ``features/safety-poketenashi_point_and_call/eval/benchmark_results.json``.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def main() -> None:
                         help="Repetitions per backend (default 10)")
     args = parser.parse_args()
 
-    feat = REPO / "features" / "safety-point_and_call"
+    feat = REPO / "features" / "safety-poketenashi_point_and_call"
     config_path = feat / "configs" / "10_inference.yaml"
     eval_dir = feat / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
