@@ -1,0 +1,36 @@
+# Minimal inference config for the point-and-call orchestrator (v1).
+#
+# IMPORTANT: this is a placeholder until U2 (configs unit) lands -- it
+# contains only the keys the orchestrator needs (pose backend, direction
+# rule thresholds, sequence matcher params). U2 will overwrite with the
+# full inference config (alerts, tracker, sample manifest, etc.).
+
+# -----------------------------------------------------------------------------
+# Pose backend (consumed by code/pose_backend.py::build_pose_backend)
+# -----------------------------------------------------------------------------
+pose:
+  backend: dwpose_onnx
+  weights: ../../../pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx
+  person_detector:
+    weights: ../../../pretrained/access-zone_intrusion/yolo11n.pt
+    conf: 0.35
+
+# -----------------------------------------------------------------------------
+# Frame-level direction-detector thresholds
+# -----------------------------------------------------------------------------
+pose_rules:
+  point_and_call:
+    elbow_angle_min_deg: 150.0     # arm must be nearly straight
+    arm_elevation_max_deg: 45.0    # not pointing high (sky / ceiling)
+    front_half_angle_deg: 30.0     # +- around 90 deg body-relative -> "front"
+    side_half_angle_deg: 45.0      # +- around 0 / 180 deg -> "right" / "left"
+    min_keypoint_score: 0.3
+
+# -----------------------------------------------------------------------------
+# Sequence matcher params
+# -----------------------------------------------------------------------------
+sequence:
+  hold_frames: 5
+  window_seconds: 8.0
+  cooldown_frames: 90
+  modes: [LR, RL, LRF, RLF]

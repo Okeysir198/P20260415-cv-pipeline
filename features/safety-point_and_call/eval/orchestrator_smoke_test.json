@@ -1,0 +1,396 @@
+[
+  {
+    "image": "01_factory_worker_a.jpg",
+    "current_label": "neutral",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      },
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      },
+      {
+        "track_id": 0,
+        "label": "invalid",
+        "confidence": 0.0,
+        "debug": {
+          "label": "invalid",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 731.97
+  },
+  {
+    "image": "02_factory_worker_b.jpg",
+    "current_label": "invalid",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "invalid",
+        "confidence": 0.0,
+        "debug": {
+          "label": "invalid",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 9.0
+  },
+  {
+    "image": "03_factory_worker_c.jpg",
+    "current_label": "neutral",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 8.95
+  },
+  {
+    "image": "04_factory_worker_d.jpg",
+    "current_label": "neutral",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 8.97
+  },
+  {
+    "image": "05_factory_worker_e.jpg",
+    "current_label": "neutral",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      },
+      {
+        "track_id": 0,
+        "label": "invalid",
+        "confidence": 0.0,
+        "debug": {
+          "label": "invalid",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 13.26
+  },
+  {
+    "image": "06_factory_worker_f.jpg",
+    "current_label": "invalid",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "invalid",
+        "confidence": 0.0,
+        "debug": {
+          "label": "invalid",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 8.97
+  },
+  {
+    "image": "07_pexels_a.jpg",
+    "current_label": "neutral",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 8.68
+  },
+  {
+    "image": "08_pexels_b.jpg",
+    "current_label": "invalid",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "invalid",
+        "confidence": 0.0,
+        "debug": {
+          "label": "invalid",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      },
+      {
+        "track_id": 0,
+        "label": "invalid",
+        "confidence": 0.0,
+        "debug": {
+          "label": "invalid",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 11.8
+  },
+  {
+    "image": "09_pexels_c.jpg",
+    "current_label": "neutral",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 7.61
+  },
+  {
+    "image": "10_pexels_d.jpg",
+    "current_label": "neutral",
+    "alerts": [],
+    "sequence_progress": [],
+    "persons": [
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      },
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      },
+      {
+        "track_id": 0,
+        "label": "neutral",
+        "confidence": 0.0,
+        "debug": {
+          "label": "neutral",
+          "side": null,
+          "elbow_angle": null,
+          "arm_elevation": null,
+          "azimuth": null
+        },
+        "sequence_state": {
+          "sequence_done": false,
+          "missing_directions": false,
+          "matched_mode": null,
+          "progress": [],
+          "cooldown_active": false
+        }
+      }
+    ],
+    "latency_ms": 16.24
+  }
+]

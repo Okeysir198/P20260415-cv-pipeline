@@ -1,0 +1,22 @@
+[
+  {
+    "backend": "dwpose_onnx",
+    "det_rate": 1.0,
+    "latency_ms_mean": 30.88717764088263,
+    "latency_ms_std": 111.52118604263099,
+    "n_runs": 3,
+    "n_images": 10
+  },
+  {
+    "backend": "rtmpose",
+    "error": "ValueError: rtmpose backend requires 'config' (path to pose YAML)"
+  },
+  {
+    "backend": "mediapipe",
+    "error": "ValueError: mediapipe backend requires 'config' (path to pose YAML)"
+  },
+  {
+    "backend": "hf_keypoint",
+    "error": "ValueError: hf_keypoint backend requires 'config' (path to pose YAML)"
+  }
+]

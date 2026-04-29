@@ -1,0 +1,20 @@
+# Standalone DWPose ONNX pose-model config.
+#
+# Parallel handle for app_demo's manager.get_pose_predictor() so the
+# point-and-call demo tab can load DWPose via the same path used by other
+# pose features (mirrors features/safety-fall_pose_estimation/configs/
+# rtmpose_s.yaml in shape). The orchestrator (orchestrator.py) loads
+# DWPose via its own pose_backend.py adapter; this file is kept here for
+# the demo tab + v2 wiring once core/p10_inference/pose_predictor.py
+# learns the dwpose_onnx arch.
+
+model:
+  arch: dwpose_onnx
+  weights: ../../../pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx
+  input_size: [384, 288]   # H, W
+  mean: [123.675, 116.28, 103.53]
+  std: [58.395, 57.12, 57.375]
+
+person_detector:
+  weights: ../../../pretrained/access-zone_intrusion/yolo11n.pt
+  conf: 0.35
