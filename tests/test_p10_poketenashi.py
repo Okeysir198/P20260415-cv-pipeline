@@ -1,5 +1,5 @@
 """Test: Poketenashi pose rule detectors — hands-in-pockets, stair safety,
-handrail, pointing-calling, and RuleResult dataclass.
+handrail, and RuleResult dataclass.
 
 Real COCO-17 keypoints as numpy arrays — no mocks, no synthetic random data.
 """
@@ -15,15 +15,23 @@ sys.path.insert(0, str(ROOT))
 
 from _runner import passed, failed, errors, run_test, run_all
 
-# Feature folder is kebab-case (safety-poketenashi) — add code dir to path
-# so we can import modules directly by filename.
-sys.path.insert(0, str(ROOT / "features" / "safety-poketenashi" / "code"))
+# After the safety-poketenashi umbrella was split into per-rule features, each
+# new feature folder ships its own copy of `_base.py` alongside its detector
+# module. Add all three `code/` dirs to sys.path so `from _base import ...` and
+# the detector imports below resolve. (All `_base.py` copies are identical, so
+# whichever is found first is fine.)
+_NEW_FEAT_BASE = ROOT / "features"
+for _sub in (
+    "safety-poketenashi_hands_in_pockets",
+    "safety-poketenashi_stair_diagonal",
+    "safety-poketenashi_no_handrail",
+):
+    sys.path.insert(0, str(_NEW_FEAT_BASE / _sub / "code"))
 
 from _base import RuleResult, PoseRule  # noqa: E402
 from hands_in_pockets_detector import HandsInPocketsDetector  # noqa: E402
 from stair_safety_detector import StairSafetyDetector  # noqa: E402
 from handrail_detector import HandrailDetector  # noqa: E402
-from pointing_calling_detector import PointingCallingDetector  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # COCO-17 keypoint index constants
@@ -296,97 +304,13 @@ def test_handrail_inside_polygon():
 
 
 # ===================================================================
-# PointingCallingDetector
-# ===================================================================
-
-def test_pointing_extended_arm():
-    """Extended arm (elbow angle > 150°) + horizontal → pointing detected, NOT triggered."""
-    # Right arm fully extended to the right, roughly horizontal
-    # Shoulder at (350, 180), elbow at (400, 180), wrist at (460, 185)
-    # Angle at elbow ≈ 180° (straight line), elevation ≈ small
-    kps, scores = _standing_keypoints(
-        r_elbow_x=400.0, r_elbow_y=180.0,
-        r_wrist_x=460.0, r_wrist_y=185.0,
-    )
-    det = PointingCallingDetector(elbow_wrist_angle_min_deg=150.0)
-    result = det.check(kps, scores)
-    # Pointing detected → triggered=False (no violation)
-    assert result.triggered is False
-    assert result.debug_info["pointing_this_frame"] is True
-
-
-def test_pointing_bent_arm():
-    """Bent arm (elbow angle < 150°) → no pointing → triggered (violation)."""
-    # Right arm bent: shoulder (350, 180), elbow (380, 200), wrist (360, 220)
-    # Angle at elbow ≈ 110° — bent
-    kps, scores = _standing_keypoints(
-        r_elbow_x=380.0, r_elbow_y=200.0,
-        r_wrist_x=360.0, r_wrist_y=220.0,
-    )
-    det = PointingCallingDetector(elbow_wrist_angle_min_deg=150.0)
-    result = det.check(kps, scores)
-    # No pointing → triggered=True (violation)
-    assert result.triggered is True
-    assert result.confidence == 1.0
-    assert result.debug_info["pointing_this_frame"] is False
-
-
-def test_pointing_arm_raised():
-    """Arm raised above 45° elevation → NOT shisa kanko pointing → triggered."""
-    # Right arm pointing upward: shoulder (350, 180), elbow (370, 130), wrist (380, 80)
-    # Arm elevation from horizontal ≈ atan2(-(80-180), 380-350) ≈ atan2(100, 30) ≈ 73°
-    kps, scores = _standing_keypoints(
-        r_elbow_x=370.0, r_elbow_y=130.0,
-        r_wrist_x=380.0, r_wrist_y=80.0,
-    )
-    det = PointingCallingDetector(elbow_wrist_angle_min_deg=150.0)
-    result = det.check(kps, scores)
-    # Even if extended, elevation > 45° → not valid pointing → triggered
-    assert result.triggered is True
-
-
-def test_pointing_low_scores():
-    """Keypoint scores below threshold → not triggered (insufficient data)."""
-    kps, scores = _standing_keypoints(
-        r_elbow_x=400.0, r_elbow_y=180.0,
-        r_wrist_x=460.0, r_wrist_y=185.0,
-    )
-    # Set right arm scores below _MIN_SCORE (0.3)
-    scores[R_SHOULDER] = 0.1
-    scores[R_ELBOW] = 0.1
-    scores[R_WRIST] = 0.1
-    # Left arm also low
-    scores[L_SHOULDER] = 0.1
-    scores[L_ELBOW] = 0.1
-    scores[L_WRIST] = 0.1
-
-    det = PointingCallingDetector()
-    result = det.check(kps, scores)
-    # Both arms skipped due to low score → no pointing → triggered (violation)
-    # The detector returns triggered=True when pointing is NOT detected
-    assert result.triggered is True
-    assert result.debug_info["arms"]["left"]["skip"] == "low score"
-    assert result.debug_info["arms"]["right"]["skip"] == "low score"
-
-
-def test_pointing_reset():
-    """Reset clears pointing history."""
-    det = PointingCallingDetector(pointing_duration_frames=10)
-    kps, scores = _standing_keypoints(
-        r_elbow_x=400.0, r_elbow_y=180.0,
-        r_wrist_x=460.0, r_wrist_y=185.0,
-    )
-    # Feed several frames
-    for _ in range(5):
-        det.check(kps, scores)
-    assert len(det._pointing_history) == 5
-    det.reset()
-    assert len(det._pointing_history) == 0
-
-
-# ===================================================================
 # Main runner
 # ===================================================================
+#
+# NOTE: the legacy `PointingCallingDetector` rule (and its 5 tests) was
+# dropped as part of the safety-poketenashi split — the directional
+# `safety-poketenashi_point_and_call` feature subsumes it. Tests for that
+# feature live in their own file under `features/safety-poketenashi_point_and_call/tests/`.
 
 ALL_TESTS = [
     # RuleResult
@@ -407,12 +331,6 @@ ALL_TESTS = [
     ("handrail_wrist_far_from_zone", test_handrail_wrist_far_from_zone),
     ("handrail_no_zones_configured", test_handrail_no_zones_configured),
     ("handrail_inside_polygon", test_handrail_inside_polygon),
-    # PointingCallingDetector
-    ("pointing_extended_arm", test_pointing_extended_arm),
-    ("pointing_bent_arm", test_pointing_bent_arm),
-    ("pointing_arm_raised", test_pointing_arm_raised),
-    ("pointing_low_scores", test_pointing_low_scores),
-    ("pointing_reset", test_pointing_reset),
 ]
 
 if __name__ == "__main__":
