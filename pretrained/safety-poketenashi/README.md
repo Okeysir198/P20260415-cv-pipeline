@@ -36,5 +36,9 @@ poketenashi hospitality/behaviour pipeline. Total **16 files** across
 - SOTA brief: `../../docs/technical_study/safety-poketenashi-sota.md`
 - Pose bulk log: `../../docs/technical_study/access-pose-bulk-download-log.md`
 - Gated retry log: `../../docs/technical_study/gated-retry-download-log.md`
-- Quality report: `../../features/safety-poketenashi/predict/QUALITY_REPORT.md`
+- Quality report: see each feature's `predict/QUALITY_REPORT.md` —
+  the umbrella `features/safety-poketenashi/` was split (2026-04-29)
+  into 5 sibling feature folders (`safety-poketenashi_phone_usage`,
+  `_hands_in_pockets`, `_no_handrail`, `_stair_diagonal`,
+  `_point_and_call`); all share this DWPose storage directory.
 - SHA256s: `./DOWNLOAD_MANIFEST.md`

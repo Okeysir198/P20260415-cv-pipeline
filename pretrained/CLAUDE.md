@@ -217,7 +217,7 @@ No open-source pretrained model exists for safety shoes detection/classification
 | Fall Detection | yolov11_fall_melihuzunoglu | `pretrained/safety-fall-detection/yolov11_fall_melihuzunoglu.pt` | 0.050 |
 | Safety Shoes | COCO YOLOX-S (no foot detector exists) | `pretrained/yolox_s.pth` | 0.000 |
 | Phone Usage | COCO YOLOX-S (action class, no pretrained) | `pretrained/yolox_s.pth` | 0.000 |
-| Pose Estimation | DWPose ONNX (interim; RTMPose fine-tune pending) | `pretrained/safety-poketenashi/dwpose_384_pose.onnx` | det=1.0 |
+| Pose Estimation (shared by 5 `safety-poketenashi_*` rule features) | DWPose ONNX (interim; RTMPose fine-tune pending) | `pretrained/safety-poketenashi/dwpose_384_pose.onnx` | det=1.0 |
 
 ### For Direct Inference (pretrained-only, no training needed)
 
@@ -227,7 +227,7 @@ No open-source pretrained model exists for safety shoes detection/classification
 | Zone Intrusion (edge) | yolov10n | `pretrained/access-zone_intrusion/yolov10n.pt` | acc=0.875, 4.6ms |
 | Face Detection | yunet_2023mar | `pretrained/access-face_recognition/yunet_2023mar.onnx` | det_rate=0.933, 2.1ms |
 | Face Recognition | yunet + sface_fp32 | `pretrained/access-face_recognition/{yunet_2023mar,sface_2021dec}.onnx` | rank-1=1.0 |
-| Pose (poketenashi) | dwpose_384_pose | `pretrained/safety-poketenashi/dwpose_384_pose.onnx` | det=1.0, 13ms |
+| Pose (`safety-poketenashi_*` rule family — 5 features) | dwpose_384_pose | `pretrained/safety-poketenashi/dwpose_384_pose.onnx` (shared storage) | det=1.0, 13ms |
 | Helmet (ONNX serving) | HudatersU_safety_helmet | `pretrained/ppe-helmet_detection/HudatersU_safety_helmet.onnx` | mAP50=0.124 |
 
 ### COCO Backbone Pool (for custom fine-tuning)

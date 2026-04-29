@@ -34,8 +34,12 @@
 | — | Gloves Detection | PPE | TBD | 1 | Training | _doc TODO_ |
 | g | Fall Detection | Safety | Tri | 1 | Training | [safety-fall-detection.md](03_platform/safety-fall-detection.md) |
 | g | Fall Pose Estimation | Safety | Tri | 1 | Training | [safety-fall_pose_estimation.md](03_platform/safety-fall_pose_estimation.md) |
-| h | Poketenashi Violations | Safety | Bang | 1 | Training | [safety-poketenashi.md](03_platform/safety-poketenashi.md) |
-| h | Phone Usage | Safety | Bang | 1 | Training | _doc TODO_ |
+| h | Poketenashi Violations (umbrella) | Safety | Bang | 1 | Training | [safety-poketenashi.md](03_platform/safety-poketenashi.md) |
+| h | Poketenashi: Phone Usage | Safety | Bang | 1 | Training | _see safety-poketenashi.md_ |
+| h | Poketenashi: Hands in Pockets | Safety | Bang | 1 | Training | _see safety-poketenashi.md_ |
+| h | Poketenashi: No Handrail | Safety | Bang | 1 | Training | _see safety-poketenashi.md_ |
+| h | Poketenashi: Stair Diagonal | Safety | Bang | 1 | Training | _see safety-poketenashi.md_ |
+| h | Poketenashi: Point-and-Call | Safety | Bang | 1 | Training | _see safety-poketenashi.md_ |
 | i | Zone Intrusion | Access | Nguyen | 1 | Training | [access-zone_intrusion.md](03_platform/access-zone_intrusion.md) |
 | — | Face Recognition | Access | TBD | 1 | Training | [access-face_recognition.md](03_platform/access-face_recognition.md) |
 | — | Traffic Signal | Traffic | TBD | — | Planned | [traffic-signal_control.md](03_platform/traffic-signal_control.md) |

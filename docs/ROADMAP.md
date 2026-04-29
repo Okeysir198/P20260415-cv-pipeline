@@ -105,7 +105,7 @@ Core detection features for Nitto Denko factory safety system.
 | f | Safety Shoes | PPE | YOLOX-Tiny + MobileNetV3 | HIGH | [ppe-shoes_detection](03_platform/ppe-shoes_detection.md) |
 | g | Fall Classification | Safety | YOLOX-M | HIGH | [safety-fall-detection](03_platform/safety-fall-detection.md) |
 | g | Fall Pose Estimation | Safety | YOLOX-Tiny + RTMPose-S | HIGH | [safety-fall_pose_estimation](03_platform/safety-fall_pose_estimation.md) |
-| h | Poketenashi Violations | Safety | YOLOX-Tiny + RTMPose-S | HIGH | [safety-poketenashi](03_platform/safety-poketenashi.md) |
+| h | Poketenashi Violations (5 rule features) | Safety | YOLOX-Tiny + DWPose + per-rule logic | HIGH | [safety-poketenashi](03_platform/safety-poketenashi.md) |
 | i | Zone Intrusion | Access | YOLOX-Tiny (pretrained) | LOW | [access-zone_intrusion](03_platform/access-zone_intrusion.md) |
 | — | Face Recognition | Access | SCRFD-500M + MobileFaceNet | LOW | [access-face_recognition](03_platform/access-face_recognition.md) |
 

@@ -12,7 +12,7 @@ Smart camera system for factory safety monitoring at Nitto Denko facilities. Com
 | Helmet Detection | [ppe-helmet_detection](../../../03_platform/ppe-helmet_detection.md) | Helmet + Nitto hat compliance |
 | Safety Shoes | [ppe-shoes_detection](../../../03_platform/ppe-shoes_detection.md) | Safety footwear compliance |
 | Fall Detection | [safety-fall-detection](../../../03_platform/safety-fall-detection.md) | Worker fall alerts |
-| Poketenashi Violations | [safety-poketenashi](../../../03_platform/safety-poketenashi.md) | Phone, hands-in-pockets, handrail, stair safety |
+| Poketenashi Violations (`safety-poketenashi_*` rule family) | [safety-poketenashi](../../../03_platform/safety-poketenashi.md) | Phone, hands-in-pockets, handrail, stair safety, point-and-call |
 | Zone Intrusion | [access-zone_intrusion](../../../03_platform/access-zone_intrusion.md) | Restricted area monitoring |
 | Face Recognition | [access-face_recognition](../../../03_platform/access-face_recognition.md) | Violator identity matching |
 

@@ -53,19 +53,22 @@ folder name, so you never edit the mapping by hand.
 
 ### Poketenashi — Prohibited / Required Actions
 
-| Folder | Task | Behaviors |
-|---|---|---|
-| `safety-poketenashi` | Orchestrator | Umbrella: runs sub-models + pose rules + zone logic |
-| `safety-poketenashi-phone-usage` | Detection (sub-model) | ❌ Using mobile phone while walking |
+The poketenashi rule family is now split into one feature folder per
+rule (each with its own configs/, code/, samples/, tests/). All five
+share the DWPose ONNX in `pretrained/safety-poketenashi/` and follow
+the same pose-rule pattern.
 
-Remaining behaviors are **pose-rule based** (implemented in `safety-poketenashi/code/`, no separate training):
-
-| Behavior | Type | Signal |
+| Folder | Task | Behavior / Signal |
 |---|---|---|
-| ❌ Hands in pockets | Pose rule | Wrists inside torso band |
-| ❌ Crossing stairs diagonally / shortcut | Pose + tracking | Trajectory angle vs stair axis |
-| ❌ No handrail on stairs | Pose + zone rule | Hand keypoint outside railing zone |
-| ❌ No pointing-and-calling at checkpoint | Pose rule | Arm extension + pointing gesture missing |
+| `safety-poketenashi_phone_usage` | Detection (sub-model) | ❌ Using mobile phone while walking |
+| `safety-poketenashi_hands_in_pockets` | Pose rule | ❌ Wrists inside torso band |
+| `safety-poketenashi_stair_diagonal` | Pose + tracking | ❌ Trajectory angle vs stair axis |
+| `safety-poketenashi_no_handrail` | Pose + zone rule | ❌ Hand keypoint outside railing zone |
+| `safety-poketenashi_point_and_call` | Pose rule + sequence FSM | ❌ No pointing-and-calling at crosswalk checkpoint |
+
+Only `safety-poketenashi_phone_usage` requires its own training data;
+the other four are pretrained-only (DWPose) + per-rule logic in the
+feature's `code/` folder.
 
 ### PPE compliance
 
