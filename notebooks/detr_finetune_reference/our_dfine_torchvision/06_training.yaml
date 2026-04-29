@@ -72,9 +72,13 @@ loss:
   type: detr
 
 logging:
-  run_name: cppe5_our_dfine_torchvision_fp32
+  # NEVER set run_name on HF backend — `_config_to_training_args` would
+  # treat it as the feature folder and create features/<run_name>/runs/...
+  # ghost paths (CLAUDE.md "HF Trainer ghost-folder footgun").
   save_dir: runs/seed42
-  report_to: tensorboard
+  # `none` — wandb auth hard-fails without WANDB_API_KEY; tensorboard
+  # background-thread races on missing runs/<date-host>/ subdirs.
+  report_to: none
 
 checkpoint:
   save_best: true

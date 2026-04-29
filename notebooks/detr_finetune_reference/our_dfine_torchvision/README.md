@@ -1,6 +1,7 @@
-# our_dfine_torchvision — D-FINE-large via our in-repo pipeline (torchvision v2 CPU aug)
+# our_dfine_torchvision — D-FINE-n via our in-repo pipeline (torchvision v2 CPU aug)
 
-**Arch**: D-FINE-large (`ustc-community/dfine-large-coco`, ~31M params).
+**Arch**: D-FINE-n (`ustc-community/dfine_n_coco`, ~4M params — `dfine-large`
+overfits CPPE-5; see `../CLAUDE.md` capacity heuristic).
 **Aug backend**: torchvision v2 transforms.
 
 Companion to `../our_dfine_albumentations/` — the **only** semantic difference
