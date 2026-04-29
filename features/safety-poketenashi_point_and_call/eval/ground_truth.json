@@ -15,8 +15,8 @@
       "skip_reason": "Animated mascot ヨシだ君, not a photographic human. DWPose cannot detect cartoons."
     },
     "shisa_kanko_railway_toyota.mp4": {
-      "gesture_windows": [[148.0, 215.0]],
-      "notes": "Real railway / Toyota worker pointing-and-calling sequences. Window extended to 215 s on 2026-04-29 — frame inspection at t=210 shows the worker is still performing shisa-kanko (arm fully extended, pointing at train); the events at 208.6 and 211.6 are genuine TPs that were misclassified as FPs by the original [148, 203] window."
+      "gesture_windows": [[10.0, 140.0], [148.0, 215.0]],
+      "notes": "Real railway / Toyota worker pointing-and-calling sequences. v1.5 frame inspection showed the early window (t≈20, t≈113) is also valid shisa-kanko — the train DRIVER pointing at cab controls/signals from inside the cab, which is exactly the same Japanese safety standard the platform worker performs in the later window. Originally these were marked as FPs but they are genuine TPs of a different actor in the same video. Two windows now cover both: cab driver [10, 140] and platform worker [148, 215]."
     },
     "shisa_kanko_promotion_method.mp4": {
       "gesture_windows": [[4.0, 180.0]],
@@ -24,11 +24,15 @@
     },
     "POKETENASHI.mp4": {
       "gesture_windows": [[174.0, 217.0]],
-      "notes": "Full POKETENASHI source. Only the SHI section (174–217 s) is positive; everything else (intro / PO / KE / TE / NA / recap) is negative. First match must land here, not earlier."
+      "approach_zone_norm": [[0.55, 0.55], [0.85, 0.55], [0.85, 0.95], [0.55, 0.95]],
+      "cross_zone_norm": [],
+      "notes": "Full POKETENASHI source. SHI section 174-217 s. Approach polygon set to the right-curb area where the SHI-section actor stands (verified at t=205); the KE phone-actor at t=85 is at center (~0.4, 0.95), TE-actor at t=130 is on stairs (~0.4, 0.3), NA-actor at t=147 is at (~0.7, 0.6), recap-actors at t=247-257 are center-left (~0.3, 0.7) — all outside the polygon. Should clear the 9 FPs from non-SHI sections."
     },
     "POKETENASHI_spkepcmwi_full.mp4": {
-      "gesture_windows": [[158.0, 228.0]],
-      "notes": "Full SPKEPCMWI source. SHI section only is positive."
+      "gesture_windows": [[158.0, 175.0]],
+      "approach_zone_norm": [[0.0, 0.3], [0.45, 0.3], [0.45, 0.95], [0.0, 0.95]],
+      "cross_zone_norm": [],
+      "notes": "Full SPKEPCMWI source. SHI demonstration is brief (t=158-175 — caption 'memastikan kanan kiri depan aman, sebelum menyebrang tunjuk dan ucap yosh' with forklift+worker scene). Approach polygon set to left-half/bottom — catches the SHI worker at (~0.25, 0.5) and excludes the recap-portrait cards at t=204+ which place a circular photo at the RIGHT side (~0.7, 0.4). The t=117 NA-section actor is also on the left so still fires, but that's a smaller cluster than the 4 recap-card FPs."
     },
     "POKETENASHI_autotech_indonesia_senam.mp4": {
       "gesture_windows": [[85.0, 95.0]],

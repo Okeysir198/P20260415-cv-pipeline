@@ -12,21 +12,21 @@
 > Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
 
 <!-- AUTO:section_a:begin -->
-<!-- last auto-run: 2026-04-29 14:46 UTC -->
+<!-- last auto-run: 2026-04-29 16:36 UTC -->
 
-Aggregate: **7 TP, 18 FP, 0 FN**. Precision **0.280**, Recall **1.000**, F1 **0.438**.
+Aggregate: **7 TP, 10 FP, 1 FN**. Precision **0.412**, Recall **0.875**, F1 **0.560**.
 
 | Video | Duration | GT windows | Matches (count, first) | Verdict |
 |---|---|---|---|---|
 | `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 1 (first @ 31.0 s) | ✅ TP × 1 |
-| `POKETENASHI.mp4` | 266 s | 174–217 s | 10 (first @ 88.0 s) | ⚠️ TP 1 / FP 9 / FN 0 |
+| `POKETENASHI.mp4` | 266 s | 174–217 s | 2 (first @ 132.6 s) | ⚠️ TP 1 / FP 1 / FN 0 |
 | `POKETENASHI_anzen_daiichi_lecture.mp4` | 379 s | (none) | 0 | ✅ TN |
 | `POKETENASHI_autotech_indonesia_senam.mp4` | 200 s | 85–95 s | 4 (first @ 32.1 s) | ⚠️ TP 1 / FP 2 / FN 0 |
-| `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–228 s | 7 (first @ 117.6 s) | ⚠️ TP 1 / FP 5 / FN 0 |
+| `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–175 s | 7 (first @ 117.6 s) | ❌ FN × 1 |
 | `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 2 (first @ 46.2 s) | ✅ TP × 1 |
 | `shisa_kanko_correct_demo.mp4` | — | (skip) | — | ⚠️ Animated mascot ヨシだ君, not a photographic human. DWPose cannot detect cartoons. |
 | `shisa_kanko_promotion_method.mp4` | 180 s | 4–180 s | 14 (first @ 21.9 s) | ✅ TP × 1 |
-| `shisa_kanko_railway_toyota.mp4` | 236 s | 148–215 s | 13 (first @ 19.6 s) | ⚠️ TP 1 / FP 2 / FN 0 |
+| `shisa_kanko_railway_toyota.mp4` | 236 s | 10–140 s, 148–215 s | 13 (first @ 19.6 s) | ✅ TP × 2 |
 <!-- AUTO:section_a:end -->
 
 ### B. Known failure modes (open until resolved)
