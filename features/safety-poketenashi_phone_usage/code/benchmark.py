@@ -1,4 +1,4 @@
-"""Pretrained model benchmark for safety-poketenashi-phone-usage.
+"""Pretrained model benchmark for safety-poketenashi_phone_usage.
 
 Evaluates COCO-pretrained YOLOX models on the phone-usage detection dataset.
 Since phone_usage is not a COCO class, only the person class (COCO class 0
@@ -7,8 +7,8 @@ Since phone_usage is not a COCO class, only the person class (COCO class 0
 Also probes for any Ultralytics .pt files in the shared pretrained root.
 
 Output:
-    features/safety-poketenashi-phone-usage/eval/benchmark_results.json
-    features/safety-poketenashi-phone-usage/eval/benchmark_report.md
+    features/safety-poketenashi_phone_usage/eval/benchmark_results.json
+    features/safety-poketenashi_phone_usage/eval/benchmark_report.md
 """
 
 import json
@@ -32,8 +32,8 @@ from core.p08_evaluation.evaluator import ModelEvaluator
 # ---------------------------------------------------------------------------
 
 PRETRAINED_ROOT = REPO / "pretrained"
-EVAL_DIR = REPO / "features" / "safety-poketenashi-phone-usage" / "eval"
-DATA_CONFIG_PATH = REPO / "features" / "safety-poketenashi-phone-usage" / "configs" / "05_data.yaml"
+EVAL_DIR = REPO / "features" / "safety-poketenashi_phone_usage" / "eval"
+DATA_CONFIG_PATH = REPO / "features" / "safety-poketenashi_phone_usage" / "configs" / "05_data.yaml"
 
 # COCO class 0 = "person" → maps to our dataset class 0 (person)
 # COCO has no equivalent for our class 1 (phone_usage)
@@ -44,7 +44,7 @@ YOLOX_MODELS = [
     {"name": "yolox_m", "arch": "yolox-m", "pth": PRETRAINED_ROOT / "yolox_m.pth"},
 ]
 
-PHONE_PRETRAINED_DIR = PRETRAINED_ROOT / "safety-poketenashi-phone-usage"
+PHONE_PRETRAINED_DIR = PRETRAINED_ROOT / "safety-poketenashi_phone_usage"
 POKETENASHI_PRETRAINED_DIR = PRETRAINED_ROOT / "safety-poketenashi"
 
 
@@ -260,7 +260,7 @@ def write_json(results: dict, path: Path) -> None:
 
 def write_markdown_report(results: dict, path: Path) -> None:
     lines = [
-        "# Benchmark Report — safety-poketenashi-phone-usage",
+        "# Benchmark Report — safety-poketenashi_phone_usage",
         "",
         "## Summary",
         "",
@@ -325,7 +325,7 @@ def write_markdown_report(results: dict, path: Path) -> None:
         "  Expected mAP for phone_usage with zero-shot COCO models: ~0.00.",
         "- **Recommended next step**: Fine-tune YOLOX-S or YOLOX-M backbone on the",
         "  `safety_poketenashi_phone_usage` training split.",
-        "  See `features/safety-poketenashi-phone-usage/configs/06_training.yaml` (to be created).",
+        "  See `features/safety-poketenashi_phone_usage/configs/06_training.yaml` (to be created).",
     ]
 
     path.parent.mkdir(parents=True, exist_ok=True)
