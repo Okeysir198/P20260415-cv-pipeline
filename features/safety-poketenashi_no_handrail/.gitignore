@@ -1,6 +1,7 @@
 runs/
 eval/*
 !eval/.gitkeep
+!eval/ground_truth.json
 predict/
 export/
 release/

@@ -1,6 +1,55 @@
 # safety-poketenashi_no_handrail
 
 **Type:** Pose rule | **Training:** 🔧 Pretrained only (rule-based on top of DWPose keypoints)
+**Robustness status (2026-04-29):** 🟡 baseline pending — eval BLOCKED until per-video handrail polygons annotated. Harness scaffolded; both sample videos currently report `skipped — no polygon configured`.
+
+## Status & investigation log
+
+> Single source of truth for "where are we with this feature." Anyone (human or future-Claude) picking this back up should read this section first.
+
+### A. Current evaluation status
+
+> Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit.
+
+<!-- AUTO:section_a:begin -->
+<!-- last auto-run: (never) -->
+
+Evaluable videos: **0**. Aggregate: **0 TP, 0 FP, 0 FN**. Precision **—**, Recall **—**, F1 **—**.
+
+| Video | Duration | GT windows | Matches (count, first) | Verdict |
+|---|---|---|---|---|
+| `03_TE_no_handrail.mp4` | — | (skip) | — | ⚠️ no polygon configured |
+| `TE_no_handrail_spkepcmwi.mp4` | — | (skip) | — | ⚠️ no polygon configured |
+<!-- AUTO:section_a:end -->
+
+### B. Known failure modes (open until resolved)
+
+- [ ] **Eval BLOCKED on polygon annotation** — until handrail polygons are drawn per video, the rule cannot fire and harness output is meaningless. Edit `eval/ground_truth.json` and fill in `handrail_zones_norm` (image-normalized [0,1] polygons, one per visible handrail) plus `violation_windows` (when the actor is on stairs without touching the rail) for each video. Then re-run `code/eval_robustness.py`.
+- [ ] *(placeholder — populate after first real baseline run)*
+
+### C. Investigation log (append-only)
+
+- **2026-04-29** — Robustness harness scaffolded (`code/eval_robustness.py`, `code/dump_debug.py`, `eval/ground_truth.json`). Polygons NOT yet annotated for either sample video; both currently report `skipped — no polygon configured`. Status block locked at BLOCKED until someone watches the clips and fills in `handrail_zones_norm` + `violation_windows`. GPU baseline will follow once polygons are in.
+
+### Tools
+
+| Script | Purpose | Cost |
+|---|---|---|
+| `code/eval_robustness.py` | Reproducible event-level scoring; auto-rewrites section A above; writes a timestamped report. Reads `handrail_zones_norm` per video from `eval/ground_truth.json` and overrides the predictor's polygons before processing — videos without a polygon are skipped. Pass `--baseline` once to lock the baseline; pass `--against eval/robustness_baseline.json` on later runs to print a delta. | ~1 min/video on GPU once polygons are configured |
+| `code/dump_debug.py` | Per-frame CSV with wrist coords, distance to nearest zone edge per side, and all relevant kp scores (wrists, hips, knees, ankles). Skips videos with no polygon. | ~30 s per 35-s video on GPU |
+| `code/handrail_detector.py` | Underlying rule (cv2.pointPolygonTest); see `_base.py` for the `PoseRule` ABC. Already imported by both scripts above; do not duplicate. | — |
+
+### Re-running
+
+```
+# After editing eval/ground_truth.json with polygons + violation windows:
+uv run python features/safety-poketenashi_no_handrail/code/eval_robustness.py
+uv run python features/safety-poketenashi_no_handrail/code/eval_robustness.py --baseline   # once polygons stabilise
+uv run python features/safety-poketenashi_no_handrail/code/dump_debug.py                   # per-frame CSVs
+```
+
+**Do not run two GPU jobs in parallel** — single-GPU contention will hang the desktop. The dump and harness should run sequentially.
+**Polygon-config note**: this rule is disabled when `handrail_zones` is empty. The harness lifts polygons out of `eval/ground_truth.json` per video so the YAML config doesn't need to be edited per video — but if you change the camera framing, update the polygon there.
 
 ## Overview
 
