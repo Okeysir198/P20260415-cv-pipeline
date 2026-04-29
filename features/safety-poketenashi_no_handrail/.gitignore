@@ -1,0 +1,11 @@
+runs/
+eval/*
+!eval/.gitkeep
+predict/
+export/
+release/
+*.pt
+*.pth
+*.onnx
+samples/*
+!samples/.gitkeep

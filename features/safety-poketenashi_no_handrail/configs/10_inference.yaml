@@ -1,0 +1,48 @@
+# Inference + alert config — safety-poketenashi_no_handrail
+# Loaded by core.p10_inference.video_inference.load_alert_config
+#
+# Pose backend: DWPose ONNX (shared with other safety-poketenashi_* rules)
+# Rule backend: HandrailDetector (wrist-to-zone polygon distance)
+
+# ── Pose backbone ─────────────────────────────────────────────────────────────
+pose:
+  backend: dwpose_onnx
+  weights: ../../../pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx
+  person_detector: ../../../pretrained/access-zone_intrusion/yolo11n.pt
+  person_conf: 0.35
+
+# ── Per-behavior alert config ─────────────────────────────────────────────────
+alerts:
+  confidence_thresholds:
+    no_handrail: 0.0           # rule-based — confidence is binary
+  frame_windows:
+    no_handrail: 12            # ~0.4 s @ 30 fps — sustained miss before alert
+  window_ratio: 0.7
+  cooldown_frames: 90          # ~3 s at 30 fps between repeated alerts per person
+
+# ── Pose rule parameters ──────────────────────────────────────────────────────
+# IMPORTANT: handrail_zones is empty by default → rule is DISABLED.
+# Populate per camera with image-normalized [0,1] polygons (one per visible
+# handrail). See CLAUDE.md "Site polygon required" + "Site calibration".
+pose_rules:
+  no_handrail:
+    hand_to_railing_px: 60     # pixels at 640px width — calibrate per camera
+    handrail_zones: []         # [] = rule disabled until site-specific polygon is provided
+                               # Example:
+                               # handrail_zones:
+                               #   - [[0.10, 0.20], [0.15, 0.20], [0.15, 0.95], [0.10, 0.95]]
+
+# ── Tracking (optional) ───────────────────────────────────────────────────────
+# Enable when multiple workers may ascend the stairs simultaneously and you
+# need per-worker compliance logging. See CLAUDE.md "When to enable ByteTrack".
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.25
+  lost_track_buffer: 30
+  minimum_iou_threshold: 0.1
+  frame_rate: 30
+
+# ── Sample media for smoke tests ──────────────────────────────────────────────
+samples:
+  images: []
+  videos: []

@@ -1,0 +1,29 @@
+# Data config — safety-poketenashi_no_handrail (pretrained-only, rule-based)
+#
+# This feature is rule-based on top of pose keypoints; no own training set.
+# The split paths below are placeholders — kept for layout uniformity with
+# the rest of features/.
+#
+# Class taxonomy is the per-frame rule output:
+#   no_handrail   — both wrists farther than hand_to_railing_px from every zone
+#   handrail_ok   — at least one wrist within reach distance of a zone
+
+dataset_name: "safety_poketenashi_no_handrail"
+path: "../../../dataset_store/training_ready/safety_poketenashi_no_handrail"
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+names:
+  0: no_handrail
+  1: handrail_ok
+num_classes: 2
+input_size: [640, 640]
+
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
+
+# v1 is pretrained/rule-based — no auto-label or SAM3 prompts needed.
+text_prompts: {}
+auto_label:
+  class_rules: []
