@@ -99,7 +99,7 @@ By extension across both sources: `.pt` 22, `.pth` 9, `.onnx` 6,
 | `ppe-shoes_detection/` | 0 |
 | `safety-fall-detection/` | 22 |
 | `safety-fall_pose_estimation/` | 0 |
-| `safety-poketenashi/` | 0 |
+| `safety-poketenashi_*` (5 rule features) | 0 |
 | `access-zone_intrusion/` | 6 (3 new from sibling repos + 3 pre-existing local symlinks) |
 | `access-face_recognition/` | 6 |
 

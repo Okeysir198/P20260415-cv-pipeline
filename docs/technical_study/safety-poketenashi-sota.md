@@ -4,6 +4,8 @@ Target platform: generic ~18 TOPS INT8 edge accelerator, chip-agnostic, standard
 
 Baseline (see `ai/docs/03_platform/safety-poketenashi.md`): YOLOX-Tiny (person) + RTMPose-S (17-kpt COCO pose) + YOLOX-Nano/M (phone) + CPU rule engine. Phase-1 rules: `phone_usage`, `hands_in_pockets`, `no_handrail`, `unsafe_stair_crossing` (+ Gap G3 `yubisashi` pointing-and-calling).
 
+> **Code layout note (2026-04-29):** the umbrella `features/safety-poketenashi/` folder has been split into one feature folder per rule — `safety-poketenashi_phone_usage`, `safety-poketenashi_hands_in_pockets`, `safety-poketenashi_no_handrail`, `safety-poketenashi_stair_diagonal`, `safety-poketenashi_point_and_call`. The shared pretrained-weights directory `ai/pretrained/safety-poketenashi/` is **unchanged** (DWPose ONNX storage; all 5 features symlink to it). Filenames in this SOTA brief refer to the storage path, not feature folders.
+
 ---
 
 ## 1. Task summary

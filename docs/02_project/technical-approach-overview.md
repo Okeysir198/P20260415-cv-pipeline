@@ -19,7 +19,7 @@ Per-use-case technical details (architecture, dataset, training, alert logic, ed
 | **F: PPE safety shoes** | [`docs/03_platform/ppe-shoes_detection.md`](../../03_platform/ppe-shoes_detection.md) |
 | **G: Fall detection (classification)** | [`docs/03_platform/safety-fall-detection.md`](../../03_platform/safety-fall-detection.md) |
 | **G: Fall detection (pose)** | [`docs/03_platform/safety-fall_pose_estimation.md`](../../03_platform/safety-fall_pose_estimation.md) |
-| **H: Behavioral violations (poketenashi)** | [`docs/03_platform/safety-poketenashi.md`](../../03_platform/safety-poketenashi.md) |
+| **H: Behavioral violations (poketenashi family — 5 rule features)** | [`docs/03_platform/safety-poketenashi.md`](../../03_platform/safety-poketenashi.md) |
 | **I: Zone intrusion** | [`docs/03_platform/access-zone_intrusion.md`](../../03_platform/access-zone_intrusion.md) |
 
 All platform docs follow the standard template: [`docs/03_platform/_TEMPLATE.md`](../../03_platform/_TEMPLATE.md)

@@ -90,7 +90,7 @@ name = `<dataset_name>_review`. Reference table:
 | `features/ppe-helmet_detection` | `ppe_helmet_detection_review` | Object Detection |
 | `features/ppe-shoes_detection` | `ppe_shoes_detection_review` | Object Detection |
 | `features/ppe-gloves_detection` | `ppe_gloves_detection_review` | Object Detection |
-| `features/safety-poketenashi-phone-usage` | `safety_poketenashi_phone_usage_review` | Object Detection |
+| `features/safety-poketenashi_phone_usage` | `safety_poketenashi_phone_usage_review` | Object Detection |
 | `features/safety-fire_detection` | `safety_fire_detection_review` | Object Detection |
 | `features/safety-fall-detection` | `safety_fall_detection_review` | Object Detection |
 | `features/safety-fall_pose_estimation` | `safety_fall_pose_estimation_review` | Keypoint / Pose |
@@ -891,7 +891,7 @@ names:
 ```
 
 ```yaml
-# features/safety-poketenashi/configs/05_data.yaml (phone detection only)
+# features/safety-poketenashi_phone_usage/configs/05_data.yaml (phone detection only)
 path: ../merged/phone_detection
 train: train/images
 val: val/images

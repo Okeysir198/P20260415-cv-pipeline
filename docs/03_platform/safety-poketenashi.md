@@ -1,5 +1,25 @@
-# Safety: Poketenashi Violations
-> ID: h | Owner: TBD | Phase: 1 | Status: training | Config: `features/safety-poketenashi/configs/06_training.yaml`
+# Safety: Poketenashi Violations (Platform Overview)
+> ID: h | Owner: TBD | Phase: 1 | Status: training
+> Code split into 5 sibling feature folders — see "Feature Layout" below.
+
+## Feature Layout (split 2026-04-29)
+
+The single `features/safety-poketenashi/` umbrella has been replaced by
+5 self-contained per-rule feature folders. This page remains the
+**platform overview** for the rule family; per-rule details (configs,
+training, eval) live in each feature's own `CLAUDE.md`.
+
+| Feature folder | Rule | Mode | Config root |
+|---|---|---|---|
+| `features/safety-poketenashi_phone_usage` | phone usage while walking | 🎯 Fine-tune (FPI-Det) | `features/safety-poketenashi_phone_usage/configs/` |
+| `features/safety-poketenashi_hands_in_pockets` | wrists inside torso band | 🔧 Pretrained pose + rule | `features/safety-poketenashi_hands_in_pockets/configs/` |
+| `features/safety-poketenashi_no_handrail` | wrist outside handrail zone | 🔧 Pretrained pose + zone | `features/safety-poketenashi_no_handrail/configs/` |
+| `features/safety-poketenashi_stair_diagonal` | trajectory angle vs stair | 🔧 Pretrained pose + tracking | `features/safety-poketenashi_stair_diagonal/configs/` |
+| `features/safety-poketenashi_point_and_call` | 指差呼称 crosswalk gesture | 🔧 Pretrained pose + FSM | `features/safety-poketenashi_point_and_call/configs/` |
+
+All five share the DWPose ONNX in `pretrained/safety-poketenashi/`
+(directory name unchanged — it is the shared storage path, not a
+feature folder).
 
 ## Customer Requirements
 
@@ -464,18 +484,33 @@ Phase 3: Action Recognition (if needed)
 
 ## Key Commands
 
+The only rule that requires its own training is `phone_usage`; the
+other four are pretrained-only (DWPose) + per-rule logic. Replace the
+config path with the feature folder for any rule-only command (e.g.
+`features/safety-poketenashi_hands_in_pockets/configs/10_inference.yaml`).
+
 ```bash
-# Train phone detection
-uv run core/p06_training/train.py --config features/safety-poketenashi/configs/06_training.yaml
+# Train phone detection (feature: safety-poketenashi_phone_usage)
+uv run core/p06_training/train.py --config features/safety-poketenashi_phone_usage/configs/06_training_yolox.yaml
 
 # Evaluate
-uv run core/p08_evaluation/evaluate.py --model runs/phone_detection/best.pt --config features/safety-poketenashi/configs/05_data.yaml --split test
+uv run core/p08_evaluation/evaluate.py \
+  --model features/safety-poketenashi_phone_usage/runs/<ts>/best.pth \
+  --config features/safety-poketenashi_phone_usage/configs/05_data.yaml \
+  --split test
 
-# Data preparation
-uv run core/p00_data_prep/run.py --config features/safety-poketenashi/configs/00_data_preparation.yaml
+# Data preparation (phone_usage only — pose-rule features have no training data)
+uv run core/p00_data_prep/run.py --config features/safety-poketenashi_phone_usage/configs/00_data_preparation.yaml
 
 # Export
-uv run core/p09_export/export.py --model runs/phone_detection/best.pt --training-config features/safety-poketenashi/configs/06_training.yaml --export-config configs/_shared/09_export.yaml
+uv run core/p09_export/export.py \
+  --model features/safety-poketenashi_phone_usage/runs/<ts>/best.pth \
+  --training-config features/safety-poketenashi_phone_usage/configs/06_training_yolox.yaml \
+  --export-config configs/_shared/09_export.yaml
+
+# Pose-rule features (hands_in_pockets, no_handrail, stair_diagonal, point_and_call)
+# have no training step — wire them into the demo via 10_inference.yaml only:
+uv run demo  # multi-tab Gradio loads each feature's 10_inference.yaml
 ```
 
 ## Limitations
