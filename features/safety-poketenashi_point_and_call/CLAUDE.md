@@ -1,7 +1,7 @@
 # safety-poketenashi_point_and_call
 
 **Type:** Pose orchestrator | **Training:** 🔧 Pretrained only (v1) — rule-based on top of pose keypoints
-**Robustness status (2026-04-29 v1.4):** 🟠 F1 = 0.375 (Δ +0.272 vs baseline 0.103). Recall jumped 0.571 → 0.857 by lowering `min_keypoint_score` 0.25 → 0.10 — unblocked the hand-at-face FN in SHI_spkepcmwi AND the spkepcmwi_full SHI-section detection. Trade-off: precision 0.250 → 0.240 (7 more FPs from noise). Net ≈ 4× the original baseline F1.
+**Robustness status (2026-04-29 v1.5):** 🟢 **Recall 1.000** (every gesture in every evaluable video detected). F1 = 0.438 (Δ +0.335 vs baseline 0.103). Per-track ByteTrack landed; 18 FPs remain from cooldown re-fires inside group scenes / multi-section camera changes — addressable with per-track polygons but not in this unit.
 
 ## Status & investigation log
 
@@ -12,21 +12,21 @@
 > Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
 
 <!-- AUTO:section_a:begin -->
-<!-- last auto-run: 2026-04-29 14:25 UTC -->
+<!-- last auto-run: 2026-04-29 14:46 UTC -->
 
-Aggregate: **6 TP, 19 FP, 1 FN**. Precision **0.240**, Recall **0.857**, F1 **0.375**.
+Aggregate: **7 TP, 18 FP, 0 FN**. Precision **0.280**, Recall **1.000**, F1 **0.438**.
 
 | Video | Duration | GT windows | Matches (count, first) | Verdict |
 |---|---|---|---|---|
-| `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 1 (first @ 31.3 s) | ✅ TP × 1 |
-| `POKETENASHI.mp4` | 266 s | 174–217 s | 9 (first @ 82.9 s) | ⚠️ TP 1 / FP 8 / FN 0 |
+| `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 1 (first @ 31.0 s) | ✅ TP × 1 |
+| `POKETENASHI.mp4` | 266 s | 174–217 s | 10 (first @ 88.0 s) | ⚠️ TP 1 / FP 9 / FN 0 |
 | `POKETENASHI_anzen_daiichi_lecture.mp4` | 379 s | (none) | 0 | ✅ TN |
-| `POKETENASHI_autotech_indonesia_senam.mp4` | 200 s | 85–95 s | 5 (first @ 37.6 s) | ❌ FN × 1 |
-| `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–228 s | 6 (first @ 204.2 s) | ⚠️ TP 1 / FP 4 / FN 0 |
+| `POKETENASHI_autotech_indonesia_senam.mp4` | 200 s | 85–95 s | 4 (first @ 32.1 s) | ⚠️ TP 1 / FP 2 / FN 0 |
+| `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–228 s | 7 (first @ 117.6 s) | ⚠️ TP 1 / FP 5 / FN 0 |
 | `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 2 (first @ 46.2 s) | ✅ TP × 1 |
 | `shisa_kanko_correct_demo.mp4` | — | (skip) | — | ⚠️ Animated mascot ヨシだ君, not a photographic human. DWPose cannot detect cartoons. |
-| `shisa_kanko_promotion_method.mp4` | 180 s | 4–180 s | 8 (first @ 17.9 s) | ✅ TP × 1 |
-| `shisa_kanko_railway_toyota.mp4` | 236 s | 148–215 s | 14 (first @ 19.6 s) | ⚠️ TP 1 / FP 2 / FN 0 |
+| `shisa_kanko_promotion_method.mp4` | 180 s | 4–180 s | 14 (first @ 21.9 s) | ✅ TP × 1 |
+| `shisa_kanko_railway_toyota.mp4` | 236 s | 148–215 s | 13 (first @ 19.6 s) | ⚠️ TP 1 / FP 2 / FN 0 |
 <!-- AUTO:section_a:end -->
 
 ### B. Known failure modes (open until resolved)
@@ -49,6 +49,7 @@ Aggregate: **6 TP, 19 FP, 1 FN**. Precision **0.240**, Recall **0.857**, F1 **0.
 - **2026-04-29 (v1.3 — per-track FSM landed)** — Implemented `code/_zone.py` (state machine: IDLE → APPROACHING → CROSSING → DONE keyed on foot-point in image-normalized polygons). Wired into `orchestrator.process_frame`: matcher only receives labels when FSM is in APPROACHING. `set_zones()` method lets the eval harness apply per-video polygons from `eval/ground_truth.json::approach_zone_norm` / `cross_zone_norm`. Added a tiny far-left-strip approach polygon for the lecture video. Re-baselined: **F1 0.103 → 0.308** (Δ +0.205). Lecture FPs 32 → 0 (TN ✅); presenter's foot point never enters the configured approach polygon, FSM stays IDLE, matcher never armed. 15 FPs remain in TP videos (`POKETENASHI`, `railway_toyota`, `shisa_kanko_promotion_method`) — TP cooldown re-fires landing outside the GT window. Those would clear with per-video polygon annotation per video (out of scope this unit; unblocks remaining 0.5+ F1 if pursued). Backward-compat: when no polygons are configured (default empty `approach_zone: []`), `in_approach` returns True for every point → FSM stays APPROACHING → rule armed always = pre-FSM behaviour. 22/22 unit tests still green.
 - **2026-04-29 (v1.3+gt — railway GT refinement)** — Frame-inspected railway clip at t=210 s; the worker is still performing shisa-kanko (arm fully extended, pointing at train). Extended the railway GT window from `[148, 203]` to `[148, 215]`. Re-baselined: **F1 0.308 → 0.348** (Δ +0.040). Railway moved from `TP1/FP3` to `✅ TP × 1`. Remaining 12 FPs are in (a) POKETENASHI's KE/TE/NA/recap sections — a single approach polygon for the SHI-section curb cannot exclude the other sections' actor positions because the camera angle changes per section (8 FPs); (b) autotech_indonesia_senam — events at t=37.6 fire on group-salute calisthenics in what's probably a different rule's section (3 FPs); (c) spkepcmwi_full's recap card at t=278 with a thumbs-up pose (1 FP). All three FN clusters unchanged: SHI_spkepcmwi hand-at-face, spkepcmwi_full SHI section not detected, autotech SHI section likely not in the [100,130] guess.
 - **2026-04-29 (v1.4 — lower kp_score + autotech GT refine)** — Found autotech's actual SHI section at t=85–95 (workers performing the gesture under caption "Tunjuk kanan dan kiri saat melewati persimpangan jalan"); refined GT from [100, 130]. Tried Intervention C alternative: lowered `min_keypoint_score` 0.25 → 0.10 to admit the hand-at-face wrist scores measured at 0.10–0.13 in Phase 1. Result: **TP 4 → 6** (SHI_spkepcmwi hand-at-face FN cleared; spkepcmwi_full SHI section now detected at t=204), **FN 3 → 1**, **Recall 0.571 → 0.857** (+0.286). FP went 12 → 19 (+7) as the looser score gate admits more noise. Net **F1 0.348 → 0.375** (Δ +0.027). The recall gain is substantial — only 1 FN left (autotech_senam: rule still doesn't trigger inside [85,95] despite group choreography; the largest-person filter likely thrashes on 5 similar-sized boxes per frame). Cumulative since baseline: F1 0.103 → 0.375 (3.6× the original).
+- **2026-04-29 (v1.5 — ByteTrack landed)** — Wired the `trackers` package's `ByteTrackTracker` (via `core.p10_inference.supervision_bridge.create_tracker`) into the orchestrator. With `tracker.enabled: true` in YAML, each detected person gets a persistent `track_id` and the orchestrator's per-track matcher + zone-FSM dicts are keyed on it. Drops the largest-person filter when tracker is on (multi-track is the whole point); falls back to pre-tracker behaviour when YAML has `tracker.enabled: false` or omits the block. Result: **TP 6 → 7, FN 1 → 0, Recall 0.857 → 1.000 ✅, F1 0.375 → 0.438** (Δ +0.063). The autotech_senam group scene now produces TP because per-track matchers handle each worker independently — no more thrashing as the largest-person filter switches between 5 similarly-sized boxes. **Cumulative since baseline: F1 0.103 → 0.438 (4.3×, recall perfect).** The remaining 18 FPs are real cooldown re-fires across track IDs that genuinely DO complete L+R+F sequences in non-target sections (POKETENASHI's KE/recap, autotech's KE salute, spkepcmwi_full's recap). Reaching ≥0.8 from here needs per-track approach polygons drawn for the multi-section videos — manual annotation work.
 
 ### Next steps (in order)
 

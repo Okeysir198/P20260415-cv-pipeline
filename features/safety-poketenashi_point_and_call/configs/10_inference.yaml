@@ -87,6 +87,8 @@ cross_zone: []
 
 # ── Tracking ──────────────────────────────────────────────────────────────────
 tracker:
+  enabled: true                 # v1.5: opt in. Routes per persistent track_id;
+                                # per-track matchers + zone FSMs handle multi-person scenes.
   type: bytetrack
   track_activation_threshold: 0.25
   lost_track_buffer: 30

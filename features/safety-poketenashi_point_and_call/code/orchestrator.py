@@ -153,6 +153,15 @@ class PointAndCallOrchestrator:
         )
         self._zone_fsms: dict[int, ZoneFSM] = {}
 
+        # ByteTrack — when `tracker.enabled: true` in YAML, the orchestrator
+        # routes per-track instead of squashing every detected person onto
+        # track_id=0. Improves group-calisthenics scenarios where 5 similarly-
+        # sized actors thrash the largest-person filter.
+        tracker_cfg = self._cfg.get("tracker", {}) or {}
+        self._tracker_enabled = bool(tracker_cfg.get("enabled", False))
+        self._tracker_cfg = tracker_cfg
+        self._tracker = None  # lazy-created on first frame to avoid importing trackers when disabled
+
     # ------------------------------------------------------------------
     # Per-track matcher (lazy)
     # ------------------------------------------------------------------
@@ -170,6 +179,42 @@ class PointAndCallOrchestrator:
             f = ZoneFSM(make_gate(self._approach_zone_norm, self._cross_zone_norm))
             self._zone_fsms[track_id] = f
         return f
+
+    def _track_pose_samples(self, pose_samples: list) -> list[int]:
+        """Run ByteTrack on the boxes in pose_samples; return per-sample track_ids.
+
+        Lazy-creates the tracker on first call. Falls back to per-detection
+        index if `core.p10_inference.supervision_bridge.create_tracker` is
+        unavailable (e.g. `trackers` not installed). Track ids returned in
+        the same order as pose_samples; -1 for any detection the tracker
+        didn't assign.
+        """
+        if self._tracker is None:
+            try:
+                from core.p10_inference.supervision_bridge import create_tracker
+                self._tracker = create_tracker(self._tracker_cfg)
+            except Exception:
+                # `trackers` not installed or other init error — fall back to
+                # the index-based id (single-track-per-detection).
+                self._tracker = False
+        if not self._tracker:
+            return list(range(len(pose_samples)))
+
+        import supervision as sv
+        boxes = np.array([s[2] for s in pose_samples], dtype=np.float32)
+        if boxes.size == 0:
+            return []
+        det = sv.Detections(
+            xyxy=boxes,
+            confidence=np.ones(len(pose_samples), dtype=np.float32),
+            class_id=np.zeros(len(pose_samples), dtype=np.int32),
+        )
+        tracked = self._tracker.update(det)
+        # supervision matches each input row → output row in order; tracker_id
+        # is -1 for any detection that didn't get assigned.
+        if tracked.tracker_id is None:
+            return [-1] * len(pose_samples)
+        return [int(tid) for tid in tracked.tracker_id]
 
     def set_zones(self, approach_norm: list[list[float]] | None,
                   cross_norm: list[list[float]] | None) -> None:
@@ -199,16 +244,21 @@ class PointAndCallOrchestrator:
             timestamp = t0 - self._t0_wall
 
         pose_samples = self._pose(image_bgr)
-        # v1: single-person matcher. When multiple people are visible (forklift
-        # driver + worker, etc.) feeding all their labels into track_id=0
-        # produces label-flicker that fakes a "multi-direction sequence". Keep
-        # only the largest-area person box so the matcher sees one consistent
-        # actor.
-        if len(pose_samples) > 1:
+        # When the tracker is enabled, route every detection by its persistent
+        # track_id; the per-track matcher + FSM handle multi-person scenes
+        # cleanly. When the tracker is OFF, fall back to v1 behaviour: pick
+        # only the largest-area box and feed everything into track_id=0.
+        track_ids: list[int] = []
+        if self._tracker_enabled and pose_samples:
+            track_ids = self._track_pose_samples(pose_samples)
+        elif len(pose_samples) > 1:
             def _box_area(s):
                 b = s[2]
                 return float((b[2] - b[0]) * (b[3] - b[1]))
             pose_samples = [max(pose_samples, key=_box_area)]
+            track_ids = [0]
+        else:
+            track_ids = [0] * len(pose_samples)
 
         persons: list[PersonBehavior] = []
         alerts: list[str] = []
@@ -216,11 +266,11 @@ class PointAndCallOrchestrator:
         sequence_progress: list[str] = []
 
         h, w = image_bgr.shape[:2]
-        for kpts, scores, box in pose_samples:
+        for sample_idx, (kpts, scores, box) in enumerate(pose_samples):
             res = self._direction_rule.check(kpts, scores)
             label = str(res.debug_info.get("label", "invalid"))
 
-            track_id = 0  # v1: single-person.
+            track_id = track_ids[sample_idx] if sample_idx < len(track_ids) else 0
 
             # Zone-FSM update: foot point at bottom-center of the person box.
             # Stays in APPROACHING (rule armed) when no approach polygon is
