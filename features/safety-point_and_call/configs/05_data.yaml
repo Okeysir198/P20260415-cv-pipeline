@@ -1,0 +1,36 @@
+# Data config — safety-point_and_call (pretrained-only feature, v1)
+#
+# This feature is rule-based on top of pose keypoints; no own training set in v1.
+# The split paths below are placeholders for v2 (when a labeled crosswalk
+# point-and-call dataset is collected).
+#
+# Class taxonomy is the per-frame gesture state emitted by the rule engine:
+#   point_left   — arm extended toward image-left (worker's right side ignored here;
+#                  classification is in image / camera frame)
+#   point_right  — arm extended toward image-right
+#   point_front  — arm extended along body forward axis (optional 前ヨシ check)
+#   neutral      — no qualifying point gesture detected (arm down or bent)
+#   invalid      — pose missing / low-confidence keypoints / occluded
+
+dataset_name: "safety_point_and_call"
+path: "../../../dataset_store/training_ready/safety_point_and_call"   # placeholder for v2
+train: "train/images"
+val: "val/images"
+test: "test/images"
+
+names:
+  0: point_left
+  1: point_right
+  2: point_front
+  3: neutral
+  4: invalid
+num_classes: 5
+input_size: [640, 640]
+
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
+
+# v1 is pretrained/rule-based — no auto-label or SAM3 prompts needed.
+text_prompts: {}
+auto_label:
+  class_rules: []

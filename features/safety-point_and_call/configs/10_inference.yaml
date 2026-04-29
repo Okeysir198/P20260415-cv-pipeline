@@ -1,0 +1,74 @@
+# Inference + alert config — safety-point_and_call (Japanese 指差呼称, shisa-kanko)
+# Loaded by core.p10_inference.video_inference.load_alert_config
+#
+# Gesture sequence: at a crosswalk, the worker stops at the curb and performs
+#   right-yoshi (右ヨシ!) -> left-yoshi (左ヨシ!) -> [optional front-yoshi (前ヨシ!)]
+#   -> cross. The pipeline detects each direction held for hold_frames frames,
+#   then accepts a complete sequence if it occurs within window_seconds.
+# Citation: Shibuya & Sasaki, "Pointing-and-calling: Japanese style of safety
+#   confirmation," industrial-safety literature on shisa kanko / yubisashi-koshō.
+#
+# v1 is pretrained-only:
+#   - Pose: DWPose ONNX (shared with safety-poketenashi).
+#   - Person detector: yolo11n.pt (shared with access-zone_intrusion).
+#   - All gesture decisions are rule-based — no trained model.
+
+# ── Pose backend (swappable) ──────────────────────────────────────────────────
+pose:
+  backend: dwpose_onnx                                                     # dwpose_onnx | rtmpose | mediapipe | hf_keypoint
+  weights: ../../../pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx     # used by dwpose_onnx
+  config: null                                                             # YAML path used by rtmpose/mediapipe/hf_keypoint backends
+  person_detector: ../../../pretrained/access-zone_intrusion/yolo11n.pt   # top-down crop source
+  person_conf: 0.35                                                        # YOLO person-class confidence threshold
+  person_class: 0                                                          # COCO person id
+
+# ── Pose-rule parameters ──────────────────────────────────────────────────────
+pose_rules:
+  point_and_call:
+    elbow_angle_min_deg: 160     # arm must be nearly straight (shoulder-elbow-wrist angle)
+    arm_elevation_max_deg: 30    # arm roughly horizontal — reject "pointing up at sky"
+    front_half_angle_deg: 30     # ±30° around body forward axis classifies as front
+    side_half_angle_deg: 45      # 30°..(180-30)° on each side splits left vs right
+    min_keypoint_score: 0.3      # ignore frames with shoulder/elbow/wrist score below this
+    hold_frames: 6               # each direction must be sustained for >= 6 frames (~0.2s @30fps)
+    window_seconds: 5.0          # full sequence must complete within 5s wall-clock
+    sequence_modes: [LR, RL, LRF, RLF]   # accepted ordered sequences (L=left, R=right, F=front)
+
+# ── Per-behavior alert config ─────────────────────────────────────────────────
+# Keys consumed by core.p10_inference.video_inference.load_alert_config.
+alerts:
+  confidence_thresholds:
+    point_and_call_done: 0.0     # rule-based — no ML score; threshold unused
+    missing_directions: 0.0      # rule-based — fires when worker enters cross_zone
+                                 #              without completing the sequence
+
+  # Frames the condition must persist before the alert/event fires
+  frame_windows:
+    point_and_call_done: 1       # event fires immediately on sequence completion
+    missing_directions: 90       # ~3s @30fps inside cross_zone with incomplete sequence
+
+  window_ratio: 1.0              # rule-based events: require full window (no fractional hits)
+  cooldown_frames: 90            # ~3s @30fps between repeated alerts per tracked person
+
+# ── Optional crosswalk zone polygon (image-normalized 0..1 coords) ───────────
+# missing_directions only fires when cross_zone is non-empty AND a tracked person
+# enters it without having completed sequence_modes within window_seconds.
+# Default empty — disabled until a site-specific polygon is provided.
+cross_zone: []
+
+# ── Tracking ──────────────────────────────────────────────────────────────────
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.25
+  lost_track_buffer: 30
+  minimum_iou_threshold: 0.1
+  frame_rate: 30
+
+# ── Sample media for smoke tests ──────────────────────────────────────────────
+# Reuse safety-poketenashi worker-stance samples until v2 collects crosswalk media.
+samples:
+  images:
+    - ../../safety-poketenashi/samples/01_factory_worker_a.jpg
+    - ../../safety-poketenashi/samples/02_factory_worker_b.jpg
+    - ../../safety-poketenashi/samples/07_pexels_a.jpg
+  videos: []
