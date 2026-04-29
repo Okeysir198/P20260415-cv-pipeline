@@ -75,7 +75,9 @@ loss:
 
 logging:
   wandb_project: smart-camera
-  run_name: cppe5_our_torchvision
+  # NEVER set logging.run_name on the HF backend — `_config_to_training_args`
+  # treats it as the feature folder and creates features/<run_name>/runs/...
+  # ghost paths (project CLAUDE.md: "HF Trainer ghost-folder footgun").
   save_dir: runs/seed42
   report_to: none
 

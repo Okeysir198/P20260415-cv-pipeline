@@ -21,6 +21,12 @@ CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
 Outputs land in `runs/seed42/` — same HF-Trainer-standard layout as
 the Albumentations sibling.
 
+> **Status note (2026-04-29 review)**: the `runs/seed42/test_results.json`
+> currently checked in is from a 3-epoch smoke run (best_metric=0.072,
+> global_step=33). The 40-epoch numbers in the table below are from an
+> earlier run that wasn't preserved in this snapshot. Re-run the full 40
+> epochs to regenerate the canonical artifact.
+
 ## Result (seed=42, Bundle B, 40 epochs, 2026-04-20)
 
 **Per-sample aug cost is now at parity with Albumentations** after
