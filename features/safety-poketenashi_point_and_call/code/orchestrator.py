@@ -7,7 +7,7 @@ swappable pose backend (DWPose ONNX by default), runs the per-frame
 full path on sample images and writes ``eval/orchestrator_smoke_test.json``.
 
 Run smoke test:
-    uv run features/safety-point_and_call/code/orchestrator.py --smoke-test
+    uv run features/safety-poketenashi_point_and_call/code/orchestrator.py --smoke-test
 """
 
 from __future__ import annotations
@@ -307,7 +307,7 @@ def _resolve_samples_dir(feat_dir: Path) -> Path:
 
 
 def _smoke_test(pose_backend_override: str | None) -> None:
-    feat = REPO / "features" / "safety-point_and_call"
+    feat = REPO / "features" / "safety-poketenashi_point_and_call"
     config_path = feat / "configs" / "10_inference.yaml"
     eval_dir = feat / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
@@ -380,7 +380,7 @@ def _smoke_test(pose_backend_override: str | None) -> None:
 
 
 def _video_test(video_path: Path, pose_backend_override: str | None) -> None:
-    feat = REPO / "features" / "safety-point_and_call"
+    feat = REPO / "features" / "safety-poketenashi_point_and_call"
     config_path = feat / "configs" / "10_inference.yaml"
     eval_dir = feat / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)

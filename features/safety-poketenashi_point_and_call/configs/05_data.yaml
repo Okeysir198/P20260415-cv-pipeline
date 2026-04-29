@@ -1,4 +1,4 @@
-# Data config — safety-point_and_call (pretrained-only feature, v1)
+# Data config — safety-poketenashi_point_and_call (pretrained-only feature, v1)
 #
 # This feature is rule-based on top of pose keypoints; no own training set in v1.
 # The split paths below are placeholders for v2 (when a labeled crosswalk
@@ -12,8 +12,8 @@
 #   neutral      — no qualifying point gesture detected (arm down or bent)
 #   invalid      — pose missing / low-confidence keypoints / occluded
 
-dataset_name: "safety_point_and_call"
-path: "../../../dataset_store/training_ready/safety_point_and_call"   # placeholder for v2
+dataset_name: "safety_poketenashi_point_and_call"
+path: "../../../dataset_store/training_ready/safety_poketenashi_point_and_call"   # placeholder for v2
 train: "train/images"
 val: "val/images"
 test: "test/images"

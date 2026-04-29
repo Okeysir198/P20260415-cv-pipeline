@@ -1,4 +1,4 @@
-# safety-point_and_call
+# safety-poketenashi_point_and_call
 
 **Type:** Pose orchestrator | **Training:** 🔧 Pretrained only (v1) — rule-based on top of pose keypoints
 
@@ -53,24 +53,24 @@ absolute path from `pretrained/`.
 
 ```bash
 # Smoke-test the orchestrator on sample images (default DWPose backend)
-cp features/safety-poketenashi/samples/*.jpg features/safety-point_and_call/samples/
-uv run features/safety-point_and_call/code/orchestrator.py --smoke-test
+cp features/safety-poketenashi/samples/*.jpg features/safety-poketenashi_point_and_call/samples/
+uv run features/safety-poketenashi_point_and_call/code/orchestrator.py --smoke-test
 # Writes eval/orchestrator_smoke_test.json + eval/smoke_*.jpg
 
 # Run on a video file (writes annotated mp4 + per-frame timeline JSON)
-uv run features/safety-point_and_call/code/orchestrator.py \
-  --video features/safety-point_and_call/samples/05_SHI_point_and_call.mp4
+uv run features/safety-poketenashi_point_and_call/code/orchestrator.py \
+  --video features/safety-poketenashi_point_and_call/samples/05_SHI_point_and_call.mp4
 # Writes eval/smoke_<basename>.mp4 + eval/smoke_<basename>.json
 
 # Override pose backend (verifies the swap)
-uv run features/safety-point_and_call/code/orchestrator.py --smoke-test --pose-backend rtmpose
+uv run features/safety-poketenashi_point_and_call/code/orchestrator.py --smoke-test --pose-backend rtmpose
 
 # Latency benchmark across all 4 backends
-uv run features/safety-point_and_call/code/benchmark.py
+uv run features/safety-poketenashi_point_and_call/code/benchmark.py
 # Writes eval/benchmark_results.json
 
 # Unit tests (synthetic keypoints — no GPU/data needed)
-uv run -m pytest features/safety-point_and_call/tests/ -v
+uv run -m pytest features/safety-poketenashi_point_and_call/tests/ -v
 
 # Demo tab (Image + Video sub-tabs, pose-backend dropdown)
 uv run app_demo/run.py
@@ -240,18 +240,18 @@ exceeded), upgrade in this order:
    keypoints in torso frame. Output: `{point_left, point_right, point_front,
    neutral, invalid}`. Trained via `core/p06_training/` (`hf-classification`
    or `timm` head). Adds `06_training_*.yaml`, ONNX-exported into
-   `pretrained/safety-point_and_call/`.
+   `pretrained/safety-poketenashi_point_and_call/`.
 3. **Sequence model upgrade if rule recall < 90%** — replace
    `CrosswalkSequenceMatcher` with **ST-GCN** (skeleton-based action recog)
    or **1D-TCN** over a sliding window of pose frames. Output:
    `{point_and_call_complete, incomplete_sequence, no_gesture}`.
 4. **Release flow**: `utils/release.py --run-dir <ts_dir>` →
-   `releases/safety_point_and_call/v<N>_<YYYY-MM-DD>/`.
+   `releases/safety_poketenashi_point_and_call/v<N>_<YYYY-MM-DD>/`.
 
 ## Notes
 
-- **Folder is kebab** (`safety-point_and_call`); `dataset_name` in
-  `05_data.yaml` is **snake** (`safety_point_and_call`).
+- **Folder is kebab** (`safety-poketenashi_point_and_call`); `dataset_name` in
+  `05_data.yaml` is **snake** (`safety_poketenashi_point_and_call`).
 - DWPose ONNX is shared with `safety-poketenashi` and
   `safety-fall_pose_estimation` — reuse the same checkpoint, do not duplicate.
 - `code/_base.py` redefines `PoseRule` + `RuleResult` locally instead of
@@ -262,3 +262,34 @@ exceeded), upgrade in this order:
 - The geometric direction classifier consumes COCO-17 keypoints (not
   WholeBody-133): shoulders 5/6, elbows 7/8, wrists 9/10, hips 11/12.
   DWPose returns 133 wholebody points; the adapter slices the first 17 (body).
+
+## Deployment Architecture
+
+### Single-camera pipeline
+Frame ingestion → person detector (YOLO11n at `pretrained/access-zone_intrusion/yolo11n.pt`) → top-down crop → DWPose ONNX (shared at `pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx`) → COCO-17 keypoints → `PointingDirectionDetector` (per-frame label: point_left/right/front/neutral/invalid) → `CrosswalkSequenceMatcher` (per-track temporal FSM) → `point_and_call_done` / `missing_directions` event → sink.
+
+### Per-track FSM (compliance logic)
+The deployment FSM is:
+```
+IDLE → APPROACH (in approach polygon) → CROSSING (in cross_zone polygon) → DONE
+                  └ on transition APPROACH→CROSSING:
+                        if matcher.last_match recent → emit `compliant`
+                        else → emit `missing_directions` ⚠
+```
+Compliance auditing requires both polygons configured per camera and ByteTrack so each worker has their own FSM state.
+
+### When to enable ByteTrack
+ALWAYS in real deployment. Sequence matching needs persistent track identity to avoid feeding multiple workers' labels into the same matcher. Configured in `configs/10_inference.yaml::tracker:`; wire via `VideoProcessor(enable_tracking=True, tracker_config=cfg["tracker"])` — see `core/p10_inference/video_inference.py:166-172`.
+
+### When you need person detector + pose detector together
+Both required. DWPose ONNX is top-down (needs person crops); the canonical adapter is `code/pose_backend.py::_DWPoseAdapter` (lines 98-167). For far-field cameras (< 15% of frame height), DWPose is the only path that works — use it always.
+
+### Shared pose backbone
+Same DWPose ONNX as the other `safety-poketenashi_*` rules. See `features/CLAUDE.md` for shared-loader recommendation when deploying multiple rules on one stream.
+
+### Site calibration
+- `cross_zone:` polygon (image-normalized) — required for `missing_directions` alert.
+- `approach_zone:` polygon (optional) — defines where the gesture is expected.
+- `max_body_speed_px_per_sec` — depends on camera distance/zoom; calibrate by recording a person walking and measuring hip pixel velocity.
+- `min_distinct_directions` (default 2) — the rule fires when N distinct of L/R/F directions are observed within `window_seconds`. Set to 1 for single-direction installations, 2 for L+R, 3 for strict L+R+F.
+- All thresholds in `pose_rules.point_and_call:` (elbow angle, arm elevation, ear distance, etc.).

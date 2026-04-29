@@ -1,4 +1,4 @@
-# safety-point_and_call
+# safety-poketenashi_point_and_call
 
 Rule-based detector for the Japanese **指差呼称** (*shisa-kanko* / *yubisashi-koshō*,
 "point-and-call") crosswalk safety gesture. A worker stops at the curb, points
@@ -52,14 +52,14 @@ state machine. Both are configured from `configs/10_inference.yaml`.
 
 ```bash
 # Orchestrator smoke test (samples/ → eval/orchestrator_smoke_test.json)
-uv run features/safety-point_and_call/code/orchestrator.py \
-  --samples features/safety-point_and_call/samples/ \
-  --output  features/safety-point_and_call/eval/orchestrator_smoke_test.json
+uv run features/safety-poketenashi_point_and_call/code/orchestrator.py \
+  --samples features/safety-poketenashi_point_and_call/samples/ \
+  --output  features/safety-poketenashi_point_and_call/eval/orchestrator_smoke_test.json
 
 # Benchmark per-frame direction classifier on samples
-uv run features/safety-point_and_call/code/benchmark.py --split samples
+uv run features/safety-poketenashi_point_and_call/code/benchmark.py --split samples
 
-# Multi-tab Gradio demo (the safety-point_and_call tab loads
+# Multi-tab Gradio demo (the safety-poketenashi_point_and_call tab loads
 # configs/10_inference.yaml for thresholds + sequence config)
 uv run demo
 ```
