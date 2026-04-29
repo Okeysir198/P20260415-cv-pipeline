@@ -15,8 +15,8 @@
       "skip_reason": "Animated mascot ヨシだ君, not a photographic human. DWPose cannot detect cartoons."
     },
     "shisa_kanko_railway_toyota.mp4": {
-      "gesture_windows": [[148.0, 203.0]],
-      "notes": "Real railway / Toyota worker pointing-and-calling sequences. Multiple gestures across the window."
+      "gesture_windows": [[148.0, 215.0]],
+      "notes": "Real railway / Toyota worker pointing-and-calling sequences. Window extended to 215 s on 2026-04-29 — frame inspection at t=210 shows the worker is still performing shisa-kanko (arm fully extended, pointing at train); the events at 208.6 and 211.6 are genuine TPs that were misclassified as FPs by the original [148, 203] window."
     },
     "shisa_kanko_promotion_method.mp4": {
       "gesture_windows": [[4.0, 180.0]],
