@@ -30,14 +30,19 @@ import os
 
 # CUBLAS_WORKSPACE_CONFIG must be set *before* any torch import (used by
 # torch.use_deterministic_algorithms). Parse seed first so env is stable.
-_argp = argparse.ArgumentParser(add_help=False)
+# `add_help=True` so `--help` short-circuits *before* the module-level
+# dataset download / model load / `trainer.train()` block runs (otherwise
+# `--help` would silently launch a full training run).
+_argp = argparse.ArgumentParser(
+    description="RT-DETRv2 fine-tune on CPPE-5 (qubvel reference port).",
+)
 _argp.add_argument("--seed", type=int, default=int(os.environ.get("SEED", 42)))
 _argp.add_argument("--tag", type=str, default=os.environ.get("RUN_TAG", ""),
                    help="optional suffix on the run dir, e.g. 'cosine_wd_bf16'")
 _argp.add_argument("--aug", choices=["basic", "strong"],
                    default=os.environ.get("AUG", "basic"),
                    help="'basic' = qubvel's reference aug; 'strong' = +HSV/CLAHE/crop for rare classes")
-_args, _ = _argp.parse_known_args()
+_args = _argp.parse_args()
 SEED = _args.seed
 TAG = _args.tag
 AUG = _args.aug
