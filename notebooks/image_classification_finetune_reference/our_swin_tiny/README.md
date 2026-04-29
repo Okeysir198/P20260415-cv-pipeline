@@ -34,11 +34,26 @@ val_predictions/, test_predictions/) written by the HF-backend callbacks.
 | Precision | fp32 (upstream + our recipe — Swin is not bf16-tuned here) |
 | best-metric | `accuracy` |
 
-## Pending results
+## Results
 
-Training not run yet under this worktree. Expected upstream ballpark
-(3 epochs, seed=42): val accuracy ~0.98 on EuroSAT's 10-class split.
-Fill in after the first run.
+3 epochs, seed=42, fp32, EuroSAT 80/20 stratified split:
+
+| Split | Metric | Value |
+|---|---|---|
+| val (epoch 3, best) | top-1 accuracy | **0.9763** |
+| val (epoch 3) | top-5 accuracy | 1.0000 |
+| val (epoch 3) | eval_loss | 0.0728 |
+
+Matches upstream cookbook ballpark (~0.98). Final checkpoint:
+`runs/seed42/checkpoint-2025/`.
+
+Note: `runs/seed42/` currently has `data_preview/` only — `val_predictions/`,
+`test_predictions/`, and `error_analysis/` (the cls 01..14 tree) were not
+written for this run. Re-run the post-train evaluation hook against
+`checkpoint-2025/` to populate them, OR re-launch training with the current
+HF-backend (the cls post-train callback now generates the full tree). The
+adjacent `viz_check*/` dirs are dev artefacts from earlier viz iterations
+and are gitignored via the repo-root + folder-local `.gitignore`.
 
 ## Gotchas already avoided
 
