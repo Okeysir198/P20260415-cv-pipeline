@@ -43,8 +43,15 @@ All artefacts land under `runs/seed42/` (self-contained, resolved via `__file__`
 - Split `train_test_split(test_size=0.1, seed=SEED)` is seeded (upstream omitted
   the seed; we fix it so runs are reproducible).
 
-## Pending results
+## Results (3 epochs, seed=42)
 
-Training not run yet under this worktree. Expected upstream ballpark
-(3 epochs, seed=42): val accuracy ~0.98 on EuroSAT's 10-class split.
-Fill in after the first run alongside `val_report/report.json`.
+| Metric | Value |
+|---|---|
+| `eval_accuracy` | **0.9859** |
+| `eval_loss` | 0.0436 |
+| `train_loss` | 1.183 |
+| `train_runtime` | 156.8 s |
+| `train_samples_per_second` | 464.8 |
+
+Matches upstream cookbook ballpark (~0.98 val acc on EuroSAT). Numbers
+sourced from `runs/seed42/{eval_results.json,train_results.json}`.
