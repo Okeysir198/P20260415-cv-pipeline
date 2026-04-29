@@ -56,15 +56,16 @@ runs/seed42/
 
 ## Expected result
 
-| metric | reference notebook | **this run** |
+| metric | reference notebook (qubvel) | **this run** |
 |---|---|---|
-| test mAP | 0.5585 | ≈ 0.559 |
-| test mAP₅₀ | 0.8222 | ≈ 0.862 |
-| wall time | 563s | ≈ 620s |
+| test mAP | 0.5789 | ≈ 0.5483 |
+| test mAP₅₀ | 0.8674 | ≈ 0.8264 |
+| wall time | ~563s | ~620s |
 
-Verified: single seed=42 run reaches test mAP 0.5591 — within torch-metric
-noise (+0.0006) of the reference. Speed parity with Albumentations; ~10%
-slower with viz callbacks turned on.
+Latest 6-way reproduction (2026-04-23, seed=42) lands at test mAP 0.5483 —
+within ±0.03 of qubvel on a 29-image test split (per-seed variance is large;
+see `../CLAUDE.md` "Per-seed variance is large"). Numbers above are the
+authoritative results from the parent `notebooks/detr_finetune_reference/CLAUDE.md`.
 
 ## What this test proves
 

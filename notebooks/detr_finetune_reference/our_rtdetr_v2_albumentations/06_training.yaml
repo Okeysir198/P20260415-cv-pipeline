@@ -74,13 +74,10 @@ loss:
 
 logging:
   wandb_project: smart-camera
-  run_name: cppe5_our_albumentations
-  # Pin save_dir so this config stays self-contained under
-  # notebooks/detr_finetune_reference/our_rtdetr_v2_albumentations/. Without
-  # this, `generate_run_dir` falls back to `features/<run_name>/runs/...`
-  # (a ghost feature folder) because the config lives outside `features/`.
-  # Path is resolved relative to this config file. HF Trainer puts its usual
-  # `checkpoint-N/` + tensorboard `runs/` + `trainer_state.json` inside.
+  # NB: do NOT set `run_name` — it overrides the run-dir derivation and
+  # creates a ghost `features/<run_name>/runs/...` (HF Trainer footgun
+  # documented in repo CLAUDE.md). `save_dir` below pins the output dir
+  # explicitly so this config stays self-contained.
   save_dir: runs/seed42
   report_to: none                 # avoid wandb auth hard-fail under HF Trainer
 
