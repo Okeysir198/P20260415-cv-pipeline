@@ -1,6 +1,7 @@
-# our_dfine_albumentations — D-FINE-large via our in-repo pipeline (Albumentations CPU aug)
+# our_dfine_albumentations — D-FINE-n via our in-repo pipeline (Albumentations CPU aug)
 
-**Arch**: D-FINE-large (`ustc-community/dfine-large-coco`, ~31M params).
+**Arch**: D-FINE-n (`ustc-community/dfine_n_coco`, ~4M params — `dfine-large`
+overfits CPPE-5; see `../CLAUDE.md` capacity heuristic).
 **Aug backend**: Albumentations 2.x (mirrors qubvel's reference notebook).
 
 A controlled experiment: same data (CPPE-5 seed=1337 split), same
