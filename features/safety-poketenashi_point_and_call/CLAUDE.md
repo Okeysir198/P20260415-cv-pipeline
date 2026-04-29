@@ -1,27 +1,33 @@
 # safety-poketenashi_point_and_call
 
 **Type:** Pose orchestrator | **Training:** 🔧 Pretrained only (v1) — rule-based on top of pose keypoints
-**Robustness status (2026-04-29):** 🟡 v1.1 — F1 ≈ 0.5 on 9-video labeled set. Investigation plan active; see "Status & investigation log" below.
+**Robustness status (2026-04-29 baseline):** 🔴 v1.1 — event-level **F1 = 0.103** (P=0.056, R=0.571) on the labeled 8-video set. Hand-tabulated estimate of "≈ 0.5" was way too generous — at the event level, every cooldown re-fire outside a GT window counts as FP. Investigation plan active; see "Status & investigation log" below.
 
 ## Status & investigation log
 
 > Single source of truth for "where are we with this feature." Anyone (human or future-Claude) picking this back up should read this section first. The detailed investigation plan lives in `~/.claude/plans/`; this is the day-to-day status.
 
-### A. Current evaluation status (last run: **2026-04-29 manual audit** — automated `eval_robustness.py` not yet built)
+### A. Current evaluation status
 
-Aggregate: **4 TPs, 1 FN, 1 N/A, 2 FPs, 2 partial**. Event-level F1 ≈ **0.5**. Threshold-set: post-v1.1 robustness pass (commit `2ac0911` on `main`).
+> Auto-rewritten by `code/eval_robustness.py` between the markers below. Do not hand-edit; re-run the harness after any change to refresh.
 
-| Video (in `samples/`) | Duration | Ground-truth gesture window | Last-run matches | Verdict |
+<!-- AUTO:section_a:begin -->
+<!-- last auto-run: 2026-04-29 10:16 UTC -->
+
+Aggregate: **4 TP, 67 FP, 3 FN**. Precision **0.056**, Recall **0.571**, F1 **0.103**.
+
+| Video | Duration | GT windows | Matches (count, first) | Verdict |
 |---|---|---|---|---|
-| `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 2 (first @ 30.0 s) | ✅ TP |
-| `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 0 | ❌ FN — actor too small (84 % invalid) |
-| `shisa_kanko_correct_demo.mp4` | 41 s | (cartoon) | 0 | ⚠️ N/A — animated mascot, not a real human; DWPose can't detect cartoons |
-| `shisa_kanko_railway_toyota.mp4` | 3:56 | 148–203 s | 12 (148.7–203 s) | ✅ TP — clusters during the actual railway-worker footage |
-| `shisa_kanko_promotion_method.mp4` | 3:00 | ~4–180 s | 11 (first @ 4.1 s) | ✅ TP |
-| `POKETENASHI.mp4` (full) | 4:26 | SHI section 174–217 s | 11, **first @ 82.9 s** | ⚠️ FP timing — first match is in the KE phone-usage section, not SHI |
-| `POKETENASHI_spkepcmwi_full.mp4` (full) | 5:10 | SHI section 158–228 s | 1 @ 278 s | ⚠️ FP timing — match is in outro, not the SHI window |
-| `POKETENASHI_autotech_indonesia_senam.mp4` | 3:20 | needs frame inspection | 3 (first @ 37.6 s) | ✅ probably TP — group calisthenics, hard to score precisely |
-| `POKETENASHI_anzen_daiichi_lecture.mp4` | 6:19 | (no gesture) | **51 matches** | ❌ massive FP — presenter gesturing while speaking |
+| `05_SHI_point_and_call.mp4` | 41 s | 29–34 s | 2 (first @ 30.0 s) | ✅ TP × 1 |
+| `POKETENASHI.mp4` | 266 s | 174–217 s | 11 (first @ 82.9 s) | ⚠️ TP 1 / FP 9 / FN 0 |
+| `POKETENASHI_anzen_daiichi_lecture.mp4` | 379 s | (none) | 51 (first @ 9.6 s) | ❌ FP × 51 |
+| `POKETENASHI_autotech_indonesia_senam.mp4` | 200 s | 100–130 s | 3 (first @ 37.6 s) | ❌ FN × 1 |
+| `POKETENASHI_spkepcmwi_full.mp4` | 310 s | 158–228 s | 1 (first @ 278.0 s) | ❌ FN × 1 |
+| `SHI_point_and_call_spkepcmwi.mp4` | 70 s | 25–60 s | 0 | ❌ FN × 1 |
+| `shisa_kanko_correct_demo.mp4` | — | (skip) | — | ⚠️ Animated mascot ヨシだ君, not a photographic human. DWPose cannot detect cartoons. |
+| `shisa_kanko_promotion_method.mp4` | 180 s | 4–180 s | 11 (first @ 4.1 s) | ✅ TP × 1 |
+| `shisa_kanko_railway_toyota.mp4` | 236 s | 148–203 s | 12 (first @ 148.8 s) | ⚠️ TP 1 / FP 3 / FN 0 |
+<!-- AUTO:section_a:end -->
 
 ### B. Known failure modes (open until resolved)
 
@@ -35,14 +41,22 @@ Aggregate: **4 TPs, 1 FN, 1 N/A, 2 FPs, 2 partial**. Event-level F1 ≈ **0.5**.
 ### C. Investigation log (append-only)
 
 - **2026-04-29** — Audited the orchestrator on the expanded 9-video sample set. Hand-tabulated F1 ≈ 0.5. Identified 3 actionable failure modes (lecture FPs, phone-on-ear FP, far-field FN) plus the AV1 codec bug (fixed in-place). Investigation plan filed at `~/.claude/plans/with-this-home-ct-admin-documents-langgr-federated-dewdrop.md`. Goal: lift F1 to ≥ 0.8 via 4 rule-based interventions before considering the ML head escalation on the v2 roadmap.
+- **2026-04-29 (Phase 0 done)** — Built `code/eval_robustness.py` + `eval/ground_truth.json` and ran the first reproducible baseline. **Real event-level F1 = 0.103** (P=0.056, R=0.571), much worse than the hand-tabulated 0.5: cooldown re-fires count individually so the lecture's 51 matches all count as FPs. New issues surfaced: (a) `shisa_kanko_railway_toyota` has 3 FPs *outside* the 148–203 s GT window plus the 1 TP inside; (b) `autotech_indonesia_senam` is currently classified FN — 3 matches fired at t=37.6 s but my GT window guess of [100, 130] is probably wrong, refine the GT next time someone watches the clip. Baseline locked at `eval/robustness_baseline.json`. Phase 1 next: per-cluster failure dump.
 
 ### Next steps (in order)
 
-1. Phase 0: build `code/eval_robustness.py` + `eval/ground_truth.json` so this status block can be auto-regenerated.
-2. Phase 1: per-cluster failure dump (CSV of pose features at FP/FN frames) → confirm hypotheses.
+1. ~~Phase 0: build `code/eval_robustness.py` + `eval/ground_truth.json` so this status block can be auto-regenerated.~~ ✅ done 2026-04-29.
+2. **Phase 1**: per-cluster failure dump (CSV of pose features at FP/FN frames) → confirm hypotheses.
 3. Phase 2: intervention A (gesture-onset temporal pattern) — biggest expected impact.
 4. After each intervention: re-run harness, append a section C log entry, tick the section B checkbox if resolved.
 5. Phase 3 gate: ship rule-based v1.2 if F1 ≥ 0.8, else escalate to ML head (v2).
+
+### Re-running the harness
+
+```
+uv run python features/safety-poketenashi_point_and_call/code/eval_robustness.py
+```
+Takes ~9 min on GPU (DWPose ONNX over 9 videos × ~30 fps). Auto-rewrites section A above and writes a timestamped report to `eval/robustness_<ts>.json`. Add `--against eval/robustness_baseline.json` to print a delta vs the locked baseline. **Do not run two of these in parallel** — single GPU contention will hang the desktop.
 
 ## Overview
 

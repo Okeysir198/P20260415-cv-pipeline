@@ -2,6 +2,7 @@ runs/*
 !runs/.gitkeep
 eval/*
 !eval/.gitkeep
+!eval/ground_truth.json
 export/*
 !export/.gitkeep
 predict/*

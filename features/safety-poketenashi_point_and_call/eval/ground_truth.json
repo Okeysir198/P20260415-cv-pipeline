@@ -1,0 +1,42 @@
+{
+  "_doc": "Ground-truth gesture windows per sample video. Each entry: gesture_windows is a list of [start_sec, end_sec] ranges where a complete shisa-kanko gesture is performed. Empty list = no gesture should fire (true negative). 'skip: true' excludes a video from the harness (e.g. cartoon characters that DWPose cannot detect). Annotations seeded from the 2026-04-29 manual audit; refine as you watch each clip more carefully.",
+  "videos": {
+    "05_SHI_point_and_call.mp4": {
+      "gesture_windows": [[29.0, 34.0]],
+      "notes": "Original POKETENASHI SHI section split. Real factory worker raises right arm in pointing pose."
+    },
+    "SHI_point_and_call_spkepcmwi.mp4": {
+      "gesture_windows": [[25.0, 60.0]],
+      "notes": "SPKEPCMWI factory video SHI section. Actor's full demo. Currently FN — far-field actor + low keypoint scores."
+    },
+    "shisa_kanko_correct_demo.mp4": {
+      "gesture_windows": [],
+      "skip": true,
+      "skip_reason": "Animated mascot ヨシだ君, not a photographic human. DWPose cannot detect cartoons."
+    },
+    "shisa_kanko_railway_toyota.mp4": {
+      "gesture_windows": [[148.0, 203.0]],
+      "notes": "Real railway / Toyota worker pointing-and-calling sequences. Multiple gestures across the window."
+    },
+    "shisa_kanko_promotion_method.mp4": {
+      "gesture_windows": [[4.0, 180.0]],
+      "notes": "Japanese promotional video showing continuous shisa-kanko demonstrations."
+    },
+    "POKETENASHI.mp4": {
+      "gesture_windows": [[174.0, 217.0]],
+      "notes": "Full POKETENASHI source. Only the SHI section (174–217 s) is positive; everything else (intro / PO / KE / TE / NA / recap) is negative. First match must land here, not earlier."
+    },
+    "POKETENASHI_spkepcmwi_full.mp4": {
+      "gesture_windows": [[158.0, 228.0]],
+      "notes": "Full SPKEPCMWI source. SHI section only is positive."
+    },
+    "POKETENASHI_autotech_indonesia_senam.mp4": {
+      "gesture_windows": [[100.0, 130.0]],
+      "notes": "Group calisthenics / SENAM demo. Approximate SHI section per t=100–130 s thumbnail row; refine with frame inspection if it materially affects scoring."
+    },
+    "POKETENASHI_anzen_daiichi_lecture.mp4": {
+      "gesture_windows": [],
+      "notes": "Presenter-only lecture. NO gesture windows. Entire video is true-negative material. Currently 51 false positives — biggest open failure mode."
+    }
+  }
+}
