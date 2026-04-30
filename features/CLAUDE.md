@@ -18,7 +18,7 @@
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi_phone_usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |
 | `safety-poketenashi_point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🟢 v1.8 **F1=0.824** (P=0.778, R=0.875), Δ +0.721 vs baseline 0.103, 2026-04-30 — **v1.2 target hit; 8× baseline** |
-| `safety-poketenashi_hands_in_pockets` | Pose rule | 🔧 Pretrained only | dwpose_384_pose | — | 🔴 expanded baseline F1=0.042 (2026-04-30) — earlier 0.800 was a 2-clip mirage; 4 TN videos added expose 91 FPs from low-wrist-score shortcut |
+| `safety-poketenashi_hands_in_pockets` | Pose rule | 🔧 Pretrained only | dwpose_384_pose | — | 🟡 v1.1 F1=0.083 (2026-04-30) — 2× the expanded baseline 0.042 via elbow-proxy gate; rule-based plateau hit, structural escalation needed |
 | `safety-poketenashi_stair_diagonal` | Pose rule (stateful) | 🔧 Pretrained only | dwpose_384_pose | — | 🟢 v1.1 F1=1.000 (2026-04-29) — sub-pixel-jitter FP gate added |
 | `safety-poketenashi_no_handrail` | Pose rule + zone | 🔧 Pretrained only | dwpose_384_pose | — | 🟡 BLOCKED — eval needs handrail polygons annotated per video |
 | `ppe-helmet_detection` | Detection | 🎯 Fine-tune | melihuzunoglu_yolov11_ppe.pt | 0.105 | ⬜ not started |

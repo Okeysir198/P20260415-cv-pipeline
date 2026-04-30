@@ -17,9 +17,21 @@ pose:
 # ── Pose-rule parameters ──────────────────────────────────────────────────────
 pose_rules:
   hands_in_pockets:
-    # Wrists must be below hip and within torso horizontal band.
-    wrist_below_hip_ratio: 0.05      # wrist y > hip y + 5% of torso height
-    wrist_inside_torso_margin: 0.08  # wrist x within 8% of torso centerline
+    # High-confidence wrist path: wrist below hip + within torso horizontal band.
+    wrist_below_hip_ratio: 0.05         # wrist y > hip y + 5% of torso height
+    wrist_inside_torso_margin: 0.08     # wrist x within 8% of torso centerline
+    # Low-confidence wrist fallback: hand likely occluded inside the pocket.
+    # Use elbow as proxy. In-pocket = elbow dropped (Y below shoulder-hip
+    # midpoint) AND tucked (X within `elbow_inside_torso_margin` torso widths
+    # of centerline). Pointing/gesturing fails the dropped check; arms-at-side
+    # fail the tucked check. Replaces the v1.0 unconditional `return True`
+    # which produced 91 FPs across non-pocket scenes (v1 vs v2 expanded set).
+    elbow_inside_torso_margin: 0.7
+    # When True, both sides must satisfy the in-pocket gate simultaneously
+    # (matches the plural semantics of `hands_in_pockets`). Default False
+    # for recall robustness — the 2-clip TP set has brief asymmetric moments
+    # that fail strict AND. Strict deployments can flip this to True.
+    require_both_sides: false
 
 # ── Per-behavior alert config ─────────────────────────────────────────────────
 alerts:
