@@ -24,15 +24,15 @@
     },
     "POKETENASHI.mp4": {
       "gesture_windows": [[174.0, 217.0]],
-      "approach_zone_norm": [[0.55, 0.55], [0.85, 0.55], [0.85, 0.95], [0.55, 0.95]],
+      "approach_zone_norm": [[0.6, 0.7], [0.85, 0.7], [0.85, 0.95], [0.6, 0.95]],
       "cross_zone_norm": [],
-      "notes": "Full POKETENASHI source. SHI section 174-217 s. Approach polygon set to the right-curb area where the SHI-section actor stands (verified at t=205); the KE phone-actor at t=85 is at center (~0.4, 0.95), TE-actor at t=130 is on stairs (~0.4, 0.3), NA-actor at t=147 is at (~0.7, 0.6), recap-actors at t=247-257 are center-left (~0.3, 0.7) — all outside the polygon. Should clear the 9 FPs from non-SHI sections."
+      "notes": "Full POKETENASHI source. SHI section 174-217 s. Approach polygon set to the right-curb area where the SHI-section actor stands (verified at t=205, box bottom-center ≈0.6,0.85). Tightened to x≥0.6 on 2026-04-29 to exclude TE-stairs actor at t=132 (box bottom-center ≈0.5,0.85). Top edge y=0.7 excludes high-on-stairs scenes."
     },
     "POKETENASHI_spkepcmwi_full.mp4": {
       "gesture_windows": [[158.0, 175.0]],
-      "approach_zone_norm": [[0.0, 0.3], [0.45, 0.3], [0.45, 0.95], [0.0, 0.95]],
+      "approach_zone_norm": [[0.78, 0.4], [1.0, 0.4], [1.0, 0.95], [0.78, 0.95]],
       "cross_zone_norm": [],
-      "notes": "Full SPKEPCMWI source. SHI demonstration is brief (t=158-175 — caption 'memastikan kanan kiri depan aman, sebelum menyebrang tunjuk dan ucap yosh' with forklift+worker scene). Approach polygon set to left-half/bottom — catches the SHI worker at (~0.25, 0.5) and excludes the recap-portrait cards at t=204+ which place a circular photo at the RIGHT side (~0.7, 0.4). The t=117 NA-section actor is also on the left so still fires, but that's a smaller cluster than the 4 recap-card FPs."
+      "notes": "Full SPKEPCMWI source. SHI demonstration t=158-175 — debug CSV showed the SHI actor's hip is at normalized x≈0.93 (FAR RIGHT, not left as initially assumed; the earlier t=162 sample frame showed forklift+worker but the foreground worker performing the gesture was on the right out of the visible-thumbnail frame). NA-section forklift driver at t=117 has hip at x≈0.43 (center). Recap-card portraits at t=204+ are at x≈0.55. Right-side polygon catches the SHI actor and excludes both the NA forklift and the recap cards."
     },
     "POKETENASHI_autotech_indonesia_senam.mp4": {
       "gesture_windows": [[85.0, 95.0]],
