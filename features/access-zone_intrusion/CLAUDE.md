@@ -52,6 +52,11 @@ eval/benchmark_results.json — raw benchmark output
 
 ## Notes
 
-- Zone polygons are site-specific — must be reconfigured per deployment location
-- yolov12 models fail with current Ultralytics version due to `AAttn` attribute missing; upgrade Ultralytics to fix
+- Zone polygons are site-specific — must be reconfigured per deployment location. Polygons are image-normalized `[0,1]` coordinate lists in `configs/10_inference.yaml`; minimal example:
+  ```yaml
+  zones:
+    - [[0.10, 0.20], [0.50, 0.20], [0.50, 0.80], [0.10, 0.80]]   # one closed polygon per restricted area
+  ```
+- yolov12 models fail with current Ultralytics version due to `AAttn` attribute missing — pin Ultralytics ≥ 8.3.0 (`uv add 'ultralytics>=8.3.0'`) to enable yolov12. Until then, `yolov12n/s` rows in the benchmark above stay erroring.
+- val split is small (8 labeled samples) — F1=1.0 has wide CI. Re-validate against ≥ 50 site frames before locking the production model.
 - No fine-tuning ever needed unless a non-person class (vehicle, forklift) is required

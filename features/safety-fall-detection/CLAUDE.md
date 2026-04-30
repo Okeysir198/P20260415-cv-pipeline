@@ -26,14 +26,14 @@ Detects fallen persons (on the ground) distinct from upright persons. COCO `pers
 
 ## Unique risk
 
-- `fallen_person` bbox is often horizontal/wide-aspect — keep `flipud=0` (configured), vertical flip destroys upright-vs-fallen signal.
+- `fallen_person` bbox is often horizontal/wide-aspect — keep `flipud=0` (configured), vertical flip destroys upright-vs-fallen signal. Verify training images contain no accidentally-rotated upside-down "fallen" examples that would teach the wrong invariant.
 - Low-volume CCTV-angle subset (`cctv_fall` ~112 imgs) may be under-represented in 20% sample -> note if `fallen_person` AP stalls.
 
 ## Pipeline Checklist
 
 - [x] `00_data_preparation.yaml`, `p00_data_prep`, `p02_annotation_qa`, `code/benchmark.py`
 - [x] Arch configs authored — `06_training_{yolox,rtdetr,dfine}.yaml`
-- [ ] Phase B — 20% smoke (3 arches) — _not yet run as of 2026-04-29_
+- [ ] Phase B — 20% smoke (3 arches) — **BLOCKED on `safety-fire_detection` Phase C completion (shared GPU 2; sequential queue per `features/CLAUDE.md` Phase B order). Configs ready; run as soon as fire-C is approved.**
 - [ ] Phase C — full-data training on winning arch(es)
 - [ ] `p08_evaluation` — full test split
 - [ ] `p09_export` — ONNX export

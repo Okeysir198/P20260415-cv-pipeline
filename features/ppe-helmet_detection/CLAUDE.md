@@ -24,12 +24,12 @@ Detects helmet compliance: whether persons are wearing hard hats. Four classes i
 
 ## Pretrained baseline
 
-`HudatersU_safety_helmet.onnx` — val mAP@0.5 = **0.124** (best ONNX, fast serving). `melihuzunoglu_yolov11_ppe.pt` — mAP@0.5 = 0.105 (best `.pt`, recommended fine-tune starting point). Full benchmark (28 models): `eval/benchmark_results.json`.
+`HudatersU_safety_helmet.onnx` — val mAP@0.5 = **0.124** (best ONNX, fast serving; benchmarked 2026-04-17 via `code/benchmark.py --split val`). `melihuzunoglu_yolov11_ppe.pt` — mAP@0.5 = **0.105** (best `.pt`, recommended fine-tune starting point; same date / methodology). Full benchmark (28 models): `eval/benchmark_results.json`.
 
 ## Unique risk
 
 - **4 classes** — `head_with_nitto_hat` at 1.6% tail. 20% sample may contain <15 positive instances -> per-class AP for this class will be very noisy; don't mark FAIL purely on its AP, weight on `head_with/without_helmet`.
-- May need augmentation or site-collected images to prevent under-detection of the nitto class in production.
+- **Nitto-class mitigation strategy** — neither `06_training_*.yaml` config currently enables class-weighted loss. Before Phase C, add either (a) `loss.class_weights: [1, 1, 1, freq_inv_4]` (≈ 60×) to `06_training_yolox.yaml`, OR (b) oversample `head_with_nitto_hat` images via `data.sampler: weighted` with `weights_by: class_count`, OR (c) collect site-specific nitto-hat photos to lift the tail above 5%. Phase B can run unweighted; gate Phase C entry on a documented choice here.
 
 ## Pipeline Checklist
 

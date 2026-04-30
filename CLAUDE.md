@@ -65,7 +65,7 @@ uv run core/p09_export/export.py \
   --training-config features/safety-fire_detection/configs/06_training_yolox.yaml
 
 # Inference via the multi-tab Gradio demo (per-feature alert config is
-# loaded from 10_inference.yaml by the feature tab)
+# loaded from 10_inference.yaml by the feature tab) — serves on http://127.0.0.1:7860/
 uv run demo
 
 # Scaffold a new feature (copies features/_TEMPLATE/, substitutes <feature_name>)
@@ -194,7 +194,7 @@ import from any `features/<name>/code/`**.
 ## Tests
 
 - **Real data only** — no mocks. Uses `test_fire_100` dataset (100 images). Services (SAM3 :18100, QA :18105, auto-label :18104) skip gracefully when down.
-- **40 test files** in four groups: `utils` (independent), `p00–p04` (annotation), `p05–p11` (train/eval/export/infer), `p12` (raw pipeline end-to-end).
+- **50+ test files** (current count: `ls tests/test_*.py | wc -l`) in four groups: `utils` (independent), `p00–p04` (annotation), `p05–p11` (train/eval/export/infer), `p12` (raw pipeline end-to-end).
 - Test configs in `configs/_test/` — includes `00_raw_pipeline.yaml` (created at runtime by p12).
 - `tests/run_all.py` runs sequentially; p08/p09/p10 depend on checkpoint from `p06_training` (`outputs/08_training/best.pth`).
 - Each file also runs standalone: `uv run tests/test_p06_training.py`
@@ -241,7 +241,7 @@ import from any `features/<name>/code/`**.
 - **INT8 ONNX is slower than fp32 on ORT CUDA EP for DETR-family** — ORT CUDA has no real INT8 kernels for transformer attention/normalisation ops; emulation is often slower than fp32. Real INT8 speedup needs TensorRT EP engine build. Calibration runs on CPU EP and saturates cores for minutes on transformer models. **Now guarded**: `core/p09_export/quantize.py::quantize_static` defaults `calibration_method="percentile"`, auto-excludes `LayerNormalization/Softmax/Gather` from quantization when an arch hint or filename contains `dfine`/`rtdetr`/`detr`, and **hard-errors on `--calibration-method minmax` for DETR-family** (collapsed mAP→0 on D-FINE). `scripts/benchmark_detr_fp32_int8_vs_pytorch.py --strict` exits nonzero when INT8 isn't viable (≥1.2× speedup AND mAP drop ≤0.01). Use `percentile` (default) or `entropy`; YOLOX/timm/seg do not need the exclude list.
 - **ONNX inference: TensorRT EP is opt-in, not default** — `core/p10_inference/predictor.py::DetectionPredictor` accepts `providers: list[str] | None`; default stays `["CUDAExecutionProvider"]` for backward compat. Pass `providers=["TensorrtExecutionProvider", "CUDAExecutionProvider"]` to opt into TRT (ORT auto-falls-back to CUDA at session creation if TRT runtime libs aren't on `LD_LIBRARY_PATH`). Invalid provider names raise immediately. `onnxruntime-gpu` (already pinned) ships both EPs — no extra dep required. CPU EP remains forbidden by policy.
 - **Keypoint top-down (`hf_keypoint`) emits a different sample shape** — `KeypointTopDownDataset.__getitem__` returns `{pixel_values, target_heatmap, target_weight}` (per-person crops with Gaussian heatmap targets), NOT the `{boxes, keypoints}` full-frame YOLO-pose dict that `KeypointDataset` returns. Anything new that consumes a keypoint dataset needs to branch on the type or you'll silently hit detection-shaped postprocess paths that produce zero predictions. The HF Trainer dispatcher (`_build_datasets`) and the post-train runner (`_run_topdown_keypoint_post_train`) are the canonical examples.
-- **Paddle backend gotchas** (full overview in "Training Backends" above): never `uv add paddlepaddle-gpu` — its bundled CUDA clashes with main venv's CUDA 13 PyTorch wheels. `paddle2onnx` is `.venv-paddle/`-only (separate from `.venv-export/`'s optimum-onnx pin). For ORT INT8: PicoDet / PP-YOLOE (CNN) generally hit real speedup; any future transformer-y paddle arch should reuse the DETR-family exclusion list in `core/p09_export/quantize.py`. PP-TinyPose is top-down — feed `KeypointTopDownDataset`, not `KeypointDataset` (same constraint as `hf_keypoint`; bottom-up silently skips every transform stage past Raw).
+- **Paddle backend gotchas**: see `core/p06_paddle/CLAUDE.md` for the full set (CUDA conflict, `paddle2onnx` venv isolation, ORT INT8 with the DETR-family exclusion list, PP-TinyPose top-down constraint). Authoritative; do not duplicate here.
 - **`pycocotools` APm/APl needs real source bboxes** — every top-down crop has identical area (input_h × input_w), so passing the crop bbox to `compute_oks_ap_pycocotools` collapses every person into a single area bucket and APm/ARm come back as -1.0. `_collect_source_bboxes(...)` in `core/p06_training/hf_callbacks.py` reads the YOLO label row + source image dims out of `KeypointTopDownDataset._index` to recover real source-pixel bboxes. New keypoint metric callers must do the same or their challenge-shape AP numbers will be misleading.
 
 ## Code Style

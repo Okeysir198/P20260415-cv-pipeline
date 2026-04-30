@@ -63,9 +63,9 @@ curl -L -o pretrained/mobilefacenet_arcface.onnx \
 
 ---
 
-## Nitto Denko Safety Models (`pretrained/nitto_denko/`) — legacy, pre-benchmark
+## Nitto Denko Safety Models (`pretrained/nitto_denko/`) — **DEPRECATED / legacy, pre-benchmark**
 
-> The tables below were populated during initial model exploration. They are **not** the current benchmark results. For the verified "best pretrained" per feature (and the winning checkpoints now living under `pretrained/<feature>/`), see the per-feature `CLAUDE.md` or the "Quick Reference" section at the bottom of this file. "Inference Quality" notes in these legacy tables are small-sample anecdotes (N=5–8), not val-split mAP.
+> ⚠️ **Deprecated section.** Populated during initial model exploration (Q1 2026). **Not** current benchmark results. For verified "best pretrained" per feature, use the per-feature `CLAUDE.md` or the "Quick Reference" at the bottom of this file. "Inference Quality" notes here are small-sample anecdotes (N=5–8), not val-split mAP. Do not pick checkpoints from these tables for new training runs.
 
 
 ### Fire Detection (`pretrained/nitto_denko/fire_detection/`)
@@ -147,12 +147,12 @@ No open-source pretrained model exists for safety shoes detection/classification
 
 | Model | File | Size | Classes | License | Source |
 |-------|------|------|---------|---------|--------|
-| YOLOv8n COCO | `vehicle_detection_ultralytics/yolov8n.pt` | 6.3 MB | 80 (COCO) | AGPL-3.0 | Ultralytics |
-| YOLOv8s COCO | `vehicle_detection_ultralytics/yolov8s.pt` | 22 MB | 80 (COCO) | AGPL-3.0 | Ultralytics |
-| YOLOv8m COCO | `vehicle_detection_ultralytics/yolov8m.pt` | 50 MB | 80 (COCO) | AGPL-3.0 | Ultralytics |
-| YOLO11n COCO | `vehicle_detection_ultralytics/yolo11n.pt` | 5.4 MB | 80 (COCO) | AGPL-3.0 | Ultralytics |
-| YOLO11s COCO | `vehicle_detection_ultralytics/yolo11s.pt` | 19 MB | 80 (COCO) | AGPL-3.0 | Ultralytics |
-| YOLO11m COCO | `vehicle_detection_ultralytics/yolo11m.pt` | 39 MB | 80 (COCO) | AGPL-3.0 | Ultralytics |
+| YOLOv8n COCO | `vehicle_detection_ultralytics/yolov8n.pt` | 6.3 MB | 80 (COCO) | ⚠️ AGPL-3.0 | Ultralytics |
+| YOLOv8s COCO | `vehicle_detection_ultralytics/yolov8s.pt` | 22 MB | 80 (COCO) | ⚠️ AGPL-3.0 | Ultralytics |
+| YOLOv8m COCO | `vehicle_detection_ultralytics/yolov8m.pt` | 50 MB | 80 (COCO) | ⚠️ AGPL-3.0 | Ultralytics |
+| YOLO11n COCO | `vehicle_detection_ultralytics/yolo11n.pt` | 5.4 MB | 80 (COCO) | ⚠️ AGPL-3.0 | Ultralytics |
+| YOLO11s COCO | `vehicle_detection_ultralytics/yolo11s.pt` | 19 MB | 80 (COCO) | ⚠️ AGPL-3.0 | Ultralytics |
+| YOLO11m COCO | `vehicle_detection_ultralytics/yolo11m.pt` | 39 MB | 80 (COCO) | ⚠️ AGPL-3.0 | Ultralytics |
 | YOLO26 vehicle | `vehicle_detection_yolo26/weights/best.pt` | 42 MB | car | — | [rujutashashikanjoshi/yolo26-testA-vehicle-detection](https://huggingface.co/rujutashashikanjoshi/yolo26-testA-vehicle-detection-4931_full-100m) |
 | Highway vehicle | `highway_vehicle_detection/weights/best.pt` | 50 MB | vehicles | MIT | [vietnguyennn0705/highway-vehicle-detection](https://huggingface.co/vietnguyennn0705/highway-vehicle-detection) |
 | YOLOX-Traffic nano | `traffic_yolox_nano/traffic_yolox_nano.onnx` | 3.6 MB | traffic | — | Wayne1227/traffic_yolox_nano |
@@ -207,6 +207,8 @@ No open-source pretrained model exists for safety shoes detection/classification
 ## Quick Reference: Best Model Per Use Case
 
 > Updated 2026-04-17 based on val-split benchmark results. See each feature's `CLAUDE.md` for full tables.
+>
+> **Benchmark methodology**: every `val mAP50` in this section was produced by `uv run features/<feature>/code/benchmark.py --split val` and persisted to `features/<feature>/eval/benchmark_results.json`. mAP follows the COCO standard at IoU=0.50. To reproduce or refresh, re-run the benchmark for the relevant feature.
 
 ### For Fine-Tuning (start from these weights)
 

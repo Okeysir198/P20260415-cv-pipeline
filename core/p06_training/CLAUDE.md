@@ -72,6 +72,8 @@ fast at the top of `train_with_hf` rather than silently degrading.
 
 Every training run produces a uniform per-run artifact tree — no per-config opt-in. Driven by `post_train.run_post_train_artifacts` + `core/p08_evaluation/error_analysis_runner.run_error_analysis`.
 
+> **`error_analysis_conf_threshold` is per-arch auto-defaulted** — `run_post_train_artifacts` resolves it from `model.output_format` when no explicit value is passed: **0.05 for DETR-family / HF detection** (RT-DETRv2, D-FINE produce TPs in the 0.05–0.20 range), **0.25 for YOLOX** (scores are `obj_sigmoid * cls_sigmoid`, FPs flood at 0.05). Override per-config via `training.post_train.error_conf_threshold` only when ops calibration requires it. Without this split, `error_analysis/summary.md` shows baseline mAP=0 even when `test_results.json` reports a healthy mAP50. Full incident detail in the Gotchas section below.
+
 ```
 runs/<ts>/
 ├── data_preview/               (on_train_start, ~2 s total — task-aware for det/cls/seg/kpt)

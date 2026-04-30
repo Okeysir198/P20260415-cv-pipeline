@@ -87,9 +87,11 @@ Shared 20% smoke recipe used by every Phase-B detection feature CLAUDE.md (fall,
 
 **Goal:** Sanity-check each arch can learn on the dataset. 20% train + 20% val (full test) × {YOLOX-M, RT-DETRv2-R50, D-FINE-M}.
 
+**Baseline PASS threshold** — an arch passes Phase B when val mAP@0.5 exceeds **max(2× pretrained baseline mAP, 0.20)**. The `0.20` floor handles features with near-zero pretrained baselines (`ppe-shoes_detection`, `safety-poketenashi_phone_usage`); the 2× rule otherwise prevents marginal "any improvement" runs from advancing.
+
 **PASS criteria (all 4 must hold):**
 1. `train/loss` drops >= 50% between epoch 1 and final epoch (no divergence, no NaN)
-2. `val mAP@0.5` exceeds the pretrained baseline (or > 0.05 if no usable baseline exists)
+2. `val mAP@0.5` exceeds the baseline threshold above
 3. Confusion matrix diagonal > 0.5 for each class (no class collapse)
 4. `error_breakdown.png` shows FP mix != 100% background
 

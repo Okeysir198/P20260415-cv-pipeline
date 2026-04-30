@@ -69,6 +69,20 @@ Microservices for the camera_edge pipeline. Three services work together for gen
 | `s18105_annotation_quality_assessment/` | 18105 | No | Annotation QA orchestrator — structural validation + SAM3 verification + optional VLM via Ollama (:11434) REST API (CPU-only) |
 | `s18103_label_studio/` | 18103 | No | Label Studio — annotation review UI (independent) |
 
+### SAM3 vs SAM3.1 — when to pick which
+
+| Capability | SAM3 (`:18100`) | SAM 3.1 (`:18106`) |
+|---|---|---|
+| Image endpoints | `/segment_box`, `/segment_text`, `/auto_mask` | same + `/segment_text_batch`, `/auto_mask_batch` |
+| Video session API | ✓ | ✓ |
+| Multi-object tracking | sequential (per-object loop) | **Object Multiplex** — parallel, ~7× throughput on H100 (less on smaller GPUs; benchmark before assuming) |
+| Endpoints | 9 | 11 |
+| Pick when… | single-object tracking, low fan-out, broad model parity | tracking ≥ 8 objects per frame, batch text segmentation, throughput-bound |
+
+### Health endpoint convention (heads-up)
+
+Most services expose `GET /health`; **Flux NIM uses `GET /v1/health/ready`** (NIM container convention, not configurable). Treat them as different shapes when scripting health checks.
+
 ## SAM3 Endpoints
 
 SAM3 (s18100) and SAM 3.1 (s18106) expose the same endpoint signatures. SAM 3.1 is available at port 18106 and adds `POST /segment_text_batch` and `POST /auto_mask_batch` dedicated batch endpoints. Use s18106 when tracking many objects simultaneously — Object Multiplex gives ~7x throughput improvement.

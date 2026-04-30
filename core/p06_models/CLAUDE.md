@@ -22,7 +22,7 @@ Separate registries (see `core/CLAUDE.md` for the full table):
 
 ## Paddle is not in this registry
 
-Paddle archs (PicoDet, PP-YOLOE, …) deliberately live outside this directory in `core/p06_paddle/`. They drive upstream `ppdet.engine.Trainer` directly inside `.venv-paddle/`; convergence with the rest of the pipeline happens at ONNX. There is no torch ↔ paddle tensor bridge.
+Paddle archs (PicoDet, PP-YOLOE) live in `core/p06_paddle/` and run in `.venv-paddle/`. See `core/p06_paddle/CLAUDE.md`.
 
 ## Pretrained weight sanity check
 

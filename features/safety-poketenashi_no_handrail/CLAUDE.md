@@ -68,7 +68,26 @@ from the umbrella) plus a DWPose pose backend and a per-frame orchestrator.
 Frame ingestion → person detector (YOLO11n at `pretrained/access-zone_intrusion/yolo11n.pt`) → top-down crop → DWPose ONNX (shared at `pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx`) → COCO-17 keypoints → `HandrailDetector` (with site-configured zone polygons) → triggered flag → event sink.
 
 ### Site polygon required
-This rule is disabled until `handrail_zones:` is populated in `configs/10_inference.yaml`. Polygons are image-normalized [0,1] coordinates; one polygon per visible handrail in the camera frame. Draw them during install using whatever zone-annotation tool the site uses (the same one used for `access-zone_intrusion`).
+This rule is disabled until `handrail_zones:` is populated in `configs/10_inference.yaml`. Polygons are image-normalized [0,1] coordinates; one polygon per visible handrail in the camera frame.
+
+**Polygon SOP** (do this before any robustness run):
+
+1. Open the sample clip; pause on a frame where the handrail is fully visible.
+2. Read off pixel coords of the handrail's bounding outline (e.g. for a 1280×720 frame, a left-side rail running diagonally might be at pixels `(450, 720) → (520, 720) → (660, 100) → (590, 100)`).
+3. Divide each `(x, y)` by `(W, H)` to normalize: `(450/1280, 720/720) → (0.352, 1.000)`.
+4. Append to `eval/ground_truth.json` under the video's `handrail_zones_norm: [...]` (a list of polygons, each a list of `[x, y]` pairs).
+5. Add `violation_windows: [[t_start_s, t_end_s], ...]` for stair sections where the actor is *not* touching any rail.
+
+Minimal example for a 1280×720 frame with one left-rail polygon:
+```json
+{
+  "video": "03_TE_no_handrail.mp4",
+  "handrail_zones_norm": [[[0.352, 1.000], [0.406, 1.000], [0.516, 0.139], [0.461, 0.139]]],
+  "violation_windows": [[2.5, 5.8]]
+}
+```
+
+After editing, re-run `code/eval_robustness.py`. Use the same zone-annotation tool that `access-zone_intrusion` uses if you prefer drawing over hand-coding.
 
 ### When to enable ByteTrack
 Enable when multiple workers can ascend the stairs simultaneously and you need per-worker compliance logging. Otherwise the per-frame check is enough. Wire via `VideoProcessor(enable_tracking=True, tracker_config=cfg["tracker"])` — see `core/p10_inference/video_inference.py:166-172`.
