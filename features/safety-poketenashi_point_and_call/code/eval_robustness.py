@@ -80,10 +80,17 @@ def _process_video(
     windows: list[list[float]],
     approach_zone_norm: list[list[float]] | None = None,
     cross_zone_norm: list[list[float]] | None = None,
+    matcher_overrides: dict | None = None,
 ) -> dict:
     o = PointAndCallOrchestrator(_CONFIG)
     if approach_zone_norm is not None or cross_zone_norm is not None:
         o.set_zones(approach_zone_norm, cross_zone_norm)
+    # Per-video matcher overrides — allows e.g. setting
+    # `min_distinct_directions: 1` on a video whose actor performs a
+    # single-direction gesture without re-tuning the global YAML.
+    if matcher_overrides:
+        o._seq_kwargs.update(matcher_overrides)
+        o._matchers.clear()  # rebuild lazily with new kwargs
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return {"error": "could not open video"}
@@ -250,6 +257,7 @@ def main() -> None:
             name, path, windows,
             approach_zone_norm=meta.get("approach_zone_norm"),
             cross_zone_norm=meta.get("cross_zone_norm"),
+            matcher_overrides=meta.get("matcher_overrides"),
         )
         v = per_video[name]
         if "error" not in v:
