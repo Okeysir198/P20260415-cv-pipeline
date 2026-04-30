@@ -17,7 +17,7 @@
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi_phone_usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |
-| `safety-poketenashi_point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🟢 v1.6 F1=0.737 (P=0.636, R=0.875), Δ +0.634 vs baseline 0.103, 2026-04-29 — 7.2× baseline, per-section polygons landed |
+| `safety-poketenashi_point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🟢 v1.7 F1=0.778 (P=0.700, R=0.875), Δ +0.675 vs baseline 0.103, 2026-04-30 — 7.6× baseline, ankle-keypoint foot-point |
 | `safety-poketenashi_hands_in_pockets` | Pose rule | 🔧 Pretrained only | dwpose_384_pose | — | 🟢 baseline F1=0.800 (2026-04-29) — at v1.2 target |
 | `safety-poketenashi_stair_diagonal` | Pose rule (stateful) | 🔧 Pretrained only | dwpose_384_pose | — | 🟢 v1.1 F1=1.000 (2026-04-29) — sub-pixel-jitter FP gate added |
 | `safety-poketenashi_no_handrail` | Pose rule + zone | 🔧 Pretrained only | dwpose_384_pose | — | 🟡 BLOCKED — eval needs handrail polygons annotated per video |

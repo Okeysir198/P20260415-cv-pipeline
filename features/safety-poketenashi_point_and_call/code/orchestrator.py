@@ -272,10 +272,23 @@ class PointAndCallOrchestrator:
 
             track_id = track_ids[sample_idx] if sample_idx < len(track_ids) else 0
 
-            # Zone-FSM update: foot point at bottom-center of the person box.
-            # Stays in APPROACHING (rule armed) when no approach polygon is
-            # configured — backward-compat for sample videos without polygons.
-            foot_xy = (float((box[0] + box[2]) * 0.5), float(box[3]))
+            # Zone-FSM update: foot point computed from COCO-17 ankle keypoints
+            # (indices 15 / 16) when their scores are valid; falls back to the
+            # box bottom-center when ankles aren't visible. Using ankles instead
+            # of box-bottom prevents an actor whose torso is high in the frame
+            # (e.g. on stairs) from registering as "in" a polygon drawn for the
+            # actor's standing position. This was the cause of POKETENASHI's
+            # t=132.6 FP on the v1.6 baseline.
+            l_ank, r_ank = scores[15], scores[16]
+            if l_ank >= 0.3 and r_ank >= 0.3:
+                foot = 0.5 * (kpts[15] + kpts[16])
+            elif l_ank >= 0.3:
+                foot = kpts[15]
+            elif r_ank >= 0.3:
+                foot = kpts[16]
+            else:
+                foot = np.array([(box[0] + box[2]) * 0.5, box[3]], dtype=np.float32)
+            foot_xy = (float(foot[0]), float(foot[1]))
             fsm = self._get_zone_fsm(track_id)
             zone_state = fsm.update(foot_xy, w, h)
             res.debug_info["zone_state"] = zone_state
