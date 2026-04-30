@@ -223,6 +223,8 @@ class HandsInPocketsPredictor:
         self._rule = HandsInPocketsDetector(
             wrist_below_hip_ratio=float(rule_cfg.get("wrist_below_hip_ratio", 0.05)),
             wrist_inside_torso_margin=float(rule_cfg.get("wrist_inside_torso_margin", 0.08)),
+            elbow_inside_torso_margin=float(rule_cfg.get("elbow_inside_torso_margin", 0.7)),
+            require_both_sides=bool(rule_cfg.get("require_both_sides", False)),
         )
 
     # ------------------------------------------------------------------
