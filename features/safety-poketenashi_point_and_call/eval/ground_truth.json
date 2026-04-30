@@ -32,7 +32,8 @@
       "gesture_windows": [[158.0, 175.0]],
       "approach_zone_norm": [[0.78, 0.4], [1.0, 0.4], [1.0, 0.95], [0.78, 0.95]],
       "cross_zone_norm": [],
-      "notes": "Full SPKEPCMWI source. SHI demonstration t=158-175 — debug CSV showed the SHI actor's hip is at normalized x≈0.93 (FAR RIGHT, not left as initially assumed; the earlier t=162 sample frame showed forklift+worker but the foreground worker performing the gesture was on the right out of the visible-thumbnail frame). NA-section forklift driver at t=117 has hip at x≈0.43 (center). Recap-card portraits at t=204+ are at x≈0.55. Right-side polygon catches the SHI actor and excludes both the NA forklift and the recap cards."
+      "matcher_overrides": {"min_distinct_directions": 1},
+      "notes": "Full SPKEPCMWI source. SHI demonstration t=158-175 — debug CSV showed the SHI actor's hip is at normalized x≈0.93 (FAR RIGHT, not left as initially assumed). The actor in this clip performs single-direction shisa-kanko (only `point_left` labels in the 17 s window — 0 right, 0 front), so `matcher_overrides.min_distinct_directions: 1` lets the FSM-armed match fire on a single sustained direction in this video without changing the global default."
     },
     "POKETENASHI_autotech_indonesia_senam.mp4": {
       "gesture_windows": [[85.0, 95.0]],
