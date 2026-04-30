@@ -3,11 +3,27 @@
   "videos": {
     "01_PO_hands_in_pockets.mp4": {
       "violation_windows": [[3.0, 22.0]],
-      "notes": "PO (POKETENASHI) section: actor walks across the workshop with both hands in pockets. Initial 0–3 s is approach (hands not yet in pockets); from ~3 s onward both hands are clearly stuffed in front trouser pockets through the end. Visual cue: wrists invisible below the belt line, elbows bent forward."
+      "notes": "PO (POKETENASHI) section: actor walks across the workshop with both hands in pockets. Initial 0–3 s is approach (hands not yet in pockets); from ~3 s onward both hands are clearly stuffed in front trouser pockets through ~22 s. Clip ends with a tripping/contrast scene at t=24-26 s — the actor demonstrates what happens when hands are FREE (reaching for a pole as he stumbles), so [22, 26] is a deliberate true negative."
     },
     "PO_hands_in_pockets_spkepcmwi.mp4": {
       "violation_windows": [[2.0, 22.0]],
       "notes": "SPKEPCMWI variant of the same PO behavior demo. Different actor / location but the same posture: hands buried in front pockets while walking. Brief setup at the start, then sustained violation. Refine if a closer review shows the actor pulling a hand out mid-clip."
+    },
+    "POKETENASHI_anzen_daiichi_lecture.mp4": {
+      "violation_windows": [],
+      "notes": "Lecturer at podium presenting Poketenashi rules. Hands gesture at face level throughout — never goes near pockets. Pure true negative for hands_in_pockets. Same source the point_and_call feature uses as a TN; reused here via symlink."
+    },
+    "shisa_kanko_railway_toyota.mp4": {
+      "violation_windows": [],
+      "notes": "Railway / Toyota workers performing shisa-kanko (point-and-call). Arms are extended pointing at signals — hands clearly NOT in pockets. Hard true negative: same body geometry rules (wrist relative to hip) but unambiguously visible hands."
+    },
+    "shisa_kanko_promotion_method.mp4": {
+      "violation_windows": [],
+      "notes": "Japanese promotional video showing continuous shisa-kanko demonstrations. Hands actively pointing throughout. Hard true negative."
+    },
+    "POKETENASHI_autotech_indonesia_senam.mp4": {
+      "violation_windows": [],
+      "notes": "Group calisthenics / SENAM demo. Workers performing exercise routines with arms in various positions but never with hands stuffed in pockets. True negative — also a hard one because workers periodically hold arms low with wrists near hip line during exercise transitions."
     }
   }
 }
