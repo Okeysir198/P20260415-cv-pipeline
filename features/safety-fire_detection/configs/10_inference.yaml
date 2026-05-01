@@ -4,18 +4,27 @@
 
 model:
   weights: ../runs/best.pt     # relative to this file
-  conf: 0.25
+  # F1-optimal threshold for RT-DETRv2 fire/smoke (verified 2026-05-01 via
+  # scripts/threshold_sweep.py on no-normalize seed=42 checkpoint).
+  # At 0.075: fire F1=0.734 (P=0.79 R=0.69), smoke F1=0.433 (P=0.53 R=0.37).
+  # Default 0.05 floods FPs (smoke had 2608 FPs vs 552 at 0.075).
+  # DETR sigmoid scores cap around 0.2 — do not raise above 0.10 or recall collapses.
+  conf: 0.075
   iou: 0.45
 
 alerts:
-  confidence_thresholds: {fire: 0.6, smoke: 0.6}
+  # Alert-time thresholds applied after detection. Tighter than `model.conf`
+  # to reduce false alarms downstream. For DETR the dynamic range is small —
+  # 0.10 means "high-confidence detection" relative to the detector's 0.075
+  # operating point.
+  confidence_thresholds: {fire: 0.10, smoke: 0.10}
   frame_windows: {}
   window_ratio: 0.8
   cooldown_frames: 90
 
 tracker:
   type: bytetrack
-  track_activation_threshold: 0.25
+  track_activation_threshold: 0.10   # match detector op point (was 0.25)
   lost_track_buffer: 30
   minimum_iou_threshold: 0.1
   frame_rate: 30

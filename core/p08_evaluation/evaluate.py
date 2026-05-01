@@ -396,8 +396,10 @@ def main() -> None:
                         help="Confidence threshold (default: 0.5).")
     parser.add_argument("--iou", type=float, default=0.5,
                         help="IoU threshold for NMS and matching (default: 0.5).")
-    parser.add_argument("--batch-size", type=int, default=16,
-                        help="Batch size for inference (default: 16).")
+    parser.add_argument("--batch-size", type=int, default=4,
+                        help="Batch size for inference (default: 4 — kept low "
+                             "to avoid OOM on DETR-family eval; raise for "
+                             "lighter models if VRAM allows).")
     parser.add_argument("--device", type=str, default=None,
                         help="Device string, e.g. 'cuda:0' (default: auto).")
     parser.add_argument("--save-dir", type=str, default=None,

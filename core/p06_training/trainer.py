@@ -371,17 +371,24 @@ class DetectionTrainer:
         # Quick val: apply val_subset_fraction when val_full_interval is active
         val_full_interval = self._train_cfg.get("val_full_interval", 0)
         val_subset_fraction = self._train_cfg.get("val_subset_fraction", 0.2)
+        eval_bs = self.config.get("data", {}).get("eval_batch_size")
         if val_full_interval > 0 and val_subset_fraction is not None:
             quick_config = copy.deepcopy(self.config)
             quick_config.setdefault("data", {}).setdefault("subset", {})["val"] = (
                 val_subset_fraction
             )
+            if eval_bs is not None:
+                quick_config["data"]["batch_size"] = eval_bs
             val_loader = build_fn(
                 data_config, split="val", training_config=quick_config, base_dir=base_dir
             )
         else:
+            val_config = self.config
+            if eval_bs is not None:
+                val_config = copy.deepcopy(self.config)
+                val_config.setdefault("data", {})["batch_size"] = eval_bs
             val_loader = build_fn(
-                data_config, split="val", training_config=self.config, base_dir=base_dir
+                data_config, split="val", training_config=val_config, base_dir=base_dir
             )
 
         self._loaded_data_cfg = data_config
@@ -393,6 +400,9 @@ class DetectionTrainer:
         data_config, base_dir, build_fn = self._get_data_components()
         full_config = copy.deepcopy(self.config)
         full_config.setdefault("data", {}).setdefault("subset", {})["val"] = None
+        eval_bs = self.config.get("data", {}).get("eval_batch_size")
+        if eval_bs is not None:
+            full_config["data"]["batch_size"] = eval_bs
         return build_fn(data_config, split="val", training_config=full_config, base_dir=base_dir)
 
     def _build_callbacks(self) -> CallbackRunner:
@@ -1048,7 +1058,9 @@ class DetectionTrainer:
         )
         return DataLoader(
             ds,
-            batch_size=data_cfg_yaml.get("batch_size", 8),
+            batch_size=data_cfg_yaml.get(
+                "eval_batch_size", data_cfg_yaml.get("batch_size", 8)
+            ),
             shuffle=False,
             num_workers=data_cfg_yaml.get("num_workers", 2),
             pin_memory=True,

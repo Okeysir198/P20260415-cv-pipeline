@@ -39,7 +39,7 @@ dispatcher (`_build_datasets`) and post-train callbacks branch on this.
 | `training.amp` | ✓ | validator **hard-errors** if True for detection |
 | `training.patience` | ✓ | `EarlyStoppingCallback` |
 | `training.ema` | ✓ | native `EMACallback` wrapping our `ModelEMA` — swaps weights in/out around each eval |
-| `training.gpu_augment` | ✗ | HF Trainer uses its own DataLoader; warning emitted. Use `augmentation.library: albumentations` for CPU-aug speed parity (~2× faster than torchvision v2) |
+| `training.gpu_augment` | ✗ | HF Trainer uses its own DataLoader; warning emitted. Both `augmentation.library` options run on CPU under HF — torchvision v2 is the recommended default (parity with albumentations after the 2026-04-20 resize-first reorder; see fire RT-DETR config notes) and additionally supports Mosaic / MixUp / CopyPaste / IRSimulation |
 | `training.val_full_interval` | partial | HF evaluates every epoch by default; this knob is effectively ignored |
 | `data.subset.{train,val}` | ✓ | wraps in `torch.utils.data.Subset` with deterministic seed |
 | `augmentation.library: albumentations` | ✓ | fast CPU aug backend with probability-gated transforms |

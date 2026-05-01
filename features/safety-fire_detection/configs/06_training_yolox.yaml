@@ -31,6 +31,7 @@ model:
 data:
   dataset_config: 05_data.yaml
   batch_size: 16
+  eval_batch_size: 4         # capped to avoid OOM during HF/pytorch eval (val + final test)
   num_workers: 4             # Mosaic does 4 disk reads/sample — reference recipe
   prefetch_factor: 4         # smooths Mosaic I/O spikes
   pin_memory: true

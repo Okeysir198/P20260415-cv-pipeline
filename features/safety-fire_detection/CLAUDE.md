@@ -2,16 +2,59 @@
 
 **Type:** Detection | **Training:** Fine-tune required (fire/smoke not in COCO 80)
 
+## 🔥 Findings (2026-04-30 / 05-01) — must-read before retraining
+
+Three load-bearing facts that the prior Phase B/C history below does NOT reflect:
+
+1. **Dataset had ~50% cross-split leakage** — pHash analyzer flagged 74,707 cross-split
+   pairs (train↔val, train↔test). Caused by Roboflow split-after-augmentation
+   (`*.rf.<hash>.jpg` siblings across splits) + true near-duplicate frames. Fixed via
+   `scripts/dedup_split.py` (group-aware stratified re-split at hamming ≤ 4).
+   Old leaked dataset preserved at `dataset_store/training_ready/fire_detection_legacy_leaked/`.
+   Honest val mAP@0.5 dropped from inflated 0.690 → 0.580 post-dedup.
+
+2. **ImageNet normalization HURTS this dataset** — fire imagery mean=[0.392, 0.360, 0.340]
+   is ~10% darker than ImageNet's [0.485, 0.456, 0.406], std ~20% wider. Setting
+   `tensor_prep.normalize: false` lifted test mAP@0.5 from 0.320 → 0.409 (+0.089) and
+   train mAP from 0.65 → 0.72. Fire-specific stats normalize works similarly. Current
+   config default is `normalize: false`. Single seed=0 confirmation: test mAP 0.375
+   (still beats ImageNet-norm baseline 0.320).
+
+3. **F1-optimal inference threshold = 0.075** (not the default 0.05). DETR sigmoid scores
+   cap ~0.2, so 0.05 floods FPs. At 0.075: smoke F1 0.36 → 0.43 (+0.07), fire F1 0.68 →
+   0.73 (+0.05). Updated in `10_inference.yaml`. Sweep tool: `scripts/threshold_sweep.py`.
+
+### What did NOT help (don't re-test)
+- `box_noise_scale` sweep (0.5/1.0/1.5/2.0) — all within ±0.03 on val, monotonically
+  worse on test as noise increases beyond 1.0. HF default 1.0 wins on test mAP.
+- Removing all aug — smoke val AP 0.18 → 0.12. Aug helps generalization, doesn't hurt smoke.
+- EMA + patience=20 alone (without normalize fix) — val 0.526, worse than no-normalize (0.580).
+- Reduced aug (HSV+brightness+perspective off) — val 0.555, smoke 0.158. No breakthrough.
+
+### Smoke is the binding constraint — and it's a precision problem, not recall
+Per-class on val (no-normalize seed=42, threshold=0.075):
+- fire:  TP=84  FP=37   FN=21  →  P=0.79  R=0.69  F1=0.73
+- smoke: TP=98  FP=256  FN=79  →  **P=0.28  R=0.55  F1=0.43**
+
+Smoke recall is OK; the model **hallucinates smoke on grey/cloudy backgrounds** (256 FPs).
+232 of those FPs are at large-bbox scale → next intervention candidates: bump `eos_coef`
+(background-class weight in DETR loss) or add background-only training images. Neither
+tested yet.
+
 ## Overview
 
 Detects fire and smoke in images/video. Both classes are absent from COCO — pretrained models show low mAP (best: 0.153) confirming fine-tuning is mandatory.
 
 ## Classes
 
-| ID | Name | Train split % |
+| ID | Name | Train split % (post-dedup) |
 |---|---|---|
-| 0 | fire | 53.7% |
-| 1 | smoke | 46.3% |
+| 0 | fire  | 56.4% (boxes) / 53.7% (imgs) |
+| 1 | smoke | 43.6% (boxes) / 80.3% (imgs) |
+
+Note: most images contain BOTH classes. Val/test splits are NOT class-balanced
+post-dedup (val ~38/62 fire/smoke, test ~50/50) — structural cost of group-aware
+splitting. Per-class APs are reported separately, not weighted.
 
 ## Dataset
 

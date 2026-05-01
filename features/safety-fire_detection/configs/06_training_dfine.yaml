@@ -45,6 +45,7 @@ model:
 data:
   dataset_config: 05_data.yaml
   batch_size: 8              # reference recipe (qubvel's per_device_train_batch_size)
+  eval_batch_size: 4         # capped to avoid OOM during HF/pytorch eval (val + final test)
   num_workers: 4
   prefetch_factor: 4
   pin_memory: true

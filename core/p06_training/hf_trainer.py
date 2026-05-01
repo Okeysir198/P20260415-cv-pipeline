@@ -671,8 +671,8 @@ def _validate_hf_backend_config(config: dict, output_format: str) -> None:
         soft_warnings.append(
             "training.gpu_augment=True is ignored on the HF backend "
             "(HF Trainer uses its own DataLoader; GPU augmentation runs "
-            "only on the pytorch backend). Aug runs on CPU; set "
-            "augmentation.library='albumentations' for ~2x throughput."
+            "only on the pytorch backend). Aug runs on CPU; torchvision "
+            "v2 and albumentations are at parity on this codebase."
         )
 
     # 3) Detection-specific sanity
@@ -990,7 +990,9 @@ def _config_to_training_args(
         learning_rate=train_cfg.get("lr", 0.001),
         weight_decay=train_cfg.get("weight_decay", 0.0005),
         per_device_train_batch_size=data_cfg.get("batch_size", 16),
-        per_device_eval_batch_size=data_cfg.get("batch_size", 16),
+        per_device_eval_batch_size=data_cfg.get(
+            "eval_batch_size", data_cfg.get("batch_size", 16)
+        ),
         optim=optim_name,
         warmup_steps=warmup_steps or 0,
         warmup_ratio=warmup_ratio,

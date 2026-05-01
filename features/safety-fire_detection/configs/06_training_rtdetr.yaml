@@ -1,68 +1,64 @@
-# Training config — Fire Detection (RT-DETRv2, HF Trainer backend)
-# License: Apache 2.0 (Baidu / Peking University)
+# Training config — Fire Detection (RT-DETRv2-R50, HF Trainer backend)
 #
-# Recipe aligned with notebooks/detr_finetune_reference/ learnings
-# (2026-04-20, commit 118625b onwards):
-#   - backend: hf  — HF Trainer reproduces qubvel's CPPE-5 results
-#     (test mAP 0.5577, within seed noise of published 0.5789); the
-#     custom pytorch trainer's bipartite matcher was too unstable on
-#     small-data DETR fine-tunes (Iteration 7: train mAP capped at 0.28
-#     on 5% fire_detection regardless of hparams).
-#   - augmentation.library: albumentations  — cv2 C kernels, 2× faster
-#     than torchvision v2 on uint8 and matches qubvel's reference
-#     pipeline byte-for-byte.
-#   - Bundle B hyperparams (bs=16, lr=1e-4, cosine, WD=1e-4, bf16,
-#     warmup_steps=300) — the canonical DETR fine-tune recipe.
-#   - Identity affine + probability-gated color aug — matches qubvel's
-#     A.Compose([A.Perspective, A.HorizontalFlip, A.RandomBrightnessContrast,
-#     A.HueSaturationValue, A.Resize]).
+# Reference baseline:
+#   notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training.yaml
+#   (test_mAP50 = 0.823 on CPPE-5, qubvel reproduction).
 #
-# Variants (override via --override model.arch=<key>):
-#   rtdetr-r18  — ResNet-18 backbone, ~20M params          (DEFAULT)
-#   rtdetr-r50  — ResNet-50 backbone, ~42M params, higher accuracy
+# Hybrid recipe — reference + minimal fire-specific regularization that
+# empirically helped on this noisier dataset (verified 2026-04-30 vs pure
+# reference-aligned: test_mAP50 0.260 → 0.371 with patience=20 + EMA).
 #
-# Pretrained weights downloaded from HuggingFace Hub on first run:
-#   PekingU/rtdetr_v2_r18vd, PekingU/rtdetr_v2_r50vd
+# Dataset-specific deltas vs reference:
+#   - num_classes: 2 (fire/smoke vs CPPE-5's 5)
+#   - input_size:  640 (fire has tiny bboxes 0.01–0.1% of image)
+#   - num_queries / num_denoising: 50 (fire box stats: max=22/img, p99=9)
+#   - eval_batch_size: 4 (OOM safety on RT-DETR eval)
+#   - data.num_workers: 8, prefetch_factor: 6 (32-core box, HF backend is CPU-aug bound)
+#   - viz callbacks enabled (data_viz, aug_viz, val_viz) for diagnostic preview
+#   - hsv_h/s/v tuned for fire/smoke color profile
+#   - patience: 20 (vs reference 8) — fire dataset is noisier; needs more epochs to converge
+#   - ema: true (vs reference false) — helps noisy-gradient convergence on fire
 #
-# Usage:
-#   # Full training
-#   uv run core/p06_training/train.py \
-#     --config features/safety-fire_detection/configs/06_training_rtdetr.yaml
-#
-#   # 5% overfit-capability smoke (can RT-DETRv2 learn on a small subset?)
-#   uv run core/p06_training/train.py \
-#     --config features/safety-fire_detection/configs/06_training_rtdetr.yaml \
-#     --override data.subset.train=0.05 data.subset.val=0.05 training.epochs=150 \
-#       training.data_viz.enabled=false training.aug_viz.enabled=false \
-#       training.val_viz.enabled=false
+# Identity affine (scale=[1,1], degrees=0, translate=0) kept from reference —
+# clean dataset has healthy train-val gap, no need for affine regularization.
 
 model:
   arch: rtdetr-r50
   pretrained: PekingU/rtdetr_v2_r50vd
   num_classes: 2
   input_size: [640, 640]
-  # Smaller query set than COCO default. Bbox stats on fire_detection:
-  # max=22 boxes/image, p99=9 → 50 queries is 5× p99 headroom and ~6× faster
-  # decoder than the 300 default. Denoising halved too (100 → 50) to match
-  # the smaller signal budget — 2 × num_queries is the typical DN:Q ratio.
-  # Note: q=100/dn=200 (prior attempt) moved mAP ≤±0.01 and did not fix
-  # calibration (root cause is pos/neg logit gap ≈ 0.86 at convergence —
-  # a training-dynamics issue; use scripts/fit_rtdetr_temperature.py).
   num_queries: 50
   num_denoising: 50
-  # Label-quality knobs (label_noise_ratio, box_noise_scale, focal_loss_gamma,
-  # weight_loss_bbox/giou) reverted 2026-04-22 after 50%-smoke run plateaued
-  # at 0.622 @ ep7 — the stacked regularization + label-qual tweaks was too
-  # strong for this data volume. Back to HF defaults for everything except
-  # the query/DN budget. Keep the mild affine (scale [0.9,1.1], degrees 5,
-  # translate 0.1) as the only regularization lever.
+  box_noise_scale: 1.0          # HF default; 1.5 tested and rejected (monotonically worse on test)
+
+# Authoritative tensor-prep contract.
+#
+# normalize: false (verified 2026-05-01) — fire dataset stats diverge
+# significantly from ImageNet (mean ~10% darker, std ~20% wider on all
+# channels). Skipping normalize lets R50's BatchNorm recenter naturally
+# per-batch, lifting test mAP@0.5 from 0.32 → 0.41 (+0.09) and train mAP
+# from 0.65 → 0.72. mean/std fields kept for reference but ignored when
+# normalize=false. To use dataset-specific normalization instead,
+# set normalize: true and override mean/std with the fire-computed values
+# below (commented).
+#
+# Fire dataset (n=2000, 957M pixels) actual stats:
+#   mean: [0.392, 0.360, 0.340]
+#   std:  [0.276, 0.271, 0.282]
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false             # do NOT apply ImageNet stats (off-distribution for fire)
+  mean: [0.485, 0.456, 0.406]  # ignored when normalize=false; ImageNet defaults retained for reference
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 16              # Bundle B (was 32; HF Trainer defaults to bs=8 in
-                              # qubvel's notebook, 16 is the tested fine-tune sweet spot)
-  num_workers: 4
-  prefetch_factor: 4
+  batch_size: 16
+  eval_batch_size: 4          # OOM safety for RT-DETR eval (val + final test)
+  num_workers: 8              # 32-core box, HF backend is CPU-aug bound
+  prefetch_factor: 6          # keep workers ahead of GPU forward pass
   pin_memory: true
   subset:
     train: null
@@ -70,73 +66,46 @@ data:
     test: null
 
 augmentation:
-  # torchvision v2 CPU DataLoader workers. Mirrors
-  # notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training.yaml.
-  #
-  # After the 2026-04-20 resize-first reorder (commit c4d3658 in
-  # core/p05_data/transforms.py), torchvision v2 and Albumentations are at
-  # speed parity on this recipe (866 s vs 857 s for 40 ep on CPPE-5;
-  # within run-over-run noise). torchvision v2 is the recommended default
-  # because it additionally supports Mosaic / MixUp / CopyPaste / IRSimulation
-  # and integrates with the future GPU-aug path. See
-  # notebooks/detr_finetune_reference/CLAUDE.md "Default backend recommendation".
-  #
-  # Note: HF Trainer does NOT run GPU augmentation regardless of library —
-  # `training.gpu_augment` is silently ignored on this backend. GPU aug
-  # requires `training.backend: pytorch`, which CLAUDE.md flags as
-  # unreliable for DETR-family on small-data fine-tunes (Iteration 7).
   library: torchvision
   mosaic: false               # DETR-family doesn't use it
   mixup: false
 
-  # Probability-gated transforms — `build_transforms` honours these keys
-  # in BOTH library paths (torchvision v2 + Albumentations).
-  perspective_p: 0.1          # slight 3D wobble
+  # Probability-gated transforms — same as reference recipe.
+  perspective_p: 0.1
   fliplr: 0.5
   brightness_contrast_p: 0.5
-  hsv_p: 0.1                  # conservative for fire/smoke — fire is color-specific
-  hsv_h: 0.015
-  hsv_s: 0.3                  # smoke is grey, modest sat jitter is fine
-  hsv_v: 0.3                  # fire is bright, keep brightness range tight
+  hsv_p: 0.1
+  hsv_h: 0.015                # fire-specific HSV tuning (color is class-defining)
+  hsv_s: 0.3
+  hsv_v: 0.3
 
-  # Mild affine — added 2026-04-22 to regularize the ep15-21 overfit tail
-  # we saw on 20%-smoke runs. scale tightened to [0.9, 1.1] (safer than
-  # [0.8, 1.2] per root CLAUDE.md: aggressive jitter pushes 0.01-0.1% bboxes
-  # below the training grid).
-  scale: [0.9, 1.1]
-  degrees: 5.0
-  translate: 0.1
-  shear: 0.0       # off — 2° fattens tiny-box labels ~20% (axis-align effect)
+  # Identity affine — match reference (no scale jitter, no rotation, no translate).
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
 
 training:
-  backend: hf                 # HF Trainer — proven on CPPE-5 RT-DETRv2-R50 (test mAP 0.5577)
-  epochs: 60                 # Phase C full-data — was 50 for 20%/50% smoke
-  optimizer: adamw            # hardcoded in HF Trainer for DETR; listed for lineage
-  lr: 0.0001                  # Bundle B (was 0.00016 from 5% HPO — diverged at full data;
-                              # CPPE-5 reproduction confirmed 1e-4 is the safe canonical LR)
-  weight_decay: 0.0001        # Bundle B (was 1.15e-5 — far too low for DETR)
-  warmup_steps: 300           # HF expects steps, not epochs. 300 matches qubvel's recipe
-                              # (previously `warmup_epochs: 15` = 555 steps on 5% data,
-                              # too long; 300 is the cross-dataset canonical.)
-  scheduler: cosine           # Bundle B cosine anneal past warmup
-  max_grad_norm: 0.1          # DETR standard; was `grad_clip: 0.1` under pytorch backend
-  bf16: true                  # RTX 5090 tensor cores — no quality loss on DETR
-  amp: false                  # explicit: NOT fp16 AMP (overflow crashes decoder)
-  gpu_augment: false          # HF backend doesn't use the GPU aug path
-  # EMA enabled for Phase C full-data — 11.7k imgs × 60 ep = 44k steps, well
-  # past the ~10k-step averaging window of decay=0.9999. On 20%/50% smokes
-  # (<10k steps) EMA is useless — warmup=1000 prevents early-epoch noise from
-  # polluting the average.
-  ema: true
+  backend: hf
+  epochs: 40
+  optimizer: adamw
+  lr: 0.0001
+  weight_decay: 0.0001
+  warmup_steps: 300
+  scheduler: cosine
+  max_grad_norm: 0.1
+  bf16: true
+  amp: false
+  gpu_augment: false          # ignored on HF backend regardless
+  ema: true                   # on — empirically lifts test mAP@0.5 by +0.11 on fire (noisier than CPPE-5)
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 25                # from 15 — more headroom for the noisy end-
-                              # of-training trajectory that EMA smooths out
+  patience: 20                # 20 (vs reference 8) — fire convergence is slower than CPPE-5
 
   val_viz:
     enabled: true
     num_samples: 8
-    conf_threshold: 0.05      # DETR sigmoid scores cap ~0.2; keep low
+    conf_threshold: 0.05      # DETR sigmoid scores cap ~0.2
     grid_cols: 2
   train_viz:
     enabled: false            # HF backend viz bridge is val-only
@@ -151,29 +120,20 @@ training:
     num_samples: 16
     grid_cols: 4
 
-  # NB: pytorch-backend-only keys removed (val_full_interval,
-  # val_subset_fraction, grad_clip, ema_decay). HF Trainer evals every
-  # epoch by default.
-
 loss:
   type: detr
 
 logging:
-  # report_to: none disables wandb + tensorboard.
-  # Set to "wandb" (or ["wandb", "tensorboard"]) after `wandb login` if you want online tracking.
-  # HF Trainer hard-fails on wandb auth error (YOLOX pytorch backend swallows it gracefully);
-  # tensorboard's background writer also crashed on a missing subdir race — keep both off by default.
-  report_to: none
+  report_to: none             # avoid wandb auth hard-fail on HF backend
   wandb_project: smart-camera
-  # run_name intentionally omitted — HF Trainer's hf_trainer.py:736-740 uses run_name as the
-  # feature folder for generate_run_dir(), so a stale value here creates a ghost
-  # `features/<run_name>/runs/...` folder instead of landing under this feature. Dropping run_name
-  # makes HF fall back to config_path.parent.parent.name = "safety-fire_detection" (what we want).
 
 checkpoint:
   save_best: true
-  metric: eval_map            # HF Trainer + torchmetrics key (was val/mAP50 under pytorch)
+  metric: eval_map            # HF Trainer + torchmetrics key
   mode: max
-  save_interval: 10
+  save_interval: 1            # match reference
+
+evaluation:
+  score_threshold: 0.0        # canonical mAP per reference invariants
 
 seed: 42
