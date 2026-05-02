@@ -1,4 +1,4 @@
-# Training config — Fire Detection (RT-DETRv2-R50, HF Trainer backend)
+# Training config — Fire Detection (RT-DETRv2-R18, HF Trainer backend)
 #
 # Reference baseline:
 #   notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training.yaml
@@ -19,12 +19,12 @@
 #   - patience: 20 (vs reference 8) — fire dataset is noisier; needs more epochs to converge
 #   - ema: true (vs reference false) — helps noisy-gradient convergence on fire
 #
-# Identity affine (scale=[1,1], degrees=0, translate=0) kept from reference —
-# clean dataset has healthy train-val gap, no need for affine regularization.
+# Affine augmentation aligned with R50/YOLOX: scale=[0.8,1.2], degrees=10,
+# translate=0.1, shear=2 — benefits fire/smoke generalization.
 
 model:
-  arch: rtdetr-r50
-  pretrained: PekingU/rtdetr_v2_r50vd
+  arch: rtdetr-r18
+  pretrained: PekingU/rtdetr_v2_r18vd
   num_classes: 2
   input_size: [640, 640]
   num_queries: 50
@@ -36,9 +36,8 @@ model:
 #
 # normalize: false (verified 2026-05-01) — fire dataset stats diverge
 # significantly from ImageNet (mean ~10% darker, std ~20% wider on all
-# channels). Skipping normalize lets R50's BatchNorm recenter naturally
-# per-batch, lifting test mAP@0.5 from 0.32 → 0.41 (+0.09) and train mAP
-# from 0.65 → 0.72. mean/std fields kept for reference but ignored when
+# channels). Skipping normalize lets BatchNorm recenter naturally per-batch,
+# lifting test mAP@0.5 by ~0.09 and train mAP by ~0.07 (verified on R50). mean/std fields kept for reference but ignored when
 # normalize=false. To use dataset-specific normalization instead,
 # set normalize: true and override mean/std with the fire-computed values
 # below (commented).
@@ -74,6 +73,7 @@ augmentation:
   # Probability-gated transforms — same as reference recipe.
   perspective_p: 0.1
   fliplr: 0.5
+  flipud: 0.0
   brightness_contrast_p: 0.3    # light only — fire color is class-defining, don't over-darken
   brightness: 0.1               # ±10% (default 0.2)
   contrast: 0.1                 # ±10% (default 0.2)
@@ -105,7 +105,7 @@ training:
   ema: true                   # on — empirically lifts test mAP@0.5 by +0.11 on fire (noisier than CPPE-5)
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 20                # 20 (vs reference 8) — fire convergence is slower than CPPE-5
+  patience: 35                # bumped 20→35: last best ep7, ES was 5 epochs from firing at ep27 (2026-05-02)
 
   val_viz:
     enabled: true

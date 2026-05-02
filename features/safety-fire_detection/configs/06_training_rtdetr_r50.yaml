@@ -1,0 +1,145 @@
+# Training config — Fire Detection (RT-DETRv2-R50, HF Trainer backend)
+#
+# Reference baseline:
+#   notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training.yaml
+#   (test_mAP50 = 0.823 on CPPE-5, qubvel reproduction).
+#
+# Hybrid recipe — reference + minimal fire-specific regularization that
+# empirically helped on this noisier dataset (verified 2026-04-30 vs pure
+# reference-aligned: test_mAP50 0.260 → 0.371 with patience=20 + EMA).
+#
+# Dataset-specific deltas vs reference:
+#   - num_classes: 2 (fire/smoke vs CPPE-5's 5)
+#   - input_size:  640 (fire has tiny bboxes 0.01–0.1% of image)
+#   - num_queries / num_denoising: 50 (fire box stats: max=22/img, p99=9)
+#   - eval_batch_size: 4 (OOM safety on RT-DETR eval)
+#   - data.num_workers: 8, prefetch_factor: 6 (32-core box, HF backend is CPU-aug bound)
+#   - viz callbacks enabled (data_viz, aug_viz, val_viz) for diagnostic preview
+#   - hsv_h/s/v tuned for fire/smoke color profile
+#   - patience: 20 (vs reference 8) — fire dataset is noisier; needs more epochs to converge
+#   - ema: true (vs reference false) — helps noisy-gradient convergence on fire
+#
+# Affine augmentation aligned with YOLOX: scale=[0.8,1.2], degrees=10,
+# translate=0.1, shear=2 — benefits fire/smoke generalization.
+
+model:
+  arch: rtdetr-r50
+  pretrained: PekingU/rtdetr_v2_r50vd
+  num_classes: 2
+  input_size: [640, 640]
+  num_queries: 50
+  num_denoising: 100            # 2× num_queries (convention); training-only, no inference cost
+  box_noise_scale: 1.0          # HF default; 1.5 tested and rejected (monotonically worse on test)
+  eos_coefficient: 0.4          # 0.1→0.4: cut large-bbox FPs (77 FP vs 75 TP at large scale, 2026-05-01)
+
+# Authoritative tensor-prep contract.
+#
+# normalize: false (verified 2026-05-01) — fire dataset stats diverge
+# significantly from ImageNet (mean ~10% darker, std ~20% wider on all
+# channels). Skipping normalize lets R50's BatchNorm recenter naturally
+# per-batch, lifting test mAP@0.5 from 0.32 → 0.41 (+0.09) and train mAP
+# from 0.65 → 0.72. mean/std fields kept for reference but ignored when
+# normalize=false. To use dataset-specific normalization instead,
+# set normalize: true and override mean/std with the fire-computed values
+# below (commented).
+#
+# Fire dataset (n=2000, 957M pixels) actual stats:
+#   mean: [0.392, 0.360, 0.340]
+#   std:  [0.276, 0.271, 0.282]
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false             # do NOT apply ImageNet stats (off-distribution for fire)
+  mean: [0.485, 0.456, 0.406]  # ignored when normalize=false; ImageNet defaults retained for reference
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 16
+  eval_batch_size: 4          # OOM safety for RT-DETR eval (val + final test)
+  num_workers: 8              # 32-core box, HF backend is CPU-aug bound
+  prefetch_factor: 6          # keep workers ahead of GPU forward pass
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  mosaic: false               # DETR-family doesn't use it
+  mixup: false
+
+  # Probability-gated transforms — same as reference recipe.
+  perspective_p: 0.1
+  fliplr: 0.5
+  flipud: 0.0
+  brightness_contrast_p: 0.3    # light only — fire color is class-defining, don't over-darken
+  brightness: 0.1               # ±10% (default 0.2)
+  contrast: 0.1                 # ±10% (default 0.2)
+  hsv_p: 0.1
+  hsv_h: 0.015                # fire-specific HSV tuning (color is class-defining)
+  hsv_s: 0.3
+  hsv_v: 0.3
+
+  min_bbox_area: 4.0            # 2×2 px minimum — keep small fire/smoke for better small-object detection
+
+  # Affine augmentation — scale jitter + mild rotation + translate for fire/smoke generalisation.
+  scale: [0.8, 1.2]
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: hf
+  epochs: 60
+  optimizer: adamw
+  lr: 0.0001
+  weight_decay: 0.0001
+  warmup_steps: 500
+  scheduler: cosine
+  max_grad_norm: 0.1
+  bf16: true
+  amp: false
+  gpu_augment: false          # ignored on HF backend regardless
+  ema: true                   # on — empirically lifts test mAP@0.5 by +0.11 on fire (noisier than CPPE-5)
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+  patience: 35                # bumped 20→35: last best ep7, ES was 5 epochs from firing at ep27 (2026-05-02)
+
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.01      # DETR sigmoid scores cap ~0.2
+    grid_cols: 2
+  train_viz:
+    enabled: false            # HF backend viz bridge is val-only
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  report_to: none             # avoid wandb auth hard-fail on HF backend
+  wandb_project: smart-camera
+
+checkpoint:
+  save_best: true
+  metric: eval_map            # HF Trainer + torchmetrics key
+  mode: max
+  save_interval: 1            # match reference
+
+evaluation:
+  score_threshold: 0.0        # canonical mAP per reference invariants
+
+seed: 42

@@ -23,6 +23,17 @@ model:
   num_classes: 5
   input_size: [480, 480]
 
+# Explicit tensor_prep — suppresses auto-migration WARNING.
+# rescale=true: processor divides by 255. normalize=false: no mean/std applied
+# (same behavior as the auto-migrated default from augmentation.normalize=false).
+tensor_prep:
+  input_size: [480, 480]
+  rescale: true
+  normalize: false
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
 data:
   dataset_config: 05_data.yaml
   batch_size: 8                  # qubvel's per_device_train_batch_size
