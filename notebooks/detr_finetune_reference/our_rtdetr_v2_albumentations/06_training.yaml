@@ -76,8 +76,28 @@ training:
   gpu_augment: false             # HF Trainer reads from dataset's collate_fn output
   ema: false                     # reference doesn't use EMA
 
-  # Viz callbacks — ported to HF Trainer via `_HFVizBridge` in hf_trainer.py.
-  # Leave on; they each produce a few hundred KB of PNGs under the run dir.
+  val_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01     # DETR sigmoid scores cap ~0.2; 0.01 shows more predictions
+    grid_cols: 2
+  train_viz:
+    enabled: false           # HF backend viz bridge is val-only
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+  best_viz:
+    enabled: true            # on_train_end fires after load_best_model_at_end reload
+    num_samples: 16
+    conf_threshold: 0.01
+
 loss:
   type: detr
 

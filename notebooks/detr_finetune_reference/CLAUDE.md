@@ -52,20 +52,33 @@ CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
 
 ## Results — 6-way CPPE-5 reference reproduction (seed=42, 2026-04-23)
 
+> **Note (2026-05-02):** `our_rtdetr_v2_torchvision` and `our_dfine_torchvision` are being
+> rerun from scratch with explicit viz configs (`val_viz`, `best_viz`, `data_viz`, `aug_viz`
+> all enabled, `conf_threshold=0.01`) and a **normalize ablation**: each torchvision config
+> runs twice — once at the original setting and once with the opposite `tensor_prep.normalize`
+> value — to measure ImageNet normalization impact on CPPE-5.
+> Runs land in `runs/seed42/` (original setting) and `runs/seed42_norm_{true,false}/`.
+> Results below are from the prior run (2026-04-23) without explicit viz; will be updated
+> when the 4 new runs complete.
+
 All six `our_*/` runs were rerun sequentially on 2 GPUs (one model per GPU, 3 batches) after the observability overhaul landed. Configs use codebase defaults for every viz block (see `core/p06_training/CLAUDE.md` → "Post-train observability").
 
 ### Detection performance
 
-| Run | Backend | Arch | Epochs | Aug | test_mAP | test_mAP₅₀ |
-|---|---|---|---|---|---|---|
-| qubvel RT-DETRv2 | — | R50 | 40 | Albu basic | 0.5789 | 0.8674 |
-| qubvel D-FINE | — | dfine-large | 30 | Albu basic | 0.4485 | — |
-| **our_rtdetr_v2_torchvision** | HF | R50 | 40 | torchvision v2 | **0.5600** | **0.8231** |
-| **our_rtdetr_v2_albumentations** | HF | R50 | 40 | Albumentations | **0.5483** | **0.8264** |
-| **our_dfine_torchvision** | HF | dfine-n | 30 | torchvision v2 | **0.4532** | **0.6828** |
-| **our_dfine_albumentations** | HF | dfine-n | 30 | Albumentations | **0.4473** | **0.6778** |
-| **our_yolox_torchvision** | pytorch | yolox-m (official) | 100 | TV + Mosaic + MixUp | — | **0.8668** |
-| **our_yolox** | pytorch | yolox-m (official) | 50 | Albumentations | — | **0.7388** |
+| Run | Backend | Arch | Epochs | Aug | normalize | test_mAP | test_mAP₅₀ |
+|---|---|---|---|---|---|---|---|
+| qubvel RT-DETRv2 | — | R50 | 40 | Albu basic | true | 0.5789 | 0.8674 |
+| qubvel D-FINE | — | dfine-large | 30 | Albu basic | true | 0.4485 | — |
+| **our_rtdetr_v2_torchvision** `runs/seed42` | HF | R50 | 40 | TV | **true** | 0.5600¹ | 0.8231¹ |
+| **our_rtdetr_v2_torchvision** `runs/seed42_norm_false` | HF | R50 | 40 | TV | false | pending | pending |
+| **our_rtdetr_v2_albumentations** `runs/seed42` | HF | R50 | 40 | Albu | **false** | **0.5483** | **0.8264** |
+| **our_dfine_torchvision** `runs/seed42` | HF | dfine-n | 30 | TV | **false** | 0.4532¹ | 0.6828¹ |
+| **our_dfine_torchvision** `runs/seed42_norm_true` | HF | dfine-n | 30 | TV | true | pending | pending |
+| **our_dfine_albumentations** `runs/seed42` | HF | dfine-n | 30 | Albu | **false** | **0.4473** | **0.6778** |
+| **our_yolox_torchvision** | pytorch | yolox-m (official) | 100 | TV + Mosaic + MixUp | — | — | **0.8668** |
+| **our_yolox** | pytorch | yolox-m (official) | 50 | Albumentations | — | — | **0.7388** |
+
+¹ Prior run (2026-04-23) without explicit viz blocks; being rerun — numbers will be updated.
 
 Takeaways:
 - **RT-DETRv2-R50** is the strongest DETR recipe on CPPE-5 — inside ±0.03 of qubvel on both aug libraries. Default for Phase 2 features.
