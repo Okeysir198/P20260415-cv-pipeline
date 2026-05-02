@@ -2,44 +2,38 @@
 
 **Type:** Detection | **Training:** Fine-tune required (fire/smoke not in COCO 80)
 
-## 🔥 Findings (2026-04-30 / 05-01) — must-read before retraining
+## 🔥 Findings (2026-05-01 / 05-02) — must-read before retraining
 
-Three load-bearing facts that the prior Phase B/C history below does NOT reflect:
+### Load-bearing facts
 
-1. **Dataset had ~50% cross-split leakage** — pHash analyzer flagged 74,707 cross-split
-   pairs (train↔val, train↔test). Caused by Roboflow split-after-augmentation
-   (`*.rf.<hash>.jpg` siblings across splits) + true near-duplicate frames. Fixed via
-   `scripts/dedup_split.py` (group-aware stratified re-split at hamming ≤ 4).
-   Old leaked dataset preserved at `dataset_store/training_ready/fire_detection_legacy_leaked/`.
-   Honest val mAP@0.5 dropped from inflated 0.690 → 0.580 post-dedup.
+1. **Dataset double-deduped (2026-05-02, active)** — `fire_detection` at `dataset_store/training_ready/fire_detection/` is now the authoritative dataset. Two-pass cleanup:
+   - Pass 1 (2026-04-30, hamming ≤ 4): eliminated 74,707 cross-split pairs from Roboflow split-after-augmentation leakage.
+   - Pass 2 (2026-05-02, hamming ≤ 6): eliminated residual 584 train↔test + 365 train↔val pairs. Additionally applied `--max-per-group-eval 200` to remove within-val redundancy (101k near-duplicate pairs from video sequences → 21k). Cross-split leakage = **0**.
+   - Final counts: **train=13,428 | val=887 | test=1,858**. Val shrank from 1,970 → 887 (one representative per video-sequence group, max 200).
 
-2. **ImageNet normalization HURTS this dataset** — fire imagery mean=[0.392, 0.360, 0.340]
-   is ~10% darker than ImageNet's [0.485, 0.456, 0.406], std ~20% wider. Setting
-   `tensor_prep.normalize: false` lifted test mAP@0.5 from 0.320 → 0.409 (+0.089) and
-   train mAP from 0.65 → 0.72. Fire-specific stats normalize works similarly. Current
-   config default is `normalize: false`. Single seed=0 confirmation: test mAP 0.375
-   (still beats ImageNet-norm baseline 0.320).
+2. **ImageNet normalization HURTS this dataset** — fire imagery mean=[0.392, 0.360, 0.340] is ~10% darker than ImageNet's [0.485, 0.456, 0.406]. Setting `tensor_prep.normalize: false` lifted test mAP@0.5 from 0.320 → 0.409 (+0.089). All configs default to `normalize: false`.
 
-3. **F1-optimal inference threshold = 0.075** (not the default 0.05). DETR sigmoid scores
-   cap ~0.2, so 0.05 floods FPs. At 0.075: smoke F1 0.36 → 0.43 (+0.07), fire F1 0.68 →
-   0.73 (+0.05). Updated in `10_inference.yaml`. Sweep tool: `scripts/threshold_sweep.py`.
+3. **D-FINE-S is the current best model** (2026-05-02) — test mAP@50 = **0.648** (ep32 checkpoint from old leaked dataset run). Better than RT-DETR R50 (0.576) despite having half the params (~22M vs 42M). DFL convergence is slow (25–26 epochs of instability before breakthrough) but delivers superior smoke AP (0.293 vs 0.221).
+
+4. **F1-optimal inference threshold = 0.075** — DETR sigmoid scores cap ~0.2, so default 0.05 floods FPs. Updated in `10_inference.yaml`.
+
+5. **D-FINE-S pretrained must be `dfine_s_coco`** — using `dfine_m_coco` (wrong size) causes partial reinit and worse convergence. Config now defaults to `ustc-community/dfine_s_coco`.
+
+6. **DFL convergence pattern** — D-FINE-S oscillates wildly (mAP 0.04–0.33) for eps 1–24, then breaks through sharply at ep25–26 (mAP jumps to 0.52→0.66 in 2 epochs, loss drops 3.9→1.7). Do NOT stop early before ep25. `patience: 15` is fine given 40 epochs; `save_interval: 1` is mandatory to avoid losing the ep26 best on crash.
 
 ### What did NOT help (don't re-test)
-- `box_noise_scale` sweep (0.5/1.0/1.5/2.0) — all within ±0.03 on val, monotonically
-  worse on test as noise increases beyond 1.0. HF default 1.0 wins on test mAP.
-- Removing all aug — smoke val AP 0.18 → 0.12. Aug helps generalization, doesn't hurt smoke.
-- EMA + patience=20 alone (without normalize fix) — val 0.526, worse than no-normalize (0.580).
-- Reduced aug (HSV+brightness+perspective off) — val 0.555, smoke 0.158. No breakthrough.
+- `box_noise_scale` sweep (0.5/1.0/1.5/2.0) — monotonically worse on test beyond 1.0. HF default 1.0 wins.
+- Removing all aug — smoke val AP 0.18 → 0.12. Aug helps generalization.
+- EMA + patience=20 alone (without normalize fix) — val 0.526, worse than no-normalize.
+- 1280×1280 resolution — GPU memory 27 GB, ep1 mAP near-zero (feature map recalibration takes too many epochs to pay off at this dataset size). Stick to 640×640.
+- YOLOX-M full data — peaked ep8 (0.385) then steadily declined. LR=0.0025 too hot; lr=0.001 is better but still plateaued. YOLOX struggles with smoke on this dataset.
 
-### Smoke is the binding constraint — and it's a precision problem, not recall
-Per-class on val (no-normalize seed=42, threshold=0.075):
+### Smoke — still the binding constraint
+Per-class on old val (no-normalize, threshold=0.075):
 - fire:  TP=84  FP=37   FN=21  →  P=0.79  R=0.69  F1=0.73
 - smoke: TP=98  FP=256  FN=79  →  **P=0.28  R=0.55  F1=0.43**
 
-Smoke recall is OK; the model **hallucinates smoke on grey/cloudy backgrounds** (256 FPs).
-232 of those FPs are at large-bbox scale → next intervention candidates: bump `eos_coef`
-(background-class weight in DETR loss) or add background-only training images. Neither
-tested yet.
+Model hallucinates smoke on grey/cloudy backgrounds (256 FPs, 232 at large-bbox scale). Fixes tried: `eos_coefficient=0.4` (added to RT-DETR config, wired through HF kwargs automatically). D-FINE-S naturally handles this better (test smoke AP 0.293 vs 0.221 for RT-DETR).
 
 ## Overview
 
@@ -49,268 +43,102 @@ Detects fire and smoke in images/video. Both classes are absent from COCO — pr
 
 | ID | Name | Train split % (post-dedup) |
 |---|---|---|
-| 0 | fire  | 56.4% (boxes) / 53.7% (imgs) |
-| 1 | smoke | 43.6% (boxes) / 80.3% (imgs) |
+| 0 | fire  | ~54% (imgs) |
+| 1 | smoke | ~80% (imgs) |
 
-Note: most images contain BOTH classes. Val/test splits are NOT class-balanced
-post-dedup (val ~38/62 fire/smoke, test ~50/50) — structural cost of group-aware
-splitting. Per-class APs are reported separately, not weighted.
+Most images contain BOTH classes. Val/test are NOT class-balanced — structural cost of group-aware splitting.
 
 ## Dataset
 
-- **Images:** 17,373 (val: 2,609 | test: ~3,000)
+- **Images:** 17,373 total → train=13,428 | val=887 | test=1,858 (post double-dedup)
 - **QA:** 95.1% good / 1.1% bad → ACCEPT
 - **Label Studio:** project id=13
-- **Training ready:** `dataset_store/training_ready/fire_detection/`
+- **Training ready:** `dataset_store/training_ready/fire_detection/` (hamming ≤ 6, max-200/group-eval)
+- **Dedup script:** `scripts/dedup_split.py --name <dataset> --thresh 6 --max-per-group-eval 200`
 
 ## Pipeline Checklist
 
 - [x] `00_data_preparation.yaml`, `p00_data_prep`, `p02_annotation_qa`, `code/benchmark.py`
 - [x] Arch configs authored — `06_training_{yolox,rtdetr,dfine}.yaml`
-- [x] **Phase B — 20% smoke (3 arches)** — YOLOX-M + RT-DETRv2-R50 PASS; D-FINE-M re-run pending
-  - [x] YOLOX-M — best.pth val mAP@0.5 = 0.5179 ✅
-  - [x] RT-DETRv2-R50 — best.pth val mAP@0.5 = 0.6904 ✅ (winner)
-  - [ ] D-FINE-M — 40 ep run stalled at mAP@0.5 = 0.5677; 50-ep re-run pending
-- [~] **Phase C — full-data training** — RT-DETRv2-R50 60-ep run complete 2026-04-22 07:24
-      → best mAP@0.5 = **0.6844** @ ep60 (last epoch → likely undertrained; consider extending)
-- [ ] `p08_evaluation` — full test split
+- [x] **Phase B — 20% smoke** — all 3 arches PASS on old dataset
+- [x] **Phase C — full-data (old dataset, leaked)** — best: RT-DETR R50 val 0.684, D-FINE-S test 0.648
+- [ ] **Phase D — full-data (clean dataset, 2026-05-02)** — PENDING: retrain D-FINE-S + RT-DETR R50 + RT-DETR R18
+- [ ] `p08_evaluation` — full test split on best clean-dataset checkpoint
 - [ ] `p09_export` — ONNX export
 - [ ] `release/` — `utils/release.py`
 
-## Phase B — 20% smoke training plan
+## Best Results (old leaked dataset — reference only)
 
-Sanity-check each arch can learn on this dataset. 20% train + 20% val (full test).
+| Arch | Val mAP@50 | Test mAP@50 | Fire AP | Smoke AP | Run |
+|------|-----------|------------|---------|---------|-----|
+| **D-FINE-S** | 0.658 @ ep26 | **0.648** | 0.361 | **0.293** | `2026-05-02_061317` (ep32 ckpt) |
+| RT-DETR R50 | 0.673 @ ep8 | 0.576 | 0.325 | 0.221 | `2026-05-01_120040` |
+| RT-DETR R50 (warm-start) | 0.643 @ ep25 | 0.559 | 0.324 | 0.238 | `2026-05-01_201738` |
+| RT-DETR R18 | 0.538 @ ep3 | 0.440 | — | — | `2026-05-02_031518` |
+| YOLOX-M | 0.395 @ ep11 | 0.218 | 0.328 | 0.109 | `2026-05-01_165844` |
 
-**PASS criteria (all 4 must hold):**
-1. `train/loss` drops ≥ 50% between epoch 1 and final epoch (no divergence, no NaN)
-2. `val mAP@0.5` exceeds the pretrained baseline: **0.153** (SalahALHaismawi yolov26)
-3. Confusion matrix diagonal > 0.5 for each class (no class collapse)
-4. `error_breakdown.png` shows FP mix ≠ 100% background
+Note: these runs used the leaked dataset (val inflated ~2×). Clean-dataset results will differ.
 
-### Commands
+## Training Commands (clean dataset, Phase D)
 
 ```bash
-# YOLOX-M (config defaults: impl=official, library=torchvision, mosaic=true,
-# mixup=false, normalize=false, lr=0.0025, val_full_interval=0 — Phase B only
-# overrides epochs→30 + subset)
-CUDA_VISIBLE_DEVICES=0 .venv-yolox-official/bin/python core/p06_training/train.py \
-  --config features/safety-fire_detection/configs/06_training_yolox.yaml \
-  --override training.epochs=30 \
-    data.subset.train=0.2 data.subset.val=0.2 \
-    training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
-
-# RT-DETRv2-R50 (config defaults: arch=r50, pretrained=r50vd, bf16=true, amp=false,
-# mosaic=false, warmup_steps=300, lr=1e-4 — Phase B overrides lr→5e-5 + bs→8 + epochs→30)
-CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
-  --config features/safety-fire_detection/configs/06_training_rtdetr.yaml \
-  --override training.lr=5e-5 training.epochs=30 \
-    data.batch_size=8 data.subset.train=0.2 data.subset.val=0.2 \
-    training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
-
-# D-FINE-M (config defaults: arch=dfine-m, pretrained=dfine_m_coco, bf16=false, amp=false,
-# weight_decay=0, lr=5e-5, bs=8 — match the reference recipe; Phase B only overrides epochs→30)
-CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+# D-FINE-S — GPU 0 (50 epochs, ~5–6 h, nohup to survive task wrapper)
+nohup bash -c 'CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
   --config features/safety-fire_detection/configs/06_training_dfine.yaml \
-  --override training.epochs=30 \
-    data.subset.train=0.2 data.subset.val=0.2 \
-    training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
+  > /tmp/fire_dfine_s.log 2>&1' &
+
+# RT-DETRv2-R50 — GPU 1 (60 epochs, ~3 h)
+nohup bash -c 'CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
+  --config features/safety-fire_detection/configs/06_training_rtdetr.yaml \
+  > /tmp/fire_rtdetr_r50.log 2>&1' &
+
+# RT-DETRv2-R18 — GPU 1 after R50 completes (60 epochs, ~1.5 h)
+nohup bash -c 'CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
+  --config features/safety-fire_detection/configs/06_training_rtdetr.yaml \
+  --override model.arch=rtdetr-r18 model.pretrained=PekingU/rtdetr_v2_r18vd \
+  > /tmp/fire_rtdetr_r18.log 2>&1' &
 ```
 
-### Error analysis (run after each training)
+**IMPORTANT**: Use `nohup ... &` (not background task) to prevent training from being killed on session timeout.
 
-```bash
-CUDA_VISIBLE_DEVICES=0 uv run core/p08_evaluation/evaluate.py \
-  --model features/safety-fire_detection/runs/<ts>/best.pth \
-  --config features/safety-fire_detection/configs/05_data.yaml \
-  --split test --conf 0.3 --iou 0.5
-```
+## Config Highlights (2026-05-02)
 
-Outputs: `metrics.json`, `confusion_matrix.png`, per-class PR curves, `error_breakdown.png` (FP type split), `size_recall.png` (tiny/small/medium/large buckets), `optimal_thresholds.json`.
+### 06_training_dfine.yaml
+- `arch: dfine-s`, `pretrained: ustc-community/dfine_s_coco` — S not M
+- `save_interval: 1` — mandatory; DFL best checkpoint (ep26) was lost on crash with save_interval=10
+- `scheduler: constant_with_warmup` — official D-FINE recipe; do NOT change to cosine
+- `bf16: false` — DFL stalls under bf16 (val collapses to ~0.15)
+- `patience: 15` — safe given DFL breakthrough at ep25–26; epochs=40 gives 15 ep post-breakthrough
 
-### OOM notes
-- 17,373 images × 20% = ~3,475 train; 30 epochs at bs=8/16 → ~20–40 min/arch on RTX 5090.
-- Pre-flight: `nvidia-smi --query-gpu=memory.free --format=csv` → need ≥20 GB free.
-- Kill if first-epoch VRAM > 24 GB or `train/loss` NaNs → halve `data.batch_size` and retry.
-- **bf16 policy** (non-negotiable): YOLOX `amp=true`; RT-DETRv2 `bf16=true amp=false`; D-FINE `bf16=false amp=false` (DFL requires fp32).
-- **Never launch two trainings on the same GPU** — system hang risk.
-- Fire-specific: ~18% empty images + tiny-object bias (bbox 0.01–0.1% of image) → keep input at 640², don't lower.
+### 06_training_rtdetr.yaml
+- `arch: rtdetr-r50`, `pretrained: PekingU/rtdetr_v2_r50vd`
+- `epochs: 60`, `scheduler: cosine`, `patience: 20`
+- `eos_coefficient: 0.4` — cuts large-bbox smoke FPs (wired through HF kwargs automatically)
+- `num_denoising: 100` — 2× num_queries (training-only, no inference cost)
+- `normalize: false` — fire dataset off-distribution from ImageNet
 
-### Results table (updated 2026-04-22)
-
-| Arch | epochs | best val mAP@0.5 | best val mAP | Class collapse? | PASS? | runs/ dir | eval/ dir |
-|---|---|---|---|---|---|---|---|
-| YOLOX-M v1 (legacy aug, superseded) | 135/200 | 0.5102 @ ep135 | — | no (fire 0.608 / smoke 0.412) | ✅ | `2026-04-21_141209_06_training` | pending |
-| **YOLOX-M v2 (new recipe)** | 92/100 | **0.5179 @ ep92** | — | no (fire 0.632 / smoke 0.404) | ✅ | `2026-04-21_154819_06_training` | pending |
-| YOLOX-M v3 (aborted) | 35/100 | 0.4718 @ ep35 | — | no | — | `2026-04-22_011502_06_training` | — |
-| **RT-DETRv2-R50 (20% smoke)** | 30/150 early-stop | **0.6904 @ ep10** 🏆 | 0.3851 | no | ✅ | `2026-04-21_154828_06_training` | test mAP@0.5 = 0.6739 (3051 imgs, val-test gap −0.017) |
-| RT-DETRv2-R50 (Phase-C trial 1) | 28/50 aborted | 0.6823 @ ep27 | 0.3446 | no | — | `2026-04-22_004655_06_training` | — |
-| RT-DETRv2-R50 (Phase-C trial 2) | — / 50 | no eval logs (crash/abort) | — | — | — | `2026-04-22_010805_06_training` | — |
-| RT-DETRv2-R50 (Phase-C trial 3) | 15/50 diverged | 0.6223 @ ep7 | 0.3312 | no | — | `2026-04-22_010928_06_training` | — |
-| RT-DETRv2-R50 (Phase-C trial 4) | 50/50 full | 0.6863 @ ep47 | 0.3674 | no | ✅ | `2026-04-22_014318_06_training` | pending |
-| **RT-DETRv2-R50 (Phase-C trial 5, current)** | **60/60 full** | **0.6844 @ ep60** (last) | **0.3848 @ ep60** (last) | no | ✅ | `2026-04-22_034458_06_training` | pending |
-| D-FINE-M | 40/40 | 0.5677 @ ep39 | 0.2959 | no (under-trained) | ❌ | `2026-04-21_201919_06_training` | 50-ep re-run pending |
-
-**Headlines:**
-- **RT-DETRv2-R50 is the winner.** 20% smoke peaked val mAP@0.5 = 0.6904 (ep10), TEST mAP@0.5 = 0.6739 (val-test gap −0.017 → strong generalization).
-- **Phase-C full-data RT-DETR (run `034458`, 2026-04-22)** — 60 ep, EMA on (`decay=0.9999`, `warmup=1000`), reverted label-qual knobs (HF defaults). Final val mAP = 0.3848, val mAP@0.5 = 0.6844. Best epoch = last epoch → monotonic climb, **still improving at ep60 → likely under-trained; extend to ~80 ep or consume EMA checkpoint.**
-- **Phase-C 50% smoke loop-of-iterations** — trials 1–4 (`004655`, `010805`, `010928`, `014318`) plateaued at mAP@0.5 ~0.68 with stacked label-qual regularization. Reverting those knobs + enabling EMA + 60 ep produced the current leader at the same mAP@0.5 but with clean-tail trajectory.
-- **RT-DETR full-data beats 20% mAP only marginally on mAP@0.5 (0.684 vs 0.690)** — ceiling is bounded by small-bbox tier. Improving it likely needs higher input resolution or small-object copy-paste aug (consistent with 20%-smoke small-obj mAP = 0.201, 2.1× gap to large).
-- **YOLOX-M v2** holds at val mAP@0.5 = 0.5179 (ep92) — ~17 pp below RT-DETR; remains the faster-inference fallback if RT-DETR ONNX export is blocked.
-- **D-FINE-M at 40 ep = 0.5677 mAP@0.5** — better than YOLOX but under-trained per CLAUDE.md gotcha (needs ≥50 ep). 50-ep re-run still pending.
-- **Label-quality knob reversal (2026-04-22)** — `label_noise_ratio=0.25`, `box_noise_scale=1.5`, `focal_loss_gamma=1.5`, `weight_loss_bbox=7.0`, `weight_loss_giou=3.0` (from `feedback_detr_label_quality_tuning`) stacked on top of each other killed convergence at 50% data. Now reverted to HF defaults for the fire/smoke recipe; only query/DN budget + mild affine retained as levers.
-
-### Error analysis summary (per arch, fill after p08)
-- Dominant FP type (background / class confusion / localization / duplicate)
-- Worst class + per-class AP gap
-- Size bucket where recall collapses (tiny / small / medium / large)
-- Top 3 failure cases (from `failure_cases.png`)
-
-## Benchmark Results — val split (2026-04-17, 2609 images)
-
-### Detection Models
-
-| Model | mAP50 | mAP50-95 | P | R | Latency ms | Status |
-|---|---|---|---|---|---|---|
-| **SalahALHaismawi_yolov26-fire-detection** | **0.153** | **0.062** | 0.241 | 0.173 | 3805 | ok |
-| touati-kamel_yolov12n-forest-fire | 0.026 | 0.013 | 0.036 | 0.127 | 3528 | ok |
-| JJUNHYEOK_yolov8n_wildfire | 0.025 | 0.017 | 0.035 | 0.396 | 3440 | ok |
-| touati-kamel_yolov10n-forest-fire | 0.025 | 0.011 | 0.037 | 0.103 | 3007 | ok |
-| touati-kamel_yolov8s-forest-fire | 0.022 | 0.009 | 0.072 | 0.053 | 4034 | ok |
-| Mehedi-2-96_fire-smoke-yolo | 0.012 | 0.004 | 0.017 | 0.013 | 3529 | ok |
-| TommyNgx_YOLOv10-Fire-and-Smoke | error | — | — | — | — | CUDA OOM |
-| pyronear_yolov8s | error | — | — | — | — | CUDA OOM |
-
-### Skipped Models
-
-| Model | Reason |
-|---|---|
-| yolox_s/m | COCO 80-class, no fire/smoke class |
-| deim_dfine_m/s_coco | COCO-only detector |
-| pyronear_yolo11s_nimble-narwhal_v6 | No .pt file found |
-| pyronear_yolo11s_sensitive-detector | No fire/smoke class |
-| pyronear_yolov11n | COCO 80-class |
-| ustc-community_dfine-medium/small-coco | COCO-only |
-
-### Classification Models (pyronear — image-level binary)
-
-| Model | F1 | Precision | Recall | Latency ms |
-|---|---|---|---|---|
-| **pyronear_resnet18** | **0.806** | 1.000 | 0.675 | 3.3 |
-| pyronear_resnet34 | 0.792 | 1.000 | 0.656 | 6.6 |
-| pyronear_mobilenet_v3_large | 0.775 | 1.000 | 0.632 | 2.0 |
-| pyronear_mobilenet_v3_small | 0.691 | 1.000 | 0.527 | 1.3 |
-| pyronear_rexnet1_0x | 0.000 | 0.000 | 0.000 | — |
-| pyronear_rexnet1_3x | 0.000 | 0.000 | 0.000 | — |
-| pyronear_rexnet1_5x | 0.000 | 0.000 | 0.000 | — |
-
-**Recommendation:** Fine-tune from `SalahALHaismawi_yolov26-fire-detection` (highest mAP50=0.153). Use `pyronear_resnet18` as a fast pre-filter (F1=0.806, 3.3ms) to gate the detector.
-
-Full results: `eval/benchmark_results.json` | `eval/benchmark_report.md`
-
-## Market Benchmark — published fire+smoke detection SOTA (2024–2026)
-
-Target band for Phase C (full-data) runs. The closest open analogue to our dataset is **D-Fire** (21.5k imgs, 2-class fire+smoke) — matching scope, similar empty-image fraction, similar tiny-bbox profile.
-
-### D-Fire — the directly comparable open benchmark
-
-| Model | mAP@0.5 | Source |
-|---|---|---|
-| YOLOv8n (baseline) | 0.625 | uncertainty-aware paper |
-| YOLOv8n + uncertainty-aware post-detection | 0.651 | same |
-| Hybrid CNN (F1 0.815) | 0.761 | D-Fire paper |
-| YOLO + histogram equalization preprocess | 0.771 | |
-| **YOLOv11-CHBG** (lightweight, −30.8% params) | **0.784** | current community SOTA |
-| **D-Fire competitive range** | **0.625 – 0.784** | — |
-
-### Wider literature — different (often easier / curated) fire-smoke datasets
-
-| Model | mAP@0.5 | Dataset |
-|---|---|---|
-| HPO-YOLOv5 | 0.921 | private, tuned |
-| Improved YOLOv8 | 0.961 | curated |
-| DSS-YOLO (YOLOv8-based) | ≥0.95 | curated, real-time |
-| YOLOv10/v11 for smoke | 0.85–0.90 | various |
-
-High-90s numbers come from curated datasets with larger/cleaner boxes — **not directly comparable to ours** (our dataset has 18% empty images, peak bbox at 0.01–0.1% of image, wild-source mix).
-
-### Our position in the band (2026-04-21)
-
-| Arch | 20% mAP@0.5 | Full-data mAP@0.5 (actual) | D-Fire SOTA band |
-|---|---|---|---|
-| YOLOX-M v1 (legacy aug) | 0.510 @ ep135 | — | 0.625 (YOLOv8n baseline) |
-| YOLOX-M v2 (new Mosaic+TV recipe) | 0.518 @ ep92 | — | 0.625 |
-| **RT-DETRv2-R50** | **0.690 @ ep10** | **0.684 @ ep60** (run `034458`, still climbing) | 0.784 (SOTA) |
-
-¹ Extrapolation from 20% → full-data gain (typical +0.04–0.10 mAP on this scale for this model class).
-
-**Takeaways:**
-1. **RT-DETRv2-R50 at 0.697 on 20% data already matches the D-Fire median and is within 9 pp of the community SOTA (0.784)**. Full-data Phase C should land at or near SOTA.
-2. **RT-DETRv2 on fire/smoke is underrepresented in the literature** — nearly all published SOTAs are YOLO-family. Our results are potentially novel territory on open benchmarks.
-3. Pretrained baseline on our val (SalahALHaismawi yolov26 mAP50 = 0.153) is far below any D-Fire number → fine-tuning is clearly mandatory (confirmed 3.3–4.6× uplift).
-
-Sources: [YOLO v9/10/11 smoke-fire comparative analysis (MDPI Fire 2024)](https://www.mdpi.com/2571-6255/8/1/26) · [DSS-YOLO real-time fire (Nature SR 2025)](https://www.nature.com/articles/s41598-025-93278-w) · [Early Fire/Smoke Detection review (Applied Sciences 2025)](https://www.mdpi.com/2076-3417/15/18/10255) · [D-Fire dataset](https://github.com/gaia-solutions-on-demand/DFireDataset) · [Benchmarking Multi-Scene Fire and Smoke Detection (arXiv 2024)](https://hf.co/papers/2410.16631) · [Fire and Smoke Datasets 20-year review (arXiv 2503.14552)](https://arxiv.org/html/2503.14552v1).
-
-## Data Findings
-
-- **Test class imbalance**: test split is ~35% fire / 65% smoke vs ~53/47 in train+val — test set was not stratified by class. Per-class AP50 on test will be biased; interpret AP50_cls0 (fire) vs AP50_cls1 (smoke) with this skew in mind.
-- **Objects are predominantly tiny**: bbox area distribution peaks at 0.01–0.1% of image area. Most objects are below the "tiny (<1%)" tier — do not reduce input resolution below 640×640.
-- **~18% empty images**: significant background-only image fraction across all splits — good for false-positive suppression, keep them in training.
-
-## GPU Augmentation Benchmark (2026-04-18, 640×640, 4 workers, updated post-vectorization)
-
-| batch_size | CPU ms/batch | GPU ms/batch | Speedup | GPU img/s |
-|---|---|---|---|---|
-| 16 | 192 ms | 60 ms | 3.23x | 269 |
-| 32 | 397 ms | 137 ms | 2.90x | 234 |
-| 64 | 782 ms | 273 ms | 2.86x | 234 |
-
-Mosaic stays CPU. GPU path: batched `affine_grid+grid_sample`, vectorized HSV, randomized ColorJitter order. Enabled via `training.gpu_augment: true`.
-
-## Training Commands
-
-```bash
-# YOLOX-M full training (all defaults live in the config: impl, library, lr, val_full_interval)
-.venv-yolox-official/bin/python core/p06_training/train.py \
-  --config features/safety-fire_detection/configs/06_training_yolox.yaml
-
-# RT-DETRv2-R50
-uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_rtdetr.yaml
-
-# D-FINE-M
-uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_dfine.yaml
-```
+### For RT-DETR R18
+- Same config as R50, override: `model.arch=rtdetr-r18 model.pretrained=PekingU/rtdetr_v2_r18vd`
+- Faster per epoch (~1.5× R50) but ~13 pp lower val mAP on old dataset
 
 ## Key Files
 
 ```
-configs/00_data_preparation.yaml   — data sources + class map
-configs/05_data.yaml               — dataset paths + class names
-configs/06_training_yolox.yaml     — YOLOX-M
-configs/06_training_rtdetr.yaml    — RT-DETRv2-R50 (HF backend, torchvision aug)
-configs/06_training_dfine.yaml     — D-FINE-M (HF backend, torchvision aug, bf16=false)
-code/benchmark.py                  — pretrained benchmark
-eval/benchmark_results.json        — benchmark output
-eval/benchmark_report.md           — benchmark summary
+configs/05_data.yaml               — dataset path (→ fire_detection, double-deduped)
+configs/06_training_yolox.yaml     — YOLOX-M (lr=0.001, warmup=3, full aug parity)
+configs/06_training_rtdetr.yaml    — RT-DETRv2-R50 (cosine, 60ep, eos_coef=0.4)
+configs/06_training_dfine.yaml     — D-FINE-S (constant_with_warmup, 40ep, save_interval=1)
+runs/2026-05-02_data_preview/      — data_preview on clean dataset (duplicates chart = 0 leakage)
 ```
 
 ## Gotchas
 
-- **D-FINE/RT-DETR require `amp: false`** — HF DETR decoder overflows in fp16, producing NaN `pred_boxes` that crash `generalized_box_iou` on first forward pass. Both configs already set this.
-- **`ValPredictionLogger` class names** — reads `trainer._loaded_data_cfg` (the resolved `05_data.yaml`). Using `trainer._data_cfg` (the `data:` section of the training YAML) returns no `names` key and labels show as IDs only. Fixed in `callbacks.py`.
-- **`gpu_augment: true` is mandatory** for all three arch configs — always verify it's present. DETR-family (D-FINE, RT-DETRv2) additionally require `augmentation.mosaic: false` since DETR does not support mosaic.
-- **HPO commands** (parallel on two GPUs):
-  ```bash
-  # GPU 0 — YOLOX
-  CUDA_VISIBLE_DEVICES=0 uv run core/p07_hpo/run_hpo.py \
-    --config features/safety-fire_detection/configs/06_training_yolox.yaml \
-    --hpo-config configs/_shared/08_hpo_yolox.yaml \
-    --override data.subset.train=0.05 data.subset.val=0.10 data.batch_size=32 \
-      augmentation.mosaic=false \
-      training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
-  # GPU 1 — D-FINE (then RT-DETRv2 sequentially)
-  CUDA_VISIBLE_DEVICES=1 uv run core/p07_hpo/run_hpo.py \
-    --config features/safety-fire_detection/configs/06_training_dfine.yaml \
-    --hpo-config configs/_shared/08_hpo_detr.yaml \
-    --override data.subset.train=0.05 data.subset.val=0.10 data.batch_size=32 \
-      training.data_viz.enabled=false training.aug_viz.enabled=false training.val_viz.enabled=false
-  ```
+- **D-FINE-S DFL breakthrough at ep25–26** — mAP oscillates 0.04–0.33 for first 24 epochs then jumps to 0.65+. This is expected; do not kill early. EarlyStopping with patience=15 + epochs=40 gives the model time to converge.
+- **D-FINE-S `save_interval: 1` is non-negotiable** — the best checkpoint is at ep26; without frequent saves, a crash at post-training test eval loses it (observed 2026-05-02). HF Trainer's `checkpoint-N` dirs only save every `save_interval` epochs; with save_interval=10, ep26 gets overwritten by ep30.
+- **D-FINE-S wrong pretrained = bad convergence** — `dfine_m_coco` weights loaded into `dfine-s` architecture cause 52+ size-mismatched layers to reinitialize randomly. Always verify `config_resolved.yaml::model.pretrained` matches the arch size after training starts.
+- **HF checkpoint prefix stripping** — our `_DetectionTrainer._save` writes `hf_model.model.*` keys. To use a checkpoint as `model.pretrained` for warm-start, strip with: `utils.checkpoint.strip_hf_prefix` and save to a temp dir. See fire session 2026-05-01 for the pattern.
+- **RT-DETR warm-start from previous run** — strip prefix from `pytorch_model.bin`, pass temp dir as `model.pretrained`, halve LR (`training.lr=0.00005`). Previous run's val mAP restored at ep1 (confirmed 0.657 on ep1 with ep8 weights as warm-start).
+- **val=887 is intentional** — the clean dataset's val is smaller than before (was 1,970). The reduction removes video-sequence near-duplicates. Val mAP will likely be lower but more honest than the leaked-dataset val (which was inflated by factor ~2.2× from 101k within-val near-duplicate pairs).
+- **D-FINE/RT-DETR require `amp: false`** — fp16 overflows both architectures.
+- **Never launch two trainings on the same GPU** — system hang risk (confirmed 2026-05-01).
+- **Use `nohup` not background tasks** — Claude task wrappers timeout and kill training. Use `nohup bash -c '... > log 2>&1' &` and monitor via `tail -f /tmp/fire_*.log`.

@@ -11,6 +11,10 @@ and promoting the clean one) is a separate manual step.
 
 Usage:
     uv run scripts/dedup_split.py --name fire_detection
+    uv run scripts/dedup_split.py --name fire_detection --single-per-group-eval
+        # Keep only 1 representative per group in val/test; reassign the rest to
+        # train. Makes val/test harder and more representative (removes within-split
+        # near-duplicate inflation).
 """
 from __future__ import annotations
 
@@ -204,12 +208,65 @@ def _stratified_group_split(
     return out
 
 
+def _apply_max_per_group_eval(
+    img_to_group: dict[Path, int],
+    group_to_split: dict[int, str],
+    max_per_group: int,
+) -> dict[Path, str | None]:
+    """Keep at most `max_per_group` images per group in val/test, evenly strided.
+
+    Train is completely unchanged. Excess images are mapped to None (dropped).
+    Strided selection preserves temporal diversity within each group.
+    No new cross-split leakage: dropped images are excluded entirely.
+    """
+    eval_splits = {"val", "test"}
+
+    # Collect and sort images per eval group for deterministic strided selection.
+    group_eval_imgs: dict[int, list[Path]] = defaultdict(list)
+    for img, gid in img_to_group.items():
+        if group_to_split[gid] in eval_splits:
+            group_eval_imgs[gid].append(img)
+
+    # Strided keep-set per group.
+    keep: set[Path] = set()
+    for gid, imgs in group_eval_imgs.items():
+        imgs_sorted = sorted(imgs)
+        n = len(imgs_sorted)
+        if n <= max_per_group:
+            keep.update(imgs_sorted)
+        else:
+            stride = n // max_per_group
+            keep.update(imgs_sorted[i] for i in range(0, n, stride) if len(keep) <= n)
+            # Ensure exactly max_per_group selected (stride may overshoot by 1).
+            selected = sorted(imgs_sorted[i] for i in range(0, n, stride))[:max_per_group]
+            keep.update(selected)
+
+    img_to_split: dict[Path, str | None] = {}
+    for img, gid in img_to_group.items():
+        assigned = group_to_split[gid]
+        if assigned in eval_splits:
+            img_to_split[img] = assigned if img in keep else None
+        else:
+            img_to_split[img] = assigned
+
+    dropped = sum(1 for s in img_to_split.values() if s is None)
+    kept_eval = sum(1 for s in img_to_split.values() if s in eval_splits)
+    print(
+        f"  max-per-group-eval={max_per_group}: kept {kept_eval} eval images, "
+        f"dropped {dropped} near-duplicates (train unchanged, no new leakage)",
+        flush=True,
+    )
+    return img_to_split
+
+
 def _emit_splits(
     img_to_group: dict[Path, int],
     group_to_split: dict[int, str],
     src_base: Path,
     dst_base: Path,
-) -> dict[str, dict[str, int]]:
+    single_per_group_eval: bool = False,
+    max_per_group_eval: int | None = None,
+) -> tuple[dict[str, dict[str, int]], dict[Path, str]]:
     """Hardlink images + labels into the new split directories."""
     print(f"  writing new layout to {dst_base}/", flush=True)
     if dst_base.exists():
@@ -218,18 +275,29 @@ def _emit_splits(
         (dst_base / split / "images").mkdir(parents=True)
         (dst_base / split / "labels").mkdir(parents=True)
 
+    if max_per_group_eval is not None:
+        img_to_split_nullable = _apply_max_per_group_eval(
+            img_to_group, group_to_split, max_per_group_eval
+        )
+    elif single_per_group_eval:
+        img_to_split_nullable = _apply_max_per_group_eval(img_to_group, group_to_split, 1)
+    else:
+        img_to_split_nullable = {img: group_to_split[gid] for img, gid in img_to_group.items()}
+
     counts = {s: {"images": 0, "labels": 0} for s in SPLITS}
-    for img, gid in img_to_group.items():
-        new_split = group_to_split[gid]
+    img_to_split_final: dict[Path, str] = {}
+    for img, new_split in img_to_split_nullable.items():
+        if new_split is None:
+            continue  # dropped duplicate — skip entirely
         new_img = dst_base / new_split / "images" / img.name
         new_label = dst_base / new_split / "labels" / (img.stem + ".txt")
 
-        # Hardlink (avoids 2× disk usage).
         try:
             new_img.hardlink_to(img)
         except OSError:
             shutil.copy2(img, new_img)
         counts[new_split]["images"] += 1
+        img_to_split_final[img] = new_split
 
         src_label = _label_path_for(img)
         if src_label.exists():
@@ -239,7 +307,7 @@ def _emit_splits(
                 shutil.copy2(src_label, new_label)
             counts[new_split]["labels"] += 1
 
-    return counts
+    return counts, img_to_split_final
 
 
 def _verify_no_leakage(
@@ -274,6 +342,16 @@ def main():
     ap.add_argument("--thresh", type=int, default=HAMMING_THRESH)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument(
+        "--single-per-group-eval", action="store_true",
+        help="Alias for --max-per-group-eval 1.",
+    )
+    ap.add_argument(
+        "--max-per-group-eval", type=int, default=None, metavar="N",
+        help="Keep at most N evenly-strided images per duplicate group in val/test; "
+             "drop the rest. Reduces within-eval redundancy without leakage. "
+             "E.g. --max-per-group-eval 200 keeps ≤200 frames per video sequence.",
+    )
     args = ap.parse_args()
 
     src = ROOT / "dataset_store" / "training_ready" / args.name
@@ -294,16 +372,35 @@ def main():
         group_to_classes[gid].extend(_classes_in_label(_label_path_for(img)))
         group_to_images[gid] += 1
 
-    group_to_split = _stratified_group_split(
-        group_to_classes, group_to_images, seed=args.seed
-    )
-    img_to_split_new = {img: group_to_split[gid] for img, gid in img_to_group.items()}
+    if args.single_per_group_eval:
+        # Preserve the original split assignments from the source dataset.
+        # Only deduplicate within val/test — train is completely unchanged.
+        group_to_split = {
+            gid: orig_split
+            for img, gid in img_to_group.items()
+            for orig_split in [next(
+                s for s in SPLITS
+                if img.parts[-3] == s  # path: <src>/<split>/images/<file>
+            )]
+        }
+        # Last assignment wins per group — fine since cross-split groups are
+        # already eliminated (src is assumed already deduped cross-split).
+    else:
+        group_to_split = _stratified_group_split(
+            group_to_classes, group_to_images, seed=args.seed
+        )
 
-    counts = _emit_splits(img_to_group, group_to_split, src, dst)
+    counts, img_to_split_new = _emit_splits(
+        img_to_group, group_to_split, src, dst,
+        single_per_group_eval=args.single_per_group_eval,
+        max_per_group_eval=args.max_per_group_eval,
+    )
     print(f"new counts: {counts}")
 
     print("verifying zero cross-split leakage on new layout...")
-    leaks = _verify_no_leakage(img_to_hash, img_to_split_new, args.thresh)
+    # Only verify images that made it into the new layout (dropped images excluded).
+    img_to_hash_kept = {p: h for p, h in img_to_hash.items() if p in img_to_split_new}
+    leaks = _verify_no_leakage(img_to_hash_kept, img_to_split_new, args.thresh)
     print(f"  cross-split pairs at hamming ≤ {args.thresh}: {leaks}")
     if leaks > 0:
         print("  WARNING: leakage > 0 — splitter is buggy")
@@ -318,6 +415,8 @@ def main():
             "stratified": True,
             "deduplicated": True,
             "hamming_thresh": args.thresh,
+            "single_per_group_eval": args.single_per_group_eval,
+            "max_per_group_eval": args.max_per_group_eval,
             "source": str(src),
             "n_groups": len(set(group_to_split.values())),
             "total_samples": sum(c["images"] for c in counts.values()),

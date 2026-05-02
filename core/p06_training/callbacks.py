@@ -833,6 +833,13 @@ class DatasetStatsLogger(Callback):
         except Exception as e:
             logger.warning("DatasetStatsLogger: dataset stats failed — %s", e)
 
+        try:
+            from core.p08_evaluation.duplicates_leakage import run as run_duplicates
+            run_duplicates(self.data_config, out_dir, base_dir=self.base_dir)
+            logger.info("DatasetStatsLogger: duplicates/leakage chart written to %s", out_dir)
+        except Exception as e:
+            logger.warning("DatasetStatsLogger: duplicates_leakage skipped — %s", e)
+
 
 class DataLabelGridLogger(Callback):
     """Save a grid of raw images with GT labels for each configured split.

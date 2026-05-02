@@ -1326,6 +1326,17 @@ class HFDatasetStatsCallback(TrainerCallback):
             )
         except Exception as e:  # pragma: no cover
             logger.warning("HFDatasetStatsCallback failed: %s", e)
+
+        # Duplicates & cross-split leakage — runs on the full dataset dirs
+        # (not the subset) so the chart reflects the real data quality, not
+        # the sampled subset. Skipped gracefully if the image dirs are missing.
+        try:
+            from core.p08_evaluation.duplicates_leakage import run as run_duplicates
+            run_duplicates(self.data_config, out_dir, base_dir=self.base_dir)
+            logger.info("HFDatasetStatsCallback: duplicates/leakage chart written to %s", out_dir)
+        except Exception as e:  # pragma: no cover
+            logger.warning("HFDatasetStatsCallback: duplicates_leakage skipped — %s", e)
+
         return control
 
 
