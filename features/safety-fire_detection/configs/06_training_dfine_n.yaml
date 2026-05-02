@@ -110,7 +110,7 @@ loss:
 
 logging:
   report_to: none
-  save_dir: runs/dfine_n
+  save_dir: ../runs/dfine_n
   wandb_project: smart-camera
 
 checkpoint:

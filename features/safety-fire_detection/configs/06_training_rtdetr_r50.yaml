@@ -136,7 +136,7 @@ loss:
 
 logging:
   report_to: none             # avoid wandb auth hard-fail on HF backend
-  save_dir: runs/rtdetr_r50
+  save_dir: ../runs/rtdetr_r50
   wandb_project: smart-camera
 
 checkpoint:

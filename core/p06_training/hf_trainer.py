@@ -20,6 +20,7 @@ Usage:
 import os as _os
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -920,8 +921,9 @@ def _config_to_training_args(
     # Resolve output directory
     save_dir = log_cfg.get("save_dir")
     if save_dir:
-        if not Path(save_dir).is_absolute():
-            save_dir = str((config_path.parent / save_dir).resolve())
+        save_path = Path(save_dir) if Path(save_dir).is_absolute() else (config_path.parent / save_dir).resolve()
+        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        save_dir = str(save_path.parent / f"{save_path.name}_{ts}")
     else:
         # features/<name>/configs/06_training.yaml → parent.parent.name = <name>
         feature_name = config_path.parent.parent.name

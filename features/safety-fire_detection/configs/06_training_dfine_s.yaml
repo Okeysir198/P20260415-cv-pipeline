@@ -172,7 +172,7 @@ logging:
   # has also crashed on missing-subdir races. Keep off by default; flip to
   # "wandb" or ["wandb","tensorboard"] after `wandb login`.
   report_to: none
-  save_dir: runs/dfine_s
+  save_dir: ../runs/dfine_s
   wandb_project: smart-camera
   # run_name omitted — HF Trainer (hf_trainer.py:736-740) uses run_name as the
   # feature folder for generate_run_dir(), so a stale value creates a ghost

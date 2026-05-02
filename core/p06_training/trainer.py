@@ -8,6 +8,7 @@ All hyperparameters are read from YAML config — no hardcoded values.
 import copy
 import math
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -418,8 +419,9 @@ class DetectionTrainer:
 
         save_dir = self._log_cfg.get("save_dir")
         if save_dir:
-            if not Path(save_dir).is_absolute():
-                save_dir = str((self.config_path.parent / save_dir).resolve())
+            save_path = Path(save_dir) if Path(save_dir).is_absolute() else (self.config_path.parent / save_dir).resolve()
+            ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            save_dir = str(save_path.parent / f"{save_path.name}_{ts}")
         else:
             from utils.config import feature_name_from_config_path
             save_dir = str(generate_run_dir(

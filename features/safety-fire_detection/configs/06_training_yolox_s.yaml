@@ -124,7 +124,7 @@ loss:
 
 logging:
   wandb_project: smart-camera
-  save_dir: runs/yolox_s
+  save_dir: ../runs/yolox_s
   # run_name omitted — trainer derives it from the config path
 
 checkpoint:
