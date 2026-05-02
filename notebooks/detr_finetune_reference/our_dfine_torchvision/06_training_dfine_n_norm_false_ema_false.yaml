@@ -96,6 +96,6 @@ checkpoint:
   save_interval: 1
 
 evaluation:
-  score_threshold: 0.0
+  score_threshold: 0.015
 
 seed: 42
