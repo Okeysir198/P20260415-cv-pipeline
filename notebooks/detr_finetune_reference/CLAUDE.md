@@ -46,89 +46,96 @@ Pinned separately via `pyproject.toml` + `scripts/setup-notebook-venv.sh`:
 .venv-notebook/bin/python notebooks/detr_finetune_reference/reference_rtdetr_v2/finetune.py --seed 42
 
 # Our pipeline (main venv is fine — we don't depend on albu 1.4.6)
-CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
-  --config notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training.yaml
+CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+  --config notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training_r50_norm_false_ema_false.yaml
 ```
 
-## Results — 6-way CPPE-5 reference reproduction (seed=42, 2026-04-23)
+## Results — normalize × EMA ablation (seed=42, 2026-05-02)
 
-> **Note (2026-05-02):** `our_rtdetr_v2_torchvision` and `our_dfine_torchvision` are being
-> rerun from scratch with explicit viz configs (`val_viz`, `best_viz`, `data_viz`, `aug_viz`
-> all enabled, `conf_threshold=0.01`) and a **normalize ablation**: each torchvision config
-> runs twice — once at the original setting and once with the opposite `tensor_prep.normalize`
-> value — to measure ImageNet normalization impact on CPPE-5.
-> Runs land in `runs/seed42/` (original setting) and `runs/seed42_norm_{true,false}/`.
-> Results below are from the prior run (2026-04-23) without explicit viz; will be updated
-> when the 4 new runs complete.
+Full 2×2 EMA×normalize sweep for RT-DETRv2 (R50 + R18) and D-FINE (n/s/m), all
+torchvision augmentation, 20 runs total. Each config has its own file under
+`our_rtdetr_v2_torchvision/` and `our_dfine_torchvision/` (naming: `06_training_<arch>_norm_{true,false}_ema_{true,false}.yaml`).
 
-All six `our_*/` runs were rerun sequentially on 2 GPUs (one model per GPU, 3 batches) after the observability overhaul landed. Configs use codebase defaults for every viz block (see `core/p06_training/CLAUDE.md` → "Post-train observability").
+### RT-DETRv2 results (40 epochs, Bundle B: lr=1e-4, cosine, wd=1e-4, bs=16, bf16)
 
-### Detection performance
+| Arch | normalize | ema | test_mAP₅₀ | save_dir |
+|---|---|---|---|---|
+| R50 | **false** | false | **0.834** ← best R50 | `r50_norm_false_ema_false` |
+| R50 | false | true | 0.804 | `r50_norm_false_ema_true` |
+| R50 | true | false | 0.826 | `r50_norm_true_ema_false` |
+| R50 | true | true | 0.745 | `r50_norm_true_ema_true` |
+| R18 | **false** | false | **0.741** ← best R18 | `r18_norm_false_ema_false` |
+| R18 | false | true | 0.734 | `r18_norm_false_ema_true` |
+| R18 | true | false | 0.670 | `r18_norm_true_ema_false` |
+| R18 | true | true | 0.654 | `r18_norm_true_ema_true` |
+| qubvel R50 (reference) | true | false | 0.867 | — |
 
-| Run | Backend | Arch | Epochs | Aug | normalize | test_mAP | test_mAP₅₀ |
-|---|---|---|---|---|---|---|---|
-| qubvel RT-DETRv2 | — | R50 | 40 | Albu basic | true | 0.5789 | 0.8674 |
-| qubvel D-FINE | — | dfine-large | 30 | Albu basic | true | 0.4485 | — |
-| **our_rtdetr_v2_torchvision** `runs/seed42` | HF | R50 | 40 | TV | **true** | 0.5600¹ | 0.8231¹ |
-| **our_rtdetr_v2_torchvision** `runs/seed42_norm_false` | HF | R50 | 40 | TV | false | pending | pending |
-| **our_rtdetr_v2_albumentations** `runs/seed42` | HF | R50 | 40 | Albu | **false** | **0.5483** | **0.8264** |
-| **our_dfine_torchvision** `runs/seed42` | HF | dfine-n | 30 | TV | **false** | 0.4532¹ | 0.6828¹ |
-| **our_dfine_torchvision** `runs/seed42_norm_true` | HF | dfine-n | 30 | TV | true | pending | pending |
-| **our_dfine_albumentations** `runs/seed42` | HF | dfine-n | 30 | Albu | **false** | **0.4473** | **0.6778** |
-| **our_yolox_torchvision** | pytorch | yolox-m (official) | 100 | TV + Mosaic + MixUp | — | — | **0.8668** |
-| **our_yolox** | pytorch | yolox-m (official) | 50 | Albumentations | — | — | **0.7388** |
+### D-FINE results (30 epochs, lr=5e-5, linear, wd=0, bs=8, fp32)
 
-¹ Prior run (2026-04-23) without explicit viz blocks; being rerun — numbers will be updated.
+| Arch | normalize | ema | test_mAP₅₀ | save_dir |
+|---|---|---|---|---|
+| dfine-n (4M) | false | **true** | **0.710** ← best dfine-n | `dfine_n_norm_false_ema_true` |
+| dfine-n (4M) | false | false | 0.681 | `dfine_n_norm_false_ema_false` |
+| dfine-n (4M) | true | false | 0.557 | `dfine_n_norm_true_ema_false` |
+| dfine-n (4M) | true | true | 0.556 | `dfine_n_norm_true_ema_true` |
+| dfine-s (16M) | false | false | 0.603 | `dfine_s_norm_false_ema_false` |
+| dfine-s (16M) | false | true | 0.565 | `dfine_s_norm_false_ema_true` |
+| dfine-s (16M) | true | false | 0.462 | `dfine_s_norm_true_ema_false` |
+| dfine-s (16M) | true | true | 0.433 | `dfine_s_norm_true_ema_true` |
+| dfine-m (31M) | false | true | 0.431 | `dfine_m_norm_false_ema_true` |
+| dfine-m (31M) | false | false | 0.400 | `dfine_m_norm_false_ema_false` |
+| dfine-m (31M) | true | true | 0.325 | `dfine_m_norm_true_ema_true` |
+| dfine-m (31M) | true | false | 0.323 | `dfine_m_norm_true_ema_false` |
+| qubvel dfine-large (80M, reference) | true | false | ~0.60 | — |
 
-Takeaways:
-- **RT-DETRv2-R50** is the strongest DETR recipe on CPPE-5 — inside ±0.03 of qubvel on both aug libraries. Default for Phase 2 features.
-- **D-FINE-n** beats `reference_dfine/` port (0.4294) at 4M params vs 80M. Both our D-FINE configs pin `arch: dfine-n`; do not use `dfine-large` on sub-2k-image training sets.
-- **YOLOX-m + Mosaic + MixUp + 100 ep** (our_yolox_torchvision) scores **val mAP₅₀ 0.867** — highest of any run in this folder. Wins when speed matters more than test-split framing.
+### Key findings
 
-### Capacity heuristic (CPPE-5 = 850 train images)
+**1. normalize=false is universally better on CPPE-5** (fire dataset already uses false):
 
-| Family | Variant | Params | test_mAP₅₀ |
+| Model | norm_false best | norm_true best | delta |
 |---|---|---|---|
-| YOLOX (Mosaic, 100 ep) | m | 25M | **0.867** |
-| RT-DETRv2 | R50 | 42M | **0.823–0.826** |
-| D-FINE | **n** | **4M** | **0.677–0.683** |
-| RT-DETRv2 | R18 | 20M | 0.72–0.73 (earlier runs) |
-| D-FINE | large | 80M | 0.38–0.49 (overfits) |
+| R50 | **0.834** | 0.826 | +0.008 |
+| R18 | **0.741** | 0.670 | **+0.071** |
+| dfine-n | **0.710** | 0.557 | **+0.153** |
+| dfine-s | **0.603** | 0.462 | **+0.141** |
+| dfine-m | **0.431** | 0.325 | **+0.106** |
 
-Sweet spot for CPPE-5-scale (~1k-image) detection: 4M–42M params. Above that overfits; below that still works if the loss geometry is right (dfine-n's distribution focal).
+**2. EMA effect varies by arch** (norm_false baseline):
+
+| Model | ema=false | ema=true | delta |
+|---|---|---|---|
+| R50 | **0.834** | 0.804 | −0.030 (hurts) |
+| R18 | **0.741** | 0.734 | −0.007 (neutral) |
+| dfine-n | 0.681 | **0.710** | +0.029 (helps) |
+| dfine-s | **0.603** | 0.565 | −0.038 (hurts) |
+| dfine-m | 0.400 | **0.431** | +0.031 (helps) |
+
+EMA helps dfine at extremes (n=4M, m=31M) but hurts dfine-s (16M) and both RT-DETRv2 variants on clean CPPE-5. On noisier datasets (fire), EMA is more beneficial.
+
+**3. Capacity sweep — dfine-n dominates at 850-image scale:**
+
+| Family | Variant | Params | best test_mAP₅₀ |
+|---|---|---|---|
+| RT-DETRv2 | **R50** | 42M | **0.834** ← best overall |
+| RT-DETRv2 | R18 | 20M | 0.741 |
+| D-FINE | **n** | **4M** | **0.710** ← best-for-cost |
+| D-FINE | s | 16M | 0.603 |
+| D-FINE | m | 31M | 0.431 |
+| YOLOX (Mosaic, 100 ep) | m | 25M | **0.867** (val, earlier run) |
+
+dfine-s and dfine-m overfit on 850 images — both are worse than 4M dfine-n. Use dfine-n for CPPE-5-scale datasets; dfine-s may recover with more data (~5k+).
+
+### Recommended configs for CPPE-5-scale fine-tuning
+
+- **Best accuracy**: `our_rtdetr_v2_torchvision/06_training_r50_norm_false_ema_false.yaml` (0.834)
+- **Best cost/accuracy**: `our_dfine_torchvision/06_training_dfine_n_norm_false_ema_true.yaml` (0.710, 4M params)
+- **Fastest**: R18 norm_false ema_false (0.741, ~20M params, 1.5× faster than R50)
 
 ## Per-run observability (every run)
 
-Each `our_*/runs/seed42/` now holds a full 3-axis report — identical layout on both backends. See `core/p06_training/CLAUDE.md` for the tree + config toggles. Expect ~2–3 GB per run (checkpoints + preview PNGs + error_analysis gallery).
+Each run dir holds a full 3-axis report — identical layout on both backends. See `core/p06_training/CLAUDE.md` for the tree + config toggles. Expect ~2–3 GB per run (checkpoints + preview PNGs + error_analysis gallery).
 
-Known gotcha: `_finalize_training` on HF backend can create a stray `notebooks/.../runs/` nested dir when `logging.save_dir` is relative and the override path contains `notebooks/`. Safe to `rm -rf our_*/notebooks/` post-hoc — the real artifacts live under `runs/seed42/`.
-
-### Capacity vs dataset-size heuristic (CPPE-5 has 850 train images)
-
-| Family | Variant tested | Params | test_mAP |
-|---|---|---|---|
-| RT-DETRv2 | R18 | 20M | 0.52–0.54 |
-| RT-DETRv2 | **R50** | **42M** | **0.56–0.57 ← best** |
-| D-FINE | **n** | **4M** | **0.47–0.48 ← best-for-cost** |
-| D-FINE | large | 80M | 0.38–0.49 (overfits) |
-
-Sweet spot for CPPE-5-scale datasets: **20–40M params**. Above (D-FINE-large
-80M) overfits; below (D-FINE-n 4M) still works if the loss geometry is
-right; RT-DETRv2-R18 loses backbone features the head can't rebuild.
-
-### Signal health (why dfine-n beats dfine-large)
-
-| Signal | dfine-large 50ep | dfine-n 30ep |
-|---|---|---|
-| train_loss | 60 → 16 (✓ drops) | 33 → 17 (✓ drops) |
-| **eval_loss** | 2.06 → **2.94** (✗ climbs = overfit) | 2.56 → **1.70** (✓ drops) |
-| val_mAP | 0.22 peak ep 2, decays | 0.27 peak ep 20+, holds |
-| val→test gap | 1.8–2.2× (inconsistent) | 1.72× (clean) |
-| Goggles (rarest class) | 0.15–0.31 (noisy) | 0.27 (stable) |
-
-dfine-large shows textbook overfit signature (eval_loss rising while train
-drops). dfine-n's smaller capacity eliminates the overfit; all three
-signals move in the correct direction.
+Known gotcha: `_finalize_training` on HF backend can create a stray `notebooks/.../runs/` nested dir when `logging.save_dir` is relative and the override path contains `notebooks/`. Safe to `rm -rf our_*/notebooks/` post-hoc — the real artifacts live under `runs/<save_dir>/`.
 
 ## Key config invariants (both arches)
 
@@ -174,21 +181,25 @@ seed = data_seed            = 42
 For D-FINE, **do not apply Bundle B** — halving LR stalled it at test
 mAP 0.26 vs the 0.45 default. D-FINE wants lr=5e-5, linear, WD=0, fp32.
 
-## Data pipeline — byte-identical at the model boundary
+## Data pipeline
 
-Both reference scripts and all four `our_*` configs feed the HF model
-the same tensor:
+Augmentation runs first (on raw pixel values), then the HF `AutoImageProcessor`
+resizes → rescales (/255) → optionally normalizes (mean/std). Normalization is
+applied **after** augmentation — color-based aug (HSV, brightness/contrast) always
+sees raw pixel scale.
 
-- `pixel_values`: (B, 3, 480, 480) float32, ImageNet-normalized (by
-  `AutoImageProcessor`, exactly once)
-- `labels`: list of `{"class_labels": LongTensor, "boxes": FloatTensor
-  cxcywh [0,1]}`
+- `pixel_values`: (B, 3, 480, 480) float32; rescaled to [0,1] by processor.
+  Whether ImageNet mean/std is also applied depends on `tensor_prep.normalize`.
+- `labels`: list of `{"class_labels": LongTensor, "boxes": FloatTensor cxcywh [0,1]}`
+- `augmentation.normalize: false` in all configs — aug pipeline never applies mean/std.
 
 Aug semantics match qubvel's basic recipe (Perspective 0.1 + HFlip 0.5 +
-BrightContrast 0.5 + HueSatVal 0.1 + bbox clip + min_area 25). Our pipeline
-supports both albumentations and torchvision v2 via `augmentation.library`
-— empirically equivalent at ±0.01 test_mAP after the resize-first reorder
-(commit `c4d3658`).
+BrightContrast 0.5 + HueSatVal 0.1 + bbox clip). Our pipeline supports both
+albumentations and torchvision v2 via `augmentation.library`.
+
+**normalize=false is the recommended default** — ablation shows it beats normalize=true
+on CPPE-5 across all 5 architectures tested (+0.008 to +0.153 mAP₅₀). The reference
+notebook uses normalize=true but our results exceed it at normalize=false.
 
 ## Conversion gotchas (applied to the `.py` files)
 

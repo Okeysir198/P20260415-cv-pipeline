@@ -59,10 +59,10 @@ Most images contain BOTH classes. Val/test are NOT class-balanced — structural
 ## Pipeline Checklist
 
 - [x] `00_data_preparation.yaml`, `p00_data_prep`, `p02_annotation_qa`, `code/benchmark.py`
-- [x] Arch configs authored — `06_training_{yolox,rtdetr,dfine}.yaml`
+- [x] Arch configs authored — 7 configs, all consistent (2026-05-02)
 - [x] **Phase B — 20% smoke** — all 3 arches PASS on old dataset
 - [x] **Phase C — full-data (old dataset, leaked)** — best: RT-DETR R50 val 0.684, D-FINE-S test 0.648
-- [ ] **Phase D — full-data (clean dataset, 2026-05-02)** — PENDING: retrain D-FINE-S + RT-DETR R50 + RT-DETR R18
+- [ ] **Phase D — full-data (clean dataset)** — PENDING: run all 7 configs below
 - [ ] `p08_evaluation` — full test split on best clean-dataset checkpoint
 - [ ] `p09_export` — ONNX export
 - [ ] `release/` — `utils/release.py`
@@ -81,61 +81,89 @@ Note: these runs used the leaked dataset (val inflated ~2×). Clean-dataset resu
 
 ## Training Commands (clean dataset, Phase D)
 
+7 configs across 2 GPUs, all self-contained — no `--override` needed.
+All set to 80 epochs, patience=30, ema=false, normalize=false, scale=[0.9,1.1].
+**IMPORTANT**: Use `nohup ... &` — session timeouts kill background tasks.
+
 ```bash
-# D-FINE-S — GPU 0 (50 epochs, ~5–6 h, nohup to survive task wrapper)
-nohup bash -c 'CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
-  --config features/safety-fire_detection/configs/06_training_dfine.yaml \
-  > /tmp/fire_dfine_s.log 2>&1' &
+# GPU 0 — D-FINE chain: dfine-n → dfine-s → dfine-m  (~8h each, ~24h total)
+CUDA_VISIBLE_DEVICES=0 nohup bash -c '
+  set -e
+  C="features/safety-fire_detection/configs"
+  for cfg in dfine_n dfine_s dfine_m; do
+    echo ">>> STARTING: $cfg"
+    uv run core/p06_training/train.py --config $C/06_training_${cfg}.yaml
+    echo ">>> DONE: $cfg"
+  done
+' > /tmp/fire_dfine_gpu0.log 2>&1 &
+echo "GPU0 PID: $!"
 
-# RT-DETRv2-R50 — GPU 1 (60 epochs, ~3 h)
-nohup bash -c 'CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
-  --config features/safety-fire_detection/configs/06_training_rtdetr.yaml \
-  > /tmp/fire_rtdetr_r50.log 2>&1' &
-
-# RT-DETRv2-R18 — GPU 1 after R50 completes (60 epochs, ~1.5 h)
-nohup bash -c 'CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
-  --config features/safety-fire_detection/configs/06_training_rtdetr.yaml \
-  --override model.arch=rtdetr-r18 model.pretrained=PekingU/rtdetr_v2_r18vd \
-  > /tmp/fire_rtdetr_r18.log 2>&1' &
+# GPU 1 — RT-DETR + YOLOX chain: r50 → r18 → yolox_s → yolox_m  (~3h + 2h + 4h + 4h = ~13h)
+CUDA_VISIBLE_DEVICES=1 nohup bash -c '
+  set -e
+  C="features/safety-fire_detection/configs"
+  for cfg in rtdetr_r50 rtdetr_r18 yolox_s yolox_m; do
+    echo ">>> STARTING: $cfg"
+    if [[ "$cfg" == yolox* ]]; then
+      .venv-yolox-official/bin/python core/p06_training/train.py --config $C/06_training_${cfg}.yaml
+    else
+      uv run core/p06_training/train.py --config $C/06_training_${cfg}.yaml
+    fi
+    echo ">>> DONE: $cfg"
+  done
+' > /tmp/fire_rtdetr_yolox_gpu1.log 2>&1 &
+echo "GPU1 PID: $!"
 ```
 
-**IMPORTANT**: Use `nohup ... &` (not background task) to prevent training from being killed on session timeout.
+Monitor:
+```bash
+tail -f /tmp/fire_dfine_gpu0.log        # GPU 0: dfine-n/s/m
+tail -f /tmp/fire_rtdetr_yolox_gpu1.log # GPU 1: rtdetr-r50/r18 + yolox-s/m
+```
 
-## Config Highlights (2026-05-02)
+Run results land in `features/safety-fire_detection/runs/<arch>/` (e.g. `runs/dfine_n/`, `runs/rtdetr_r50/`).
 
-### 06_training_dfine.yaml
-- `arch: dfine-s`, `pretrained: ustc-community/dfine_s_coco` — S not M
-- `save_interval: 1` — mandatory; DFL best checkpoint (ep26) was lost on crash with save_interval=10
-- `scheduler: constant_with_warmup` — official D-FINE recipe; do NOT change to cosine
-- `bf16: false` — DFL stalls under bf16 (val collapses to ~0.15)
-- `patience: 15` — safe given DFL breakthrough at ep25–26; epochs=40 gives 15 ep post-breakthrough
+## Config Summary (2026-05-02, all consistent)
 
-### 06_training_rtdetr.yaml
-- `arch: rtdetr-r50`, `pretrained: PekingU/rtdetr_v2_r50vd`
-- `epochs: 60`, `scheduler: cosine`, `patience: 20`
-- `eos_coefficient: 0.4` — cuts large-bbox smoke FPs (wired through HF kwargs automatically)
-- `num_denoising: 100` — 2× num_queries (training-only, no inference cost)
-- `normalize: false` — fire dataset off-distribution from ImageNet
+All 7 configs share the same augmentation, viz, and evaluation settings.
+Only arch/pretrained and backend-specific hyperparameters differ.
 
-### For RT-DETR R18
-- Same config as R50, override: `model.arch=rtdetr-r18 model.pretrained=PekingU/rtdetr_v2_r18vd`
-- Faster per epoch (~1.5× R50) but ~13 pp lower val mAP on old dataset
+| Config | Arch | Params | Backend | epochs | patience | lr | scheduler |
+|---|---|---|---|---|---|---|---|
+| `06_training_dfine_n.yaml` | dfine-n | 4M | hf | 80 | 30 | 2.5e-4 | constant_with_warmup |
+| `06_training_dfine_s.yaml` | dfine-s | 16M | hf | 80 | 30 | 2.5e-4 | constant_with_warmup |
+| `06_training_dfine_m.yaml` | dfine-m | 31M | hf | 80 | 30 | 2.5e-4 | constant_with_warmup |
+| `06_training_rtdetr_r50.yaml` | rtdetr-r50 | 42M | hf | 80 | 30 | 1e-4 | cosine |
+| `06_training_rtdetr_r18.yaml` | rtdetr-r18 | 20M | hf | 80 | 30 | 1e-4 | cosine |
+| `06_training_yolox_s.yaml` | yolox-s | 9M | pytorch | 80 | 30 | 1e-3 | cosine |
+| `06_training_yolox_m.yaml` | yolox-m | 25M | pytorch | 80 | 30 | 1e-3 | cosine |
+
+Common to all: `normalize=false`, `ema=false`, `scale=[0.9,1.1]`, `input_size=640`,
+`save_interval=1`, `eval_batch_size=4`, `seed=42`, `score_threshold=0.01`.
+
+D-FINE invariants: `bf16=false` (mandatory), `constant_with_warmup`, `patience=30` covers DFL oscillation.
+RT-DETR invariants: `bf16=true`, `cosine`.
+YOLOX invariants: pytorch backend, sgd, `mosaic=true`, `.venv-yolox-official/`.
 
 ## Key Files
 
 ```
-configs/05_data.yaml               — dataset path (→ fire_detection, double-deduped)
-configs/06_training_yolox.yaml     — YOLOX-M (lr=0.001, warmup=3, full aug parity)
-configs/06_training_rtdetr.yaml    — RT-DETRv2-R50 (cosine, 60ep, eos_coef=0.4)
-configs/06_training_dfine.yaml     — D-FINE-S (constant_with_warmup, 40ep, save_interval=1)
-runs/2026-05-02_data_preview/      — data_preview on clean dataset (duplicates chart = 0 leakage)
+configs/05_data.yaml                  — dataset path (→ fire_detection, double-deduped)
+configs/06_training_dfine_n.yaml      — D-FINE-n  (4M,  hf, constant_warmup)
+configs/06_training_dfine_s.yaml      — D-FINE-s  (16M, hf, constant_warmup)
+configs/06_training_dfine_m.yaml      — D-FINE-m  (31M, hf, constant_warmup)
+configs/06_training_rtdetr_r50.yaml   — RT-DETRv2-R50 (42M, hf, cosine)
+configs/06_training_rtdetr_r18.yaml   — RT-DETRv2-R18 (20M, hf, cosine)
+configs/06_training_yolox_s.yaml      — YOLOX-S  (9M,  pytorch, sgd+mosaic)
+configs/06_training_yolox_m.yaml      — YOLOX-M  (25M, pytorch, sgd+mosaic)
+runs/<arch>/                          — run artifacts (e.g. runs/dfine_n/, runs/rtdetr_r50/)
 ```
 
 ## Gotchas
 
-- **D-FINE-S DFL breakthrough at ep25–26** — mAP oscillates 0.04–0.33 for first 24 epochs then jumps to 0.65+. This is expected; do not kill early. EarlyStopping with patience=15 + epochs=40 gives the model time to converge.
-- **D-FINE-S `save_interval: 1` is non-negotiable** — the best checkpoint is at ep26; without frequent saves, a crash at post-training test eval loses it (observed 2026-05-02). HF Trainer's `checkpoint-N` dirs only save every `save_interval` epochs; with save_interval=10, ep26 gets overwritten by ep30.
-- **D-FINE-S wrong pretrained = bad convergence** — `dfine_m_coco` weights loaded into `dfine-s` architecture cause 52+ size-mismatched layers to reinitialize randomly. Always verify `config_resolved.yaml::model.pretrained` matches the arch size after training starts.
+- **D-FINE DFL breakthrough at ep25–26** — mAP oscillates 0.04–0.33 for first 24 epochs then jumps sharply. Expected behavior; patience=30 gives 4+ post-breakthrough epochs before ES fires. Do not kill early.
+- **`save_interval: 1` is non-negotiable for D-FINE** — DFL best checkpoint arrives suddenly (ep26); save_interval=10 would overwrite it before post-train completes.
+- **D-FINE wrong pretrained = bad convergence** — dfine_m_coco weights in dfine-n/s architecture cause 52+ mismatched-layer reinits. Config already pins the correct pretrained per arch; verify `config_resolved.yaml::model.pretrained` after launch.
 - **HF checkpoint prefix stripping** — our `_DetectionTrainer._save` writes `hf_model.model.*` keys. To use a checkpoint as `model.pretrained` for warm-start, strip with: `utils.checkpoint.strip_hf_prefix` and save to a temp dir. See fire session 2026-05-01 for the pattern.
 - **RT-DETR warm-start from previous run** — strip prefix from `pytorch_model.bin`, pass temp dir as `model.pretrained`, halve LR (`training.lr=0.00005`). Previous run's val mAP restored at ep1 (confirmed 0.657 on ep1 with ep8 weights as warm-start).
 - **val=887 is intentional** — the clean dataset's val is smaller than before (was 1,970). The reduction removes video-sequence near-duplicates. Val mAP will likely be lower but more honest than the leaked-dataset val (which was inflated by factor ~2.2× from 101k within-val near-duplicate pairs).

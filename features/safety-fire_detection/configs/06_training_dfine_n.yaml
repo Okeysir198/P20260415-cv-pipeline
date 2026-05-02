@@ -1,0 +1,125 @@
+# Training config — Fire Detection (D-FINE-N, HF Trainer backend)
+# License: Apache 2.0 (USTC / DEIM)
+#
+# CPPE-5 ablation finding (2026-05-02): dfine-n (4M) significantly outperforms
+# dfine-s (16M) and dfine-m (31M) on 850-image datasets — capacity overfit.
+# Fire dataset has ~13k train images (larger), but dfine-n's stronger generalization
+# may still hold. This config tests that hypothesis.
+#
+# Key differences from 06_training_dfine_s.yaml:
+#   - arch: dfine-n (~4M params vs dfine-s ~16M)
+#   - ema: false (CPPE-5 showed EMA hurts dfine-s; testing without for dfine-n too)
+#   - normalize: false (already correct; fire stats off-distribution from ImageNet)
+#
+# Usage:
+#   uv run core/p06_training/train.py \
+#     --config features/safety-fire_detection/configs/06_training_dfine_n.yaml
+
+model:
+  arch: dfine-n
+  pretrained: ustc-community/dfine_n_coco
+  num_classes: 2
+  input_size: [640, 640]     # fire/smoke objects are predominantly tiny (<1% of image);
+                             # do NOT reduce below 640 — see feature CLAUDE.md "Data Findings"
+
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false             # do NOT apply ImageNet stats (off-distribution for fire)
+  mean: [0.485, 0.456, 0.406]  # ignored when normalize=false
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 8
+  eval_batch_size: 4
+  num_workers: 4
+  prefetch_factor: 4
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false           # HF DFineImageProcessor handles normalization; feed [0,1]
+  mosaic: false              # DETR-family doesn't use it
+  mixup: false
+
+  perspective_p: 0.1
+  fliplr: 0.5
+  flipud: 0.0
+  brightness_contrast_p: 0.3
+  brightness: 0.1
+  contrast: 0.1
+  hsv_p: 0.1
+  hsv_h: 0.015
+  hsv_s: 0.3
+  hsv_v: 0.3
+  min_bbox_area: 4.0
+
+  scale: [0.9, 1.1]
+  degrees: 10.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: hf
+  epochs: 80
+  optimizer: adamw
+  lr: 0.00025                # head LR
+  lr_backbone: 0.000025      # backbone LR (10× lower — official ratio)
+  weight_decay: 0.000125     # official D-FINE optimizer.yml (norm groups get 0)
+  warmup_steps: 500
+  scheduler: constant_with_warmup
+  max_grad_norm: 0.1
+  bf16: false                # MANDATORY for D-FINE — DFL stalls under bf16
+  amp: false                 # fp16 AMP overflows DETR decoder
+  gpu_augment: false
+  ema: false                 # off — CPPE-5 ablation showed EMA neutral/harmful for dfine variants
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+  patience: 30              # disables ES; guarantees full 60-ep DFL convergence
+
+  val_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01     # DETR sigmoid scores cap ~0.2; 0.01 shows more predictions
+    grid_cols: 2
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01
+  train_viz:
+    enabled: false           # HF backend viz bridge is val-only
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  report_to: none
+  save_dir: runs/dfine_n
+  wandb_project: smart-camera
+
+checkpoint:
+  save_best: true
+  metric: eval_map
+  mode: max
+  save_interval: 1
+
+evaluation:
+  score_threshold: 0.01
+
+seed: 42

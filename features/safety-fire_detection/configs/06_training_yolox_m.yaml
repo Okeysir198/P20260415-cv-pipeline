@@ -56,7 +56,7 @@ augmentation:
   hsv_s: 0.3
   hsv_v: 0.3
   min_bbox_area: 4.0         # 2×2 px minimum — keep small fire/smoke
-  scale: [0.8, 1.2]          # ±20% — tight for tiny-object datasets; Mosaic gives
+  scale: [0.9, 1.1]
                              # the big scale/context variety, affine is fine jitter
   degrees: 10.0
   translate: 0.1
@@ -64,7 +64,7 @@ augmentation:
 
 training:
   backend: pytorch
-  epochs: 100                # reference production count (was 200)
+  epochs: 80                # reference production count (was 200)
   optimizer: sgd
   lr: 0.001                  # 0.0025→0.001: full-data fine-tune; 0.0025 too hot, peaked ep8 then declined
                              # The previous default 0.01 was 4× too hot at bs=16
@@ -73,7 +73,7 @@ training:
   weight_decay: 0.0005
   warmup_epochs: 3
   scheduler: cosine
-  patience: 40
+  patience: 30
   val_full_interval: 0       # full val every epoch — production best.pth selection.
                              # Quick-val on a 20% subset overstates mAP by a few
                              # points vs full val; best-epoch selection is only
@@ -81,7 +81,7 @@ training:
   val_subset_fraction: 1.0   # ignored when val_full_interval=0
   amp: true                  # YOLOX is AMP-safe (unlike DETR-family)
   grad_clip: 35.0
-  ema: true
+  ema: false
   ema_decay: 0.9998
   gpu_augment: false         # keep Mosaic on CPU — it calls dataset.get_raw_item()
 
@@ -90,6 +90,10 @@ training:
     num_samples: 12
     conf_threshold: 0.01
     grid_cols: 2
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01
     gt_color_rgb: [160, 32, 240]
     pred_color_rgb: [0, 200, 0]
     gt_thickness: 2
@@ -120,6 +124,7 @@ loss:
 
 logging:
   wandb_project: smart-camera
+  save_dir: runs/yolox_m
   # run_name omitted — trainer derives it from the config path
 
 checkpoint:
@@ -127,5 +132,8 @@ checkpoint:
   metric: val/mAP50
   mode: max
   save_interval: 10
+
+evaluation:
+  score_threshold: 0.01
 
 seed: 42

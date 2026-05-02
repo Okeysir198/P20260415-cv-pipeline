@@ -89,7 +89,7 @@ augmentation:
   min_bbox_area: 4.0
 
   # Affine — aligned with rtdetr/yolox for fire/smoke generalization
-  scale: [0.8, 1.2]
+  scale: [0.9, 1.1]
   degrees: 10.0
   translate: 0.1
   shear: 2.0
@@ -103,7 +103,7 @@ training:
   # Phase D (clean dataset), bumped to 60 — DFL head keeps refining past ep40
   # on larger distributions; old leaked-data run peaked ep26-32, clean run may
   # peak later. patience=100 disables ES so full 60-ep run is guaranteed.
-  epochs: 60
+  epochs: 80
   optimizer: adamw
   # Layered AdamW matching official Peterande/D-FINE `configs/dfine/include/
   # optimizer.yml` — head (encoder/decoder) at 2.5e-4, backbone (HGNetv2) at
@@ -128,20 +128,24 @@ training:
   # EMA is part of the official D-FINE recipe (decay 0.9999, 1000-step warmup).
   # Smooths the noisy DETR mAP trajectory; also what CPPE-5 reference uses by
   # default. `EMACallback` in hf_trainer.py handles swap-before-eval/save.
-  ema: true
+  ema: false
   ema_decay: 0.9999
   ema_warmup_steps: 1000
   # patience=100 effectively disables ES for D-FINE through all 60 epochs.
   # History: p15 fired at ep16, p35 would fire at ep36 — both before DFL breakthrough
   # (still oscillating at ep32, train loss declining, breakthrough expected ep33-45).
   # With max epochs=60, patience=100 guarantees the full run completes.
-  patience: 100
+  patience: 30
 
   val_viz:
     enabled: true
     num_samples: 16
     conf_threshold: 0.01     # DETR sigmoid scores cap ~0.2; 0.01 shows more predictions
     grid_cols: 2
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01
   train_viz:
     enabled: false           # HF backend viz bridge is val-only
   data_viz:
@@ -168,6 +172,7 @@ logging:
   # has also crashed on missing-subdir races. Keep off by default; flip to
   # "wandb" or ["wandb","tensorboard"] after `wandb login`.
   report_to: none
+  save_dir: runs/dfine_s
   wandb_project: smart-camera
   # run_name omitted — HF Trainer (hf_trainer.py:736-740) uses run_name as the
   # feature folder for generate_run_dir(), so a stale value creates a ghost
@@ -179,5 +184,8 @@ checkpoint:
   metric: eval_map           # HF Trainer + torchmetrics key (was val/mAP50 under pytorch)
   mode: max
   save_interval: 1             # every epoch — prevents losing best checkpoint on crash
+
+evaluation:
+  score_threshold: 0.01
 
 seed: 42

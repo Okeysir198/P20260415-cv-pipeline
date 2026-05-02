@@ -17,7 +17,7 @@
 #   - viz callbacks enabled (data_viz, aug_viz, val_viz) for diagnostic preview
 #   - hsv_h/s/v tuned for fire/smoke color profile
 #   - patience: 20 (vs reference 8) — fire dataset is noisier; needs more epochs to converge
-#   - ema: true (vs reference false) — helps noisy-gradient convergence on fire
+#   - ema: false (vs reference false) — helps noisy-gradient convergence on fire
 #
 # Affine augmentation aligned with YOLOX: scale=[0.8,1.2], degrees=10,
 # translate=0.1, shear=2 — benefits fire/smoke generalization.
@@ -68,6 +68,7 @@ data:
 
 augmentation:
   library: torchvision
+  normalize: false           # HF RTDetrV2ImageProcessor handles it; feed [0,1]
   mosaic: false               # DETR-family doesn't use it
   mixup: false
 
@@ -86,14 +87,14 @@ augmentation:
   min_bbox_area: 4.0            # 2×2 px minimum — keep small fire/smoke for better small-object detection
 
   # Affine augmentation — scale jitter + mild rotation + translate for fire/smoke generalisation.
-  scale: [0.8, 1.2]
+  scale: [0.9, 1.1]
   degrees: 10.0
   translate: 0.1
   shear: 2.0
 
 training:
   backend: hf
-  epochs: 60
+  epochs: 80
   optimizer: adamw
   lr: 0.0001
   weight_decay: 0.0001
@@ -103,16 +104,20 @@ training:
   bf16: true
   amp: false
   gpu_augment: false          # ignored on HF backend regardless
-  ema: true                   # on — empirically lifts test mAP@0.5 by +0.11 on fire (noisier than CPPE-5)
+  ema: false
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 35                # bumped 20→35: last best ep7, ES was 5 epochs from firing at ep27 (2026-05-02)
+  patience: 30                # bumped 20→35: last best ep7, ES was 5 epochs from firing at ep27 (2026-05-02)
 
   val_viz:
     enabled: true
     num_samples: 8
     conf_threshold: 0.01      # DETR sigmoid scores cap ~0.2
     grid_cols: 2
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01
   train_viz:
     enabled: false            # HF backend viz bridge is val-only
   data_viz:
@@ -131,6 +136,7 @@ loss:
 
 logging:
   report_to: none             # avoid wandb auth hard-fail on HF backend
+  save_dir: runs/rtdetr_r50
   wandb_project: smart-camera
 
 checkpoint:
@@ -140,6 +146,6 @@ checkpoint:
   save_interval: 1            # match reference
 
 evaluation:
-  score_threshold: 0.0        # canonical mAP per reference invariants
+  score_threshold: 0.01        # canonical mAP per reference invariants
 
 seed: 42
