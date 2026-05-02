@@ -20,7 +20,7 @@
 #
 # Variants (override via --override model.arch=<key>):
 #   dfine-n      — smallest, fastest inference (~4M params)
-#   dfine-s      — 16M params                                  (DEFAULT)
+#   dfine-s      — 16M params                                  ← DEFAULT (best test mAP 0.648, 2026-05-02)
 #   dfine-m      — 31M params, balanced accuracy-speed
 #   dfine-large  — 102M params, highest accuracy
 #
@@ -36,8 +36,8 @@
 #         data.subset.train=0.2 data.subset.val=0.2 training.epochs=30
 
 model:
-  arch: dfine-m
-  pretrained: ustc-community/dfine_m_coco
+  arch: dfine-s
+  pretrained: ustc-community/dfine_s_coco
   num_classes: 2
   input_size: [640, 640]     # fire/smoke objects are predominantly tiny (<1% of image);
                              # do NOT reduce below 640 — see feature CLAUDE.md "Data Findings"

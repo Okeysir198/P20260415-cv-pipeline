@@ -45,11 +45,17 @@ augmentation:
   normalize: false           # Megvii YOLOX weights: raw [0, 255] inputs (NOT /255)
   mosaic: true               # THE single biggest lever — keep on
   mixup: false               # OFF per user preference across all features
-  hsv_h: 0.015
-  hsv_s: 0.5                 # Megvii default
-  hsv_v: 0.4                 # Megvii default
+  perspective_p: 0.1
   fliplr: 0.5
   flipud: 0.0                # YOLOX never flips vertically
+  brightness_contrast_p: 0.3    # light only — fire color is class-defining
+  brightness: 0.1
+  contrast: 0.1
+  hsv_p: 0.1
+  hsv_h: 0.015               # fire-specific HSV tuning (color is class-defining)
+  hsv_s: 0.3
+  hsv_v: 0.3
+  min_bbox_area: 4.0         # 2×2 px minimum — keep small fire/smoke
   scale: [0.8, 1.2]          # ±20% — tight for tiny-object datasets; Mosaic gives
                              # the big scale/context variety, affine is fine jitter
   degrees: 10.0
@@ -60,12 +66,12 @@ training:
   backend: pytorch
   epochs: 100                # reference production count (was 200)
   optimizer: sgd
-  lr: 0.0025                 # Megvii scaling rule: basic_lr × bs/64 = 0.01 × 16/64.
+  lr: 0.001                  # 0.0025→0.001: full-data fine-tune; 0.0025 too hot, peaked ep8 then declined
                              # The previous default 0.01 was 4× too hot at bs=16
                              # (documented in features/CLAUDE.md Iteration log).
   momentum: 0.9
   weight_decay: 0.0005
-  warmup_epochs: 5
+  warmup_epochs: 3
   scheduler: cosine
   patience: 40
   val_full_interval: 0       # full val every epoch — production best.pth selection.

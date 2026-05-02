@@ -92,12 +92,12 @@ augmentation:
 
 training:
   backend: hf
-  epochs: 40
+  epochs: 60
   optimizer: adamw
   lr: 0.0001
   weight_decay: 0.0001
-  warmup_steps: 300
-  scheduler: linear
+  warmup_steps: 500
+  scheduler: cosine
   max_grad_norm: 0.1
   bf16: true
   amp: false
