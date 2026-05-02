@@ -1,18 +1,14 @@
-# D-FINE-M on CPPE-5, via our in-repo pipeline + HF Trainer backend
-# + torchvision v2 CPU augmentation.
-# Same recipe as 06_training.yaml (dfine-n baseline) — only arch and pretrained differ.
-# Purpose: compare dfine-n vs dfine-s vs dfine-m capacity on CPPE-5 (850 train images).
+# D-FINE-n | normalize=false | ema=false
+# Best-performing D-FINE variant on CPPE-5. Rescale-only, no EMA.
+# Reference-aligned hyperparams: lr=5e-5, linear, wd=0, 30ep.
 #
-# Usage (from repo root):
+# Usage:
 #   CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
-#     --config notebooks/detr_finetune_reference/our_dfine_torchvision/06_training_dfine_m.yaml
-#
-# Artefacts land in
-#   notebooks/detr_finetune_reference/our_dfine_torchvision/runs/seed42_dfine_m/
+#     --config notebooks/detr_finetune_reference/our_dfine_torchvision/06_training_dfine_n_norm_false_ema_false.yaml
 
 model:
-  arch: dfine-m                  # ~31M params
-  pretrained: ustc-community/dfine_m_coco
+  arch: dfine-n
+  pretrained: ustc-community/dfine_n_coco
   num_classes: 5
   input_size: [480, 480]
 
@@ -37,7 +33,7 @@ data:
 
 augmentation:
   library: torchvision
-  normalize: false               # HF DFineImageProcessor handles it; feed [0,1]
+  normalize: false
   mosaic: false
   mixup: false
   perspective_p: 0.1
@@ -61,13 +57,13 @@ training:
   bf16: false
   amp: false
   gpu_augment: false
-  ema: false                     # reference doesn't use EMA
+  ema: false
   patience: 8
 
   val_viz:
     enabled: true
     num_samples: 16
-    conf_threshold: 0.01
+    conf_threshold: 0.05
     grid_cols: 2
   train_viz:
     enabled: false
@@ -84,13 +80,13 @@ training:
   best_viz:
     enabled: true
     num_samples: 16
-    conf_threshold: 0.01
+    conf_threshold: 0.05
 
 loss:
   type: detr
 
 logging:
-  save_dir: runs/seed42_dfine_m
+  save_dir: runs/dfine_n_norm_false_ema_false
   report_to: none
 
 checkpoint:

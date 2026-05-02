@@ -1,0 +1,102 @@
+# RT-DETRv2-R18 | normalize=false | ema=true
+# Lighter backbone, rescale-only + EMA decay 0.9999.
+#
+# Usage:
+#   CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+#     --config notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training_r18_norm_false_ema_true.yaml
+
+model:
+  arch: rtdetr-r18
+  pretrained: PekingU/rtdetr_v2_r18vd
+  num_classes: 5
+  input_size: [480, 480]
+
+tensor_prep:
+  input_size: [480, 480]
+  rescale: true
+  normalize: false
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 16
+  num_workers: 2
+  prefetch_factor: 2
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false
+  mosaic: false
+  mixup: false
+  perspective_p: 0.1
+  fliplr: 0.5
+  brightness_contrast_p: 0.5
+  hsv_p: 0.1
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
+
+training:
+  backend: hf
+  epochs: 40
+  optimizer: adamw
+  lr: 0.0001
+  weight_decay: 0.0001
+  warmup_steps: 300
+  scheduler: cosine
+  max_grad_norm: 0.1
+  bf16: true
+  amp: false
+  gpu_augment: false
+  ema: true
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+
+  val_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.05
+    grid_cols: 2
+  train_viz:
+    enabled: false
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.05
+
+loss:
+  type: detr
+
+logging:
+  wandb_project: smart-camera
+  save_dir: runs/r18_norm_false_ema_true
+  report_to: none
+
+checkpoint:
+  save_best: true
+  metric: eval_map
+  mode: max
+  save_interval: 1
+
+evaluation:
+  score_threshold: 0.0
+
+seed: 42

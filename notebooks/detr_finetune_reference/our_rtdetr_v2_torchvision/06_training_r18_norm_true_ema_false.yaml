@@ -1,32 +1,27 @@
-# D-FINE-n on CPPE-5 — normalize=true ablation.
-# Identical to 06_training.yaml except tensor_prep.normalize=true (ImageNet
-# mean/std applied by the processor, matching the reference notebook default).
-# Purpose: measure the mAP delta of applying ImageNet normalization for D-FINE on CPPE-5.
+# RT-DETRv2-R18 | normalize=true | ema=false
+# Lighter backbone (~20M vs R50 42M). Same hyperparams as R50 baseline.
 #
-# Usage (from repo root):
-#   CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
-#     --config notebooks/detr_finetune_reference/our_dfine_torchvision/06_training_norm_true.yaml
-#
-# Artefacts land in
-#   notebooks/detr_finetune_reference/our_dfine_torchvision/runs/seed42_norm_true/
+# Usage:
+#   CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+#     --config notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training_r18_norm_true_ema_false.yaml
 
 model:
-  arch: dfine-n
-  pretrained: ustc-community/dfine_n_coco
+  arch: rtdetr-r18
+  pretrained: PekingU/rtdetr_v2_r18vd
   num_classes: 5
   input_size: [480, 480]
 
 tensor_prep:
   input_size: [480, 480]
   rescale: true
-  normalize: true              # ablation: apply ImageNet mean/std (vs 06_training.yaml normalize=false)
+  normalize: true
   mean: [0.485, 0.456, 0.406]
   std:  [0.229, 0.224, 0.225]
   applied_by: hf_processor
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 8
+  batch_size: 16
   num_workers: 2
   prefetch_factor: 2
   pin_memory: true
@@ -37,7 +32,7 @@ data:
 
 augmentation:
   library: torchvision
-  normalize: false               # HF DFineImageProcessor handles it; feed [0,1]
+  normalize: false
   mosaic: false
   mixup: false
   perspective_p: 0.1
@@ -51,23 +46,22 @@ augmentation:
 
 training:
   backend: hf
-  epochs: 30
+  epochs: 40
   optimizer: adamw
-  lr: 0.00005
-  weight_decay: 0.0
+  lr: 0.0001
+  weight_decay: 0.0001
   warmup_steps: 300
-  scheduler: linear
+  scheduler: cosine
   max_grad_norm: 0.1
-  bf16: false
+  bf16: true
   amp: false
   gpu_augment: false
-  ema: false                     # reference doesn't use EMA
-  patience: 8
+  ema: false
 
   val_viz:
     enabled: true
     num_samples: 16
-    conf_threshold: 0.01
+    conf_threshold: 0.05
     grid_cols: 2
   train_viz:
     enabled: false
@@ -84,13 +78,14 @@ training:
   best_viz:
     enabled: true
     num_samples: 16
-    conf_threshold: 0.01
+    conf_threshold: 0.05
 
 loss:
   type: detr
 
 logging:
-  save_dir: runs/seed42_norm_true
+  wandb_project: smart-camera
+  save_dir: runs/r18_norm_true_ema_false
   report_to: none
 
 checkpoint:

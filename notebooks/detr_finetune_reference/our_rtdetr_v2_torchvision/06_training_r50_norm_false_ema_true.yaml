@@ -1,18 +1,13 @@
-# D-FINE-S on CPPE-5, via our in-repo pipeline + HF Trainer backend
-# + torchvision v2 CPU augmentation.
-# Same recipe as 06_training.yaml (dfine-n baseline) — only arch and pretrained differ.
-# Purpose: compare dfine-n vs dfine-s vs dfine-m capacity on CPPE-5 (850 train images).
+# RT-DETRv2-R50 | normalize=false | ema=true
+# Rescale-only + EMA ablation. No ImageNet mean/std, EMA decay 0.9999.
 #
-# Usage (from repo root):
-#   CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
-#     --config notebooks/detr_finetune_reference/our_dfine_torchvision/06_training_dfine_s.yaml
-#
-# Artefacts land in
-#   notebooks/detr_finetune_reference/our_dfine_torchvision/runs/seed42_dfine_s/
+# Usage:
+#   CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+#     --config notebooks/detr_finetune_reference/our_rtdetr_v2_torchvision/06_training_r50_norm_false_ema_true.yaml
 
 model:
-  arch: dfine-s                  # ~16M params
-  pretrained: ustc-community/dfine_s_coco
+  arch: rtdetr-r50
+  pretrained: PekingU/rtdetr_v2_r50vd
   num_classes: 5
   input_size: [480, 480]
 
@@ -26,7 +21,7 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 8
+  batch_size: 16
   num_workers: 2
   prefetch_factor: 2
   pin_memory: true
@@ -37,7 +32,7 @@ data:
 
 augmentation:
   library: torchvision
-  normalize: false               # HF DFineImageProcessor handles it; feed [0,1]
+  normalize: false
   mosaic: false
   mixup: false
   perspective_p: 0.1
@@ -51,23 +46,24 @@ augmentation:
 
 training:
   backend: hf
-  epochs: 30
+  epochs: 40
   optimizer: adamw
-  lr: 0.00005
-  weight_decay: 0.0
+  lr: 0.0001
+  weight_decay: 0.0001
   warmup_steps: 300
-  scheduler: linear
+  scheduler: cosine
   max_grad_norm: 0.1
-  bf16: false
+  bf16: true
   amp: false
   gpu_augment: false
-  ema: false                     # reference doesn't use EMA
-  patience: 8
+  ema: true
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
 
   val_viz:
     enabled: true
     num_samples: 16
-    conf_threshold: 0.01
+    conf_threshold: 0.05
     grid_cols: 2
   train_viz:
     enabled: false
@@ -84,13 +80,14 @@ training:
   best_viz:
     enabled: true
     num_samples: 16
-    conf_threshold: 0.01
+    conf_threshold: 0.05
 
 loss:
   type: detr
 
 logging:
-  save_dir: runs/seed42_dfine_s
+  wandb_project: smart-camera
+  save_dir: runs/r50_norm_false_ema_true
   report_to: none
 
 checkpoint:
