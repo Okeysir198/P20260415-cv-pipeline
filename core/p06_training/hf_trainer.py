@@ -48,6 +48,7 @@ from core.p06_training.hf_callbacks import (  # noqa: E402
     HFAugLabelGridCallback,
     HFDataLabelGridCallback,
     HFDatasetStatsCallback,
+    HFTrainPredictionCallback,
     HFValPredictionCallback,
 )
 from utils.config import generate_run_dir, load_config, merge_configs  # noqa: E402
@@ -1257,6 +1258,9 @@ def _build_callbacks(
             enable_train_end=want_best_viz,
             data_config=data_config,
             base_dir=base_dir,
+            config_path=str(config_path) if config_path else None,
+            viz_key="val_viz",
+            balanced=val_viz.get("balanced", False),
         ))
 
     # Step-by-step transform pipeline viz — fires once on train-begin. Catches
@@ -1278,10 +1282,26 @@ def _build_callbacks(
             task=task,
         ))
 
-    # train_viz would run the same viz on the train_dataloader — not wired
-    # in the native HF callback path (HFValPredictionCallback reads HF's
-    # eval_dataloader specifically). Add a `split="train"` variant here if
-    # per-epoch train-set predictions become important for a future feature.
+    # Per-epoch train-set predictions — same logic as val_viz but pointed at
+    # train_dataset. Useful to spot overfitting / aug pathologies that don't
+    # show up in val. Disabled by default; opt in via `training.train_viz.enabled`.
+    train_viz = train_cfg.get("train_viz", {})
+    if train_viz.get("enabled", False) and train_dataset is not None:
+        callbacks.append(HFTrainPredictionCallback(
+            save_dir=save_dir, class_names=class_names, input_size=input_size,
+            num_samples=train_viz.get("num_samples", val_viz.get("num_samples", 12)),
+            conf_threshold=train_viz.get("conf_threshold", val_viz.get("conf_threshold", 0.05)),
+            grid_cols=train_viz.get("grid_cols", val_viz.get("grid_cols", 2)),
+            train_dataset=train_dataset,
+            test_dataset=None,
+            enable_epoch_end=True,
+            enable_train_end=False,
+            data_config=data_config,
+            base_dir=base_dir,
+            config_path=str(config_path) if config_path else None,
+            viz_key="train_viz",
+            balanced=train_viz.get("balanced", False),
+        ))
 
     return callbacks
 

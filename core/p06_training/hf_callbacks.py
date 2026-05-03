@@ -34,6 +34,7 @@ from transformers import TrainerCallback
 
 from core.p05_data.transforms import build_transforms
 from core.p06_training._common import (
+    VizSamplingMixin,
     build_dataset_for_viz,
     task_from_output_format,
     yolo_targets_to_xyxy,
@@ -1545,7 +1546,7 @@ class HFAugLabelGridCallback(TrainerCallback):
         return control
 
 
-class HFValPredictionCallback(TrainerCallback):
+class HFValPredictionCallback(VizSamplingMixin, TrainerCallback):
     """Per-epoch val grids + (on_train_end) best-checkpoint val/test grids.
 
     Uses the HF `eval_dataloader` (passed via hook kwargs by HF Trainer) for
@@ -1580,6 +1581,9 @@ class HFValPredictionCallback(TrainerCallback):
         enable_train_end: bool = True,
         data_config: dict | None = None,
         base_dir: str | None = None,
+        config_path: str | None = None,
+        viz_key: str = "val_viz",
+        balanced: bool = False,
     ) -> None:
         self.save_dir = Path(save_dir)
         self.class_names = class_names
@@ -1600,12 +1604,19 @@ class HFValPredictionCallback(TrainerCallback):
         self._loaded_data_cfg = data_config
         self._config_dir = base_dir
         self._sample_indices: list[int] | None = None
+        # Live-reload: at the top of every on_epoch_end we re-read this YAML
+        # and refresh `enabled` / `conf_threshold` / `grid_cols` / `dpi` from
+        # `training.<viz_key>`. Edit the file mid-run to toggle viz on/off.
+        self._config_path = Path(config_path) if config_path else None
+        self._viz_key = viz_key
+        self.balanced = balanced
 
     def on_epoch_end(self, args, state, control, **kwargs):
         """Per-epoch val grid. Delegates rendering to the shared
         :func:`core.p06_training.post_train.render_prediction_grid` so the
         per-epoch grid is byte-consistent with best.png and the error-analysis
         galleries."""
+        self._refresh_from_config()
         if not self.enable_epoch_end:
             return control
         eval_loader = kwargs.get("eval_dataloader")
@@ -1614,11 +1625,10 @@ class HFValPredictionCallback(TrainerCallback):
             return control
 
         ds = eval_loader.dataset
-        if self._sample_indices is None:
-            n = len(ds)
-            if n == 0:
-                return control
-            self._sample_indices = sorted(random.sample(range(n), min(self.num_samples, n)))
+        n = len(ds)
+        if n == 0:
+            return control
+        self._ensure_sample_indices(n, ds=ds)
 
         was_training = model.training
         model.eval()
@@ -1763,6 +1773,110 @@ class HFValPredictionCallback(TrainerCallback):
             )
         except Exception as e:
             logger.warning("post-train artifacts skipped: %s", e, exc_info=True)
+        return control
+
+
+class HFTrainPredictionCallback(HFValPredictionCallback):
+    """Per-epoch GT-vs-prediction grids on the **train** split.
+
+    Same logic as :class:`HFValPredictionCallback.on_epoch_end` — fires at the
+    end of every epoch, samples a fixed pool of indices on first call, runs
+    the model in eval mode on those samples, renders the grid via the same
+    shared ``render_prediction_grid`` helper. Differences:
+
+    - Reads from ``self.train_dataset`` (passed at init) instead of the HF
+      ``eval_dataloader.dataset``.
+    - Writes to ``train_predictions/epochs/epoch_NNN.png`` instead of
+      ``val_predictions/epochs/...``.
+    - ``on_train_end`` is disabled (post-train best/test artifacts are
+      val-side concerns; train-set best.png adds no signal).
+
+    Use to spot train-side overfitting, augmentation issues, or label-noise
+    patterns that don't show up in val. Add to a feature config via
+    ``training.train_viz.enabled: true``.
+    """
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        self._refresh_from_config()
+        if not self.enable_epoch_end:
+            return control
+        ds = self.train_dataset
+        model = kwargs.get("model")
+        if ds is None or model is None:
+            return control
+
+        n = len(ds)
+        if n == 0:
+            return control
+        self._ensure_sample_indices(n, ds=ds)
+
+        was_training = model.training
+        model.eval()
+
+        epoch_idx = int(round(state.epoch or 0.0))
+        task = _infer_task_from_model(model)
+
+        # Top-down keypoint short-circuit — same as val variant.
+        if task == "keypoint" and _is_topdown_keypoint_dataset(ds):
+            ap_val = 0.0
+            if state.log_history:
+                for entry in reversed(state.log_history):
+                    if "eval_AP" in entry:
+                        ap_val = float(entry["eval_AP"])
+                        break
+            out_path = (
+                self.save_dir / "train_predictions" / "epochs"
+                / f"epoch_{epoch_idx:03d}.png"
+            )
+            try:
+                _render_topdown_keypoint_grid(
+                    model, ds, self._sample_indices, out_path,
+                    title=f"Train · Epoch {epoch_idx} — AP: {ap_val:.4f}",
+                    grid_cols=self.grid_cols, dpi=self.dpi,
+                )
+                logger.info(
+                    "HFTrainPredictionCallback: saved train_predictions/epochs/epoch_%03d.png",
+                    epoch_idx,
+                )
+            except Exception as e:
+                logger.warning("per-epoch train grid skipped: %s", e)
+            if was_training:
+                model.train()
+            return control
+
+        map_val = 0.0
+        if state.log_history:
+            for entry in reversed(state.log_history):
+                if "eval_map_50" in entry:
+                    map_val = float(entry["eval_map_50"])
+                    break
+
+        from core.p06_training.post_train import render_prediction_grid
+        from core.p10_inference.supervision_bridge import VizStyle
+        out_path = self.save_dir / "train_predictions" / "epochs" / f"epoch_{epoch_idx:03d}.png"
+        try:
+            render_prediction_grid(
+                model, ds, self._sample_indices, out_path,
+                title=f"Train · Epoch {epoch_idx} — val mAP50: {map_val:.4f}",
+                class_names=self.class_names, input_size=self.input_size,
+                style=VizStyle(), task=task,
+                conf_threshold=self.conf_threshold, grid_cols=self.grid_cols,
+                dpi=self.dpi,
+            )
+            logger.info(
+                "HFTrainPredictionCallback: saved train_predictions/epochs/epoch_%03d.png",
+                epoch_idx,
+            )
+        except Exception as e:
+            logger.warning("per-epoch train grid skipped: %s", e)
+
+        if was_training:
+            model.train()
+        return control
+
+    def on_train_end(self, args, state, control, **kwargs):
+        # Train-side post-train artifacts are not generated; val callback
+        # owns best.png + error_analysis.
         return control
 
 

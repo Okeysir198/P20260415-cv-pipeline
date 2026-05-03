@@ -21,6 +21,7 @@ import torch
 import torch.nn as nn
 
 import wandb
+from core.p06_training._common import VizSamplingMixin
 from core.p10_inference.supervision_bridge import annotate_gt_pred
 from utils.viz import (
     VizStyle,
@@ -554,12 +555,17 @@ class WandBLogger(Callback):
             self._enabled = False
 
 
-class ValPredictionLogger(Callback):
+class ValPredictionLogger(VizSamplingMixin, Callback):
     """Save a grid of predictions each epoch for a given split (val or train).
 
     GT boxes: solid purple (thickness=2) drawn first.
     Pred boxes: solid green (thickness=1) drawn on top.
     Saved to ``<save_dir>/{split}_predictions/epoch_<N>.png``.
+
+    Inherits sampling + live-reload from
+    :class:`core.p06_training._common.VizSamplingMixin` — supports balanced
+    per-class sampling (``balanced=True``) and live config reload via
+    ``config_path`` + ``viz_key``.
     """
 
     _DEFAULT_GT_COLOR = sv.Color(r=160, g=32, b=240)   # purple
@@ -578,6 +584,10 @@ class ValPredictionLogger(Callback):
         pred_color_rgb: tuple = (0, 200, 0),
         text_scale: float = 0.4,
         dpi: int = 150,
+        balanced: bool = False,
+        config_path: str | None = None,
+        viz_key: str | None = None,
+        enabled: bool = True,
     ) -> None:
         self.save_dir = Path(save_dir)
         self.split = split
@@ -590,15 +600,12 @@ class ValPredictionLogger(Callback):
         self.pred_color = sv.Color(r=pred_color_rgb[0], g=pred_color_rgb[1], b=pred_color_rgb[2])
         self.text_scale = text_scale
         self.dpi = dpi
+        self.balanced = balanced
+        self.enabled = enabled
         self._sample_indices: list[int] | None = None
-
-    @staticmethod
-    def _unwrap_subset(dataset: Any):
-        """Return (underlying_dataset, index_fn) unwrapping torch Subset if needed."""
-        if hasattr(dataset, "indices"):  # torch.utils.data.Subset
-            indices = dataset.indices
-            return dataset.dataset, lambda i: indices[i]
-        return dataset, lambda i: i
+        # Live-reload locator (mixin reads these). viz_key defaults from split.
+        self._config_path = Path(config_path) if config_path else None
+        self._viz_key = viz_key or (f"{split}_viz" if split in ("train", "val") else "val_viz")
 
     def _get_loader(self, trainer: Any):
         return trainer.train_loader if self.split == "train" else trainer.val_loader
@@ -606,17 +613,30 @@ class ValPredictionLogger(Callback):
     def on_train_start(self, trainer: Any) -> None:
         dataset = self._get_loader(trainer).dataset
         n = len(dataset)
-        k = min(self.num_samples, n)
-        self._sample_indices = sorted(random.sample(range(n), k))
-        logger.info("ValPredictionLogger(%s): sampled %d images for visualization", self.split, k)
+        if n == 0:
+            return
+        self._ensure_sample_indices(n, ds=dataset)
+        logger.info(
+            "ValPredictionLogger(%s): sampled %d images for visualization",
+            self.split, len(self._sample_indices or []),
+        )
 
     def on_epoch_end(
         self, trainer: Any, epoch: int, metrics: dict[str, float]
     ) -> None:
+        self._refresh_from_config()
+        if not self.enabled:
+            return
+        loader_ds = self._get_loader(trainer).dataset
+        n = len(loader_ds)
+        if n == 0:
+            return
+        self._ensure_sample_indices(n, ds=loader_ds)
         if self._sample_indices is None:
             return
 
-        raw_dataset, idx_map = self._unwrap_subset(self._get_loader(trainer).dataset)
+        from core.p06_training._common import unwrap_subset
+        raw_dataset, idx_map = unwrap_subset(loader_ds)
         model = trainer.model
         device = trainer.device
         model.eval()

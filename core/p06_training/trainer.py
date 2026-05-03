@@ -495,6 +495,10 @@ class DetectionTrainer:
                         pred_color_rgb=tuple(viz_cfg.get("pred_color_rgb", [0, 200, 0])),
                         text_scale=viz_cfg.get("text_scale", 0.4),
                         dpi=viz_cfg.get("dpi", 150),
+                        balanced=viz_cfg.get("balanced", False),
+                        config_path=str(self.config_path) if hasattr(self, "config_path") else None,
+                        viz_key=cfg_key,
+                        enabled=True,
                     )
                 )
 

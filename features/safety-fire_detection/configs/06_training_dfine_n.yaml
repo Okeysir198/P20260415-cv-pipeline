@@ -69,8 +69,8 @@ training:
   backend: hf
   epochs: 80
   optimizer: adamw
-  lr: 0.00025                # head LR
-  lr_backbone: 0.000025      # backbone LR (10× lower — official ratio)
+  lr: 0.00025
+  lr_backbone: 0.000025
   weight_decay: 0.000125     # official D-FINE optimizer.yml (norm groups get 0)
   warmup_steps: 500
   scheduler: constant_with_warmup
@@ -85,15 +85,20 @@ training:
 
   val_viz:
     enabled: true
-    num_samples: 16
-    conf_threshold: 0.01     # DETR sigmoid scores cap ~0.2; 0.01 shows more predictions
+    num_samples: 10
+    conf_threshold: 0.01      # DETR sigmoid scores cap ~0.2
     grid_cols: 2
+    balanced: true            # round-robin over fire/smoke buckets
   best_viz:
     enabled: true
     num_samples: 16
     conf_threshold: 0.01
   train_viz:
-    enabled: false           # HF backend viz bridge is val-only
+    enabled: true             # per-epoch GT-vs-pred grid on train split
+    num_samples: 10
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
   data_viz:
     enabled: true
     splits: [train, val, test]

@@ -27,10 +27,11 @@ model:
   pretrained: PekingU/rtdetr_v2_r50vd
   num_classes: 2
   input_size: [640, 640]
-  num_queries: 50
-  num_denoising: 100            # 2× num_queries (convention); training-only, no inference cost
+  num_queries: 30               # 50 → 30: fire p99=9 boxes/img, fewer queries → higher per-match scores
+  num_denoising: 60             # 2× num_queries (convention); training-only, no inference cost
   box_noise_scale: 1.0          # HF default; 1.5 tested and rejected (monotonically worse on test)
-  eos_coefficient: 0.4          # 0.1→0.4: cut large-bbox FPs (77 FP vs 75 TP at large scale, 2026-05-01)
+  eos_coefficient: 0.05         # 0.1 → 0.05: less background pressure → higher confidence on positives
+  focal_loss_alpha: 0.5         # 0.25 → 0.5: more weight on positive class → higher per-positive scores
 
 # Authoritative tensor-prep contract.
 #
@@ -96,30 +97,35 @@ training:
   backend: hf
   epochs: 80
   optimizer: adamw
-  lr: 0.0001
+  lr: 0.00005                 # 1e-4 → 5e-5: canonical for small-class DETR fine-tune; 1e-4 collapsed after ep7 (2026-05-02)
   weight_decay: 0.0001
-  warmup_steps: 500
+  warmup_steps: 300           # 500 → 300: reference recipe
   scheduler: cosine
   max_grad_norm: 0.1
   bf16: true
   amp: false
   gpu_augment: false          # ignored on HF backend regardless
-  ema: false
+  ema: true                   # official RT-DETRv2 default; smooths post-warmup oscillation
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 30                # bumped 20→35: last best ep7, ES was 5 epochs from firing at ep27 (2026-05-02)
+  patience: 30
 
   val_viz:
     enabled: true
-    num_samples: 8
+    num_samples: 10
     conf_threshold: 0.01      # DETR sigmoid scores cap ~0.2
     grid_cols: 2
+    balanced: true            # round-robin over fire/smoke buckets
   best_viz:
     enabled: true
     num_samples: 16
     conf_threshold: 0.01
   train_viz:
-    enabled: false            # HF backend viz bridge is val-only
+    enabled: true             # per-epoch GT-vs-pred grid on train split
+    num_samples: 10
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
   data_viz:
     enabled: true
     splits: [train, val, test]
