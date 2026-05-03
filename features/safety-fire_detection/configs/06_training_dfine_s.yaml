@@ -191,6 +191,6 @@ checkpoint:
   save_interval: 1             # every epoch — prevents losing best checkpoint on crash
 
 evaluation:
-  score_threshold: 0.01
+  score_threshold: 0.0
 
 seed: 42

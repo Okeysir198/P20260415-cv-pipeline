@@ -101,13 +101,16 @@ dedup:
   #   - Higher (≥6) → catches everything, but groups balloon (one giant group
   #                   per video sequence) → splitter loses degrees of freedom.
   # Recommended: 3 for general image data, 4–5 only for very clean unique-shot
-  # collections (e.g. studio product photos).
-  hamming_thresh: 3
+  # collections (e.g. studio product photos), 6 for video-heavy datasets where
+  # consecutive frames must be detected as the same group (this dataset).
+  hamming_thresh: 6
 
   # Whether to cap the number of group representatives kept in val/test.
   # null = off (keep all). Integer N = keep ≤N evenly-strided members per group
   # in eval splits, drop the rest. Train is never capped.
-  max_per_group_eval: null
+  # 50 here compresses long video sequences in val/test that would otherwise
+  # inflate eval metrics through within-split near-duplicate redundancy.
+  max_per_group_eval: 50
 
   # Joint stratification axes.
   #   class  - per-class box-count balance

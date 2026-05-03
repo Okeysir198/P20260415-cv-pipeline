@@ -212,32 +212,185 @@ def stratified_group_split(
 # ---------------------------------------------------------------------------
 
 
+def _stride_pick(imgs: list[Path], k: int) -> list[Path]:
+    """Even-stride pick of up to k images from a sorted list."""
+    imgs_sorted = sorted(imgs)
+    n = len(imgs_sorted)
+    if k >= n:
+        return imgs_sorted
+    stride = max(1, n // k)
+    return sorted(imgs_sorted[i] for i in range(0, n, stride))[:k]
+
+
+def _group_dominant_class(group_imgs: list[Path], img_to_classes: dict[Path, list[int]]) -> int:
+    """Most-common class across all boxes in the group; -1 if no boxes anywhere."""
+    cnt: Counter = Counter()
+    for img in group_imgs:
+        cnt.update(img_to_classes.get(img, []))
+    if not cnt:
+        return -1
+    return cnt.most_common(1)[0][0]
+
+
 def apply_max_per_group_eval(
     img_to_group: dict[Path, int],
     group_to_split: dict[int, str],
     max_per_group_eval: int,
+    img_to_classes: dict[Path, list[int]] | None = None,
     seed: int = 42,  # noqa: ARG001 - kept for API symmetry with stratified_group_split
 ) -> dict[Path, str | None]:
-    """Cap eval-split groups to ≤N evenly-strided members. Train splits never capped.
+    """Cap eval-split groups, optionally class-aware to preserve class distribution.
+
+    The naïve cap (every oversize group truncated to N) systematically drops
+    more samples from *large* groups than from small ones. When group size
+    correlates with class (e.g. one class's footage tends to be longer video
+    sequences), this skews the post-cap class distribution away from train.
+
+    When `img_to_classes` is provided, the cap becomes a *target per-class
+    image budget* rather than a uniform per-group truncation. For each eval
+    split:
+      1. Compute target per-class image counts proportional to the train-split
+         class distribution.
+      2. Bucket groups by dominant class (most-common class across all the
+         group's boxes — most groups are mono-class video sequences).
+      3. For each class, distribute the per-class budget across its groups in
+         proportion to group size, with each group keeping at least 1 image
+         and at most all its images. The legacy `max_per_group_eval` becomes
+         a *minimum* per-group keep cap when class budget is tight, otherwise
+         large groups can exceed it to satisfy under-represented classes.
+
+    When `img_to_classes` is None, falls back to legacy class-blind even-stride
+    per group capped at `max_per_group_eval`.
 
     Excess images map to None (caller drops them entirely — no new leakage).
     """
     eval_splits = {"val", "test"}
-    group_eval_imgs: dict[int, list[Path]] = defaultdict(list)
+
+    split_to_group_imgs: dict[str, dict[int, list[Path]]] = {
+        s: defaultdict(list) for s in SPLITS
+    }
     for img, gid in img_to_group.items():
-        if group_to_split[gid] in eval_splits:
-            group_eval_imgs[gid].append(img)
+        split_to_group_imgs[group_to_split[gid]][gid].append(img)
 
     keep: set[Path] = set()
-    for _gid, imgs in group_eval_imgs.items():
-        imgs_sorted = sorted(imgs)
-        n = len(imgs_sorted)
-        if n <= max_per_group_eval:
-            keep.update(imgs_sorted)
-        else:
-            stride = max(1, n // max_per_group_eval)
-            selected = sorted(imgs_sorted[i] for i in range(0, n, stride))[:max_per_group_eval]
-            keep.update(selected)
+    for _gid, imgs in split_to_group_imgs["train"].items():
+        keep.update(imgs)
+
+    if img_to_classes is None:
+        # Legacy class-blind path: even-stride per group, hard cap at max_per_group_eval.
+        for split in eval_splits:
+            for _gid, imgs in split_to_group_imgs[split].items():
+                if len(imgs) <= max_per_group_eval:
+                    keep.update(imgs)
+                else:
+                    keep.update(_stride_pick(imgs, max_per_group_eval))
+    else:
+        # Class-aware path: target eval class fractions = train class fractions.
+        # Use BOX counts (not image counts) since detection metrics are box-weighted.
+        train_box_counts: Counter = Counter()
+        for _gid, imgs in split_to_group_imgs["train"].items():
+            for img in imgs:
+                train_box_counts.update(img_to_classes.get(img, []))
+        train_box_total = sum(train_box_counts.values())
+        target_box_frac = (
+            {c: cnt / train_box_total for c, cnt in train_box_counts.items()}
+            if train_box_total > 0
+            else {}
+        )
+
+        for split in eval_splits:
+            group_imgs_map = split_to_group_imgs[split]
+
+            # Estimate post-cap split size from the legacy cap as the base budget,
+            # so reducing/raising max_per_group_eval still scales eval set size.
+            est_split_size = sum(
+                min(len(imgs), max_per_group_eval) for imgs in group_imgs_map.values()
+            )
+
+            # Bucket groups by dominant class
+            groups_by_class: dict[int, list[tuple[int, list[Path]]]] = defaultdict(list)
+            for gid, imgs in group_imgs_map.items():
+                cls = _group_dominant_class(imgs, img_to_classes)
+                groups_by_class[cls].append((gid, imgs))
+
+            # Target per-class image budget (image-level allocation toward box-frac target)
+            target_per_class: dict[int, int] = {}
+            for cls in groups_by_class:
+                avail = sum(len(imgs) for _, imgs in groups_by_class[cls])
+                target = int(round(est_split_size * target_box_frac.get(cls, 0)))
+                target_per_class[cls] = min(avail, max(0, target))
+
+            # Sanity: distribute residual (rounding error) to largest buckets
+            allocated = sum(target_per_class.values())
+            residual = est_split_size - allocated
+            if residual != 0 and target_per_class:
+                ordered = sorted(
+                    target_per_class.keys(),
+                    key=lambda c: -sum(len(imgs) for _, imgs in groups_by_class[c]),
+                )
+                idx = 0
+                step = 1 if residual > 0 else -1
+                while residual != 0 and idx < len(ordered) * 4:
+                    cls = ordered[idx % len(ordered)]
+                    avail = sum(len(imgs) for _, imgs in groups_by_class[cls])
+                    new_val = target_per_class[cls] + step
+                    if 0 <= new_val <= avail:
+                        target_per_class[cls] = new_val
+                        residual -= step
+                    idx += 1
+
+            # For each class, allocate its budget across its groups proportionally
+            # to group size, with each group keeping ≥1 and ≤len(imgs).
+            for cls, grps in groups_by_class.items():
+                budget = target_per_class.get(cls, 0)
+                if budget <= 0:
+                    continue
+                grps_sorted = sorted(grps, key=lambda gi: -len(gi[1]))
+                total_size = sum(len(imgs) for _, imgs in grps_sorted)
+                if total_size <= budget:
+                    # Class is under-represented globally → keep every image
+                    for _gid, imgs in grps_sorted:
+                        keep.update(imgs)
+                    continue
+
+                # Proportional split with floor 1, ceiling len(imgs).
+                # First pass: floor allocation
+                per_group_keep: dict[int, int] = {}
+                for gid, imgs in grps_sorted:
+                    share = len(imgs) / total_size
+                    k = max(1, int(budget * share))
+                    per_group_keep[gid] = min(k, len(imgs))
+
+                # Repair: distribute remaining deficit / surplus
+                allocated = sum(per_group_keep.values())
+                deficit = budget - allocated
+                if deficit > 0:
+                    # Add to groups with most slack (largest available room)
+                    while deficit > 0:
+                        room = {
+                            gid: len(imgs) - per_group_keep[gid]
+                            for gid, imgs in grps_sorted
+                        }
+                        gid_best = max(room, key=lambda g: room[g])
+                        if room[gid_best] <= 0:
+                            break
+                        per_group_keep[gid_best] += 1
+                        deficit -= 1
+                elif deficit < 0:
+                    # Trim from largest keep counts (preserve floor 1)
+                    while deficit < 0:
+                        candidates = {
+                            gid: cnt for gid, cnt in per_group_keep.items() if cnt > 1
+                        }
+                        if not candidates:
+                            break
+                        gid_largest = max(candidates, key=lambda g: candidates[g])
+                        per_group_keep[gid_largest] -= 1
+                        deficit += 1
+
+                # Even-stride pick from each group up to its allocated keep count
+                for gid, imgs in grps_sorted:
+                    keep.update(_stride_pick(imgs, per_group_keep[gid]))
 
     out: dict[Path, str | None] = {}
     for img, gid in img_to_group.items():
@@ -248,8 +401,9 @@ def apply_max_per_group_eval(
             out[img] = assigned
 
     dropped = sum(1 for s in out.values() if s is None)
+    mode = "class-aware" if img_to_classes is not None else "class-blind"
     print(
-        f"  [dedup] max_per_group_eval={max_per_group_eval}: "
+        f"  [dedup] max_per_group_eval={max_per_group_eval} ({mode}): "
         f"dropped {dropped} eval near-duplicates (train unchanged)",
         flush=True,
     )

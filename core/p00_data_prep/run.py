@@ -312,7 +312,11 @@ def _assign_splits_dedup(
 
     if dedup_cfg["max_per_group_eval"] is not None:
         img_to_split_nullable = apply_max_per_group_eval(
-            img_to_group, group_to_split, dedup_cfg["max_per_group_eval"], seed=seed
+            img_to_group,
+            group_to_split,
+            dedup_cfg["max_per_group_eval"],
+            img_to_classes=path_to_classes,
+            seed=seed,
         )
     else:
         img_to_split_nullable = {img: group_to_split[gid] for img, gid in img_to_group.items()}

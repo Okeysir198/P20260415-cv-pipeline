@@ -27,11 +27,17 @@ model:
   pretrained: PekingU/rtdetr_v2_r18vd
   num_classes: 2
   input_size: [640, 640]
-  num_queries: 30               # 50 → 30: fire p99=9 boxes/img, fewer queries → higher per-match scores
-  num_denoising: 60             # 2× num_queries (convention); training-only, no inference cost
-  box_noise_scale: 1.0          # HF default; 1.5 tested and rejected (monotonically worse on test)
-  eos_coefficient: 0.05         # 0.1 → 0.05: less background pressure → higher confidence on positives
-  focal_loss_alpha: 0.5         # 0.25 → 0.5: more weight on positive class → higher per-positive scores
+  # All RT-DETRv2 model knobs reset to HF defaults (PekingU/rtdetr_v2_r18vd) —
+  # cleanest baseline. Earlier per-feature deviations rolled back 2026-05-03 after
+  # discovering eos_coefficient and focal_loss_alpha "defaults" used previously
+  # were vanilla DETR, not RT-DETRv2.
+  num_queries: 30               # fire p99=9 boxes/img → 300 wastes capacity; keep small (only deviation from HF default)
+  num_denoising: 100            # HF default
+  box_noise_scale: 2.0          # 1.0 → 2.0: strong DN box-recovery training (label class is clean, only boxes are sloppy)
+  label_noise_ratio: 0.1        # 0.5 → 0.1: small regularization only — class labels are reliable
+  eos_coefficient: 0.0001       # HF default (RT-DETRv2 uses 1e-4 — focal-loss world; 0.1 is vanilla DETR's value)
+  focal_loss_alpha: 0.75        # HF default (was 0.25 — that's vanilla-DETR / older convention)
+  focal_loss_gamma: 2.0         # HF default
 
 # Authoritative tensor-prep contract.
 #
@@ -104,7 +110,7 @@ training:
   bf16: true
   amp: false
   gpu_augment: false          # ignored on HF backend regardless
-  ema: true                   # official RT-DETRv2 default; smooths post-warmup oscillation
+  ema: false                  # comparison run vs ema=true (2026-05-03)
   ema_decay: 0.9999
   ema_warmup_steps: 1000
   patience: 30
@@ -151,6 +157,6 @@ checkpoint:
   save_interval: 1            # match reference
 
 evaluation:
-  score_threshold: 0.009        # canonical mAP per reference invariants
+  score_threshold: 0.0        # canonical mAP per reference invariants
 
 seed: 42
