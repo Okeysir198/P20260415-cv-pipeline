@@ -120,7 +120,7 @@ logging:
 
 checkpoint:
   save_best: true
-  metric: eval_map
+  metric: eval_map_50         # mAP50 is more stable than mAP for DETR-family on small val sets (sigmoid scores compress 0.05–0.20 → flat PR curve → noisy mAP)
   mode: max
   save_interval: 1
 

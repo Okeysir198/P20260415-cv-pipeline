@@ -150,36 +150,51 @@ def run_data_prep(config: dict, args) -> None:
 
     # Assign splits BEFORE copying so we can write each sample directly into its
     # split subdir. No flat images/ or labels/ dir, no symlinks.
+    from core.p00_data_prep.core.dedup import validate_dedup_config
     from core.p00_data_prep.core.splitter import (
         ensure_split_dirs,
         write_audit_snapshot,
     )
 
-    # Separate pre-split sources (has_splits=True) from flat sources needing random splitting.
-    pre_assigned: list[tuple[int, str]] = []  # (idx, split)
-    to_split_input: list[dict] = []
-    _VALID_SPLITS = {"train", "val", "test"}
-    _SPLIT_ALIASES = {"valid": "val"}
+    dedup_cfg = validate_dedup_config(config.get("dedup", {}))
+    idx_to_split: dict[int, str]
+    dropped_idx: set[int] = set()
 
-    for i, s in enumerate(samples):
-        if "original_split" in s:
-            raw = s["original_split"]
-            mapped = _SPLIT_ALIASES.get(raw, raw)
-            pre_assigned.append((i, mapped if mapped in _VALID_SPLITS else "train"))
-        else:
-            to_split_input.append({"_idx": i, "filename": Path(s["image_path"]).name, "labels": s.get("labels", [])})
+    if dedup_cfg["enabled"]:
+        idx_to_split, dropped_idx = _assign_splits_dedup(
+            samples, dedup_cfg, ratios, seed
+        )
+    else:
+        # Legacy path: honor pre-split author intent + stratify the rest by class.
+        pre_assigned: list[tuple[int, str]] = []
+        to_split_input: list[dict] = []
+        _VALID_SPLITS = {"train", "val", "test"}
+        _SPLIT_ALIASES = {"valid": "val"}
 
-    n_pre = len(pre_assigned)
-    n_random = len(to_split_input)
-    print(f"\n✂️  Assigning splits ({ratios[0]:.0%}/{ratios[1]:.0%}/{ratios[2]:.0%})...")
-    print(f"   Pre-split (scene-aware): {n_pre}  |  Random-split: {n_random}")
+        for i, s in enumerate(samples):
+            if "original_split" in s:
+                raw = s["original_split"]
+                mapped = _SPLIT_ALIASES.get(raw, raw)
+                pre_assigned.append((i, mapped if mapped in _VALID_SPLITS else "train"))
+            else:
+                to_split_input.append({
+                    "_idx": i,
+                    "filename": Path(s["image_path"]).name,
+                    "labels": s.get("labels", []),
+                })
 
-    idx_to_split: dict[int, str] = {i: split for i, split in pre_assigned}
+        n_pre = len(pre_assigned)
+        n_random = len(to_split_input)
+        print(f"\n✂️  Assigning splits ({ratios[0]:.0%}/{ratios[1]:.0%}/{ratios[2]:.0%})...")
+        print(f"   Pre-split (scene-aware): {n_pre}  |  Random-split: {n_random}")
 
-    if to_split_input:
-        splitter = SplitGenerator(ratios=ratios, seed=seed, stratified=True)
-        assignment = splitter.assign_splits(to_split_input)  # {split: [dict, ...]}
-        idx_to_split.update({item["_idx"]: split for split, items in assignment.items() for item in items})
+        idx_to_split = {i: split for i, split in pre_assigned}
+        if to_split_input:
+            splitter = SplitGenerator(ratios=ratios, seed=seed, stratified=True)
+            assignment = splitter.assign_splits(to_split_input)
+            idx_to_split.update(
+                {item["_idx"]: split for split, items in assignment.items() for item in items}
+            )
 
     ensure_split_dirs(output_dir)
     split_dirs = {
@@ -191,7 +206,9 @@ def run_data_prep(config: dict, args) -> None:
     file_ops = FileOps(handle_duplicates="rename")
 
     for i, sample in enumerate(tqdm(samples, desc="Processing")):
-        split = idx_to_split.get(i, "train")
+        if i in dropped_idx or i not in idx_to_split:
+            continue
+        split = idx_to_split[i]
         output_path = file_ops.copy_file(
             sample["image_path"], split_dirs[split]["images"], source_name=sample["source"]
         )
@@ -238,6 +255,97 @@ def run_data_prep(config: dict, args) -> None:
         print(f"   {split}/: {counts[split]} imgs ({d['images']})")
     print(f"   Snapshot: {splits_file}")
     print(f"   Report: {report_path}")
+
+
+def _assign_splits_dedup(
+    samples: list[dict],
+    dedup_cfg: dict,
+    ratios: tuple,
+    seed: int,
+) -> tuple[dict[int, str], set[int]]:
+    """Compute idx → split via pHash dedup + group-aware stratified split.
+
+    Returns (idx_to_split, dropped_idx). Dropped indices were trimmed by
+    `max_per_group_eval` and should be skipped during file emission.
+    """
+    from core.p00_data_prep.core.dedup import (
+        apply_max_per_group_eval,
+        build_groups,
+        compute_phashes,
+        stratified_group_split,
+        verify_no_leakage,
+    )
+
+    print(
+        f"\n✂️  Dedup-aware split (hamming ≤ {dedup_cfg['hamming_thresh']}, "
+        f"stratify_by={dedup_cfg['stratify_by']}, "
+        f"ratios={ratios[0]:.0%}/{ratios[1]:.0%}/{ratios[2]:.0%})"
+    )
+
+    img_paths = [Path(s["image_path"]) for s in samples]
+    path_to_idx = {Path(s["image_path"]): i for i, s in enumerate(samples)}
+    path_to_source = {Path(s["image_path"]): s.get("source", "unknown") for s in samples}
+    path_to_classes = {
+        Path(s["image_path"]): [obj["class_id"] for obj in s.get("objects", [])]
+        for s in samples
+    }
+
+    img_to_hash = compute_phashes(img_paths)
+    img_to_group = build_groups(img_to_hash, dedup_cfg["hamming_thresh"])
+
+    group_to_classes: dict[int, list[int]] = {}
+    group_to_images: dict[int, int] = {}
+    group_to_source: dict[int, str] = {}
+    for img, gid in img_to_group.items():
+        group_to_classes.setdefault(gid, []).extend(path_to_classes.get(img, []))
+        group_to_images[gid] = group_to_images.get(gid, 0) + 1
+        group_to_source.setdefault(gid, path_to_source.get(img, "unknown"))
+
+    group_to_split = stratified_group_split(
+        group_to_classes,
+        group_to_images,
+        group_to_source=group_to_source if "source" in dedup_cfg["stratify_by"] else None,
+        target_ratios=ratios,
+        stratify_by=dedup_cfg["stratify_by"],
+        seed=seed,
+    )
+
+    if dedup_cfg["max_per_group_eval"] is not None:
+        img_to_split_nullable = apply_max_per_group_eval(
+            img_to_group, group_to_split, dedup_cfg["max_per_group_eval"], seed=seed
+        )
+    else:
+        img_to_split_nullable = {img: group_to_split[gid] for img, gid in img_to_group.items()}
+
+    idx_to_split: dict[int, str] = {}
+    dropped: set[int] = set()
+    img_to_split_kept: dict[Path, str] = {}
+    for img, idx in path_to_idx.items():
+        new_split = img_to_split_nullable.get(img)
+        if new_split is None:
+            dropped.add(idx)
+        else:
+            idx_to_split[idx] = new_split
+            img_to_split_kept[img] = new_split
+
+    # Per-source / per-split summary
+    per_split_per_source: dict[str, dict[str, int]] = {s: {} for s in ("train", "val", "test")}
+    for img, split in img_to_split_kept.items():
+        src = path_to_source.get(img, "unknown")
+        per_split_per_source[split][src] = per_split_per_source[split].get(src, 0) + 1
+    for split in ("train", "val", "test"):
+        items = ", ".join(f"{k}={v}" for k, v in sorted(per_split_per_source[split].items()))
+        print(f"   {split}: {sum(per_split_per_source[split].values())} imgs ({items})")
+
+    if dedup_cfg["verify_no_leakage"]:
+        img_to_hash_kept = {p: h for p, h in img_to_hash.items() if p in img_to_split_kept}
+        leaks = verify_no_leakage(
+            img_to_hash_kept, img_to_split_kept, dedup_cfg["hamming_thresh"]
+        )
+        flag = "✅" if leaks == 0 else "⚠️"
+        print(f"   {flag} cross-split leakage at hamming ≤ {dedup_cfg['hamming_thresh']}: {leaks}")
+
+    return idx_to_split, dropped
 
 
 def resplit_only(output_dir: Path, ratios: tuple, seed: int, task_type: str) -> None:

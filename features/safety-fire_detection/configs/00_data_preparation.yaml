@@ -76,6 +76,52 @@ splits:
   test: 0.1
   seed: 42
 
+# ---------------------------------------------------------------------------
+# Deduplication + smart split (added 2026-05-03)
+# Controls how the post-merge dataset is re-split to (a) eliminate
+# train↔val↔test near-duplicate leakage and (b) keep every source family
+# proportionally represented in all 3 splits.
+# Pipeline:
+#   1. Compute pHash for every image.
+#   2. Build connected components (groups) at hamming distance ≤ thresh.
+#   3. Assign whole groups to splits — never split a group across train/val/test.
+#   4. While assigning, balance per-class box counts AND per-source image
+#      counts toward target ratios (joint stratification).
+#   5. Optionally cap per-group survivors in val/test to fight video-sequence
+#      bloat (where ~thousands of near-identical frames inflate eval metrics).
+# Disable only if your dataset has zero near-duplicates AND only one source.
+# ---------------------------------------------------------------------------
+dedup:
+  enabled: true
+
+  # pHash hamming distance defining "near-duplicate".
+  # Trade-off:
+  #   - Lower (≤2)  → tighter, more groups, easier to balance, may MISS some
+  #                   true near-dupes (slow camera pans, JPEG re-saves).
+  #   - Higher (≥6) → catches everything, but groups balloon (one giant group
+  #                   per video sequence) → splitter loses degrees of freedom.
+  # Recommended: 3 for general image data, 4–5 only for very clean unique-shot
+  # collections (e.g. studio product photos).
+  hamming_thresh: 3
+
+  # Whether to cap the number of group representatives kept in val/test.
+  # null = off (keep all). Integer N = keep ≤N evenly-strided members per group
+  # in eval splits, drop the rest. Train is never capped.
+  max_per_group_eval: null
+
+  # Joint stratification axes.
+  #   class  - per-class box-count balance
+  #   source - per-source image-count balance
+  stratify_by: [class, source]
+
+  # How to identify a sample's source:
+  #   adapter        - read source.name attached at p00 ingest time (default)
+  #   filename_prefix- legacy fallback for existing training_ready/ datasets
+  source_from: adapter
+
+  # Verify zero cross-split leakage at hamming ≤ thresh after splitting.
+  verify_no_leakage: true
+
 options:
   copy_images: true
   handle_duplicates: "rename"

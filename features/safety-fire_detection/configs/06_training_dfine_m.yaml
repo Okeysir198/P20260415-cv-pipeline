@@ -186,7 +186,7 @@ logging:
 
 checkpoint:
   save_best: true
-  metric: eval_map           # HF Trainer + torchmetrics key (was val/mAP50 under pytorch)
+  metric: eval_map_50        # mAP50 is more stable than mAP for DETR-family on small val sets (sigmoid scores compress 0.05–0.20 → flat PR curve → noisy mAP)
   mode: max
   save_interval: 1             # every epoch — prevents losing best checkpoint on crash
 
