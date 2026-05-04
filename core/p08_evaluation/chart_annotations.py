@@ -48,6 +48,42 @@ class ChartMeta:
 _DEFAULT_NEXT_STEP = "No action — signal is within acceptable band."
 
 
+# ---------------------------------------------------------------------------
+# Failure-mode + FN-cause glossaries (single source of truth).
+# Used by error_analysis_runner._analyze_detection (mode tuple) AND by the
+# in-image side-panels for charts 10 / 16 / 17.
+# ---------------------------------------------------------------------------
+
+FAILURE_MODE_GLOSSARY: dict[str, str] = {
+    "missed":          "GT box has no matching prediction at all (recall failure).",
+    "localization":    "Prediction overlaps GT but IoU < 0.5 (regression failure).",
+    "class_confusion": "Prediction at right place but wrong class (head failure).",
+    "duplicate":       "Multiple predictions match the same GT (NMS failure).",
+    "background_fp":   "Prediction with no matching GT (precision failure).",
+}
+
+# Per-mode "if this mode is dominant → try this" hint. Compact, action-first.
+FAILURE_MODE_REMEDIES: dict[str, str] = {
+    "missed":          "+mosaic, +copy-paste, lower conf",
+    "localization":    "IoU loss weight↑, higher input size",
+    "class_confusion": "class-balanced sampling, check label noise (chart 04)",
+    "duplicate":       "tighter NMS / lower IoU NMS thr",
+    "background_fp":   "+hard-neg mining, higher conf, longer training",
+}
+
+FN_CAUSE_GLOSSARY: dict[str, str] = {
+    "true_miss":         "Detector produced no candidate for this GT.",
+    "under_confidence":  "Detector found it but score < threshold.",
+    "localization_fail": "Detector found it but IoU too low.",
+}
+
+FN_CAUSE_REMEDIES: dict[str, str] = {
+    "true_miss":         "augment + capacity",
+    "under_confidence":  "lower threshold or temperature scaling",
+    "localization_fail": "tighter regression head, higher input size",
+}
+
+
 def evaluate_next_step(
     metrics: dict[str, Any] | None, meta: ChartMeta | None
 ) -> str:
@@ -287,6 +323,14 @@ CHART_META: dict[str, ChartMeta] = {
                     "Long-tail problem — more data for '{worst_class}' is usually "
                     "higher-leverage than model changes.",
             ),
+            Rule(
+                when=lambda m: (
+                    m.get("best_score", 0) - m.get("worst_score", 0) > 0.2
+                ),
+                say="Per-class F1 spread > 0.2 ({best_score:.2f} → {worst_score:.2f}). "
+                    "Long-tail class '{worst_class}' needs targeted resampling "
+                    "(class-balanced sampler or oversample at load).",
+            ),
         ),
     ),
 
@@ -298,12 +342,20 @@ CHART_META: dict[str, ChartMeta] = {
             "the last row/column is 'background'; for segmentation cells "
             "are aggregated pixel counts."
         ),
+        signal_template="Top off-diagonal: {top_confused_from} → {top_confused_to} ({top_pair_share:.1%}).",
         next_step_rules=(
             Rule(
                 when=lambda m: m.get("max_off_diagonal", 0) > 0.20,
                 say="'{top_confused_from}' → '{top_confused_to}' confusion is high "
                     "({max_off_diagonal:.2f}). Consider merging the two classes or "
                     "improving labels for the boundary cases.",
+            ),
+            Rule(
+                when=lambda m: m.get("top_pair_share", 0) > 0.05,
+                say="Top confusion pair '{top_confused_from}' → '{top_confused_to}' "
+                    "is {top_pair_share:.1%} of all errors. Investigate the label "
+                    "boundary between these two classes (chart 04 label-quality, or "
+                    "Label Studio QA pass).",
             ),
         ),
     ),
@@ -362,32 +414,65 @@ CHART_META: dict[str, ChartMeta] = {
         signal_template="Dominant mode: {dominant_mode} (Δ {dominant_delta:.3f}).",
         next_step_rules=(
             Rule(
+                when=lambda m: m.get("dominant_mode") == "missed"
+                    and m.get("dominant_delta", 0) > 0.15,
+                say="Largest lever: missed boxes (Δ {dominant_delta:.3f}). Try "
+                    "lower conf, +mosaic, +copy-paste, or check recall-by-size "
+                    "in chart 20.",
+            ),
+            Rule(
+                when=lambda m: m.get("dominant_mode") == "background_fp"
+                    and m.get("dominant_delta", 0) > 0.15,
+                say="Largest lever: background FPs (Δ {dominant_delta:.3f}). Try "
+                    "higher conf, hard-negative mining, or longer training.",
+            ),
+            Rule(
+                when=lambda m: m.get("dominant_mode") == "localization"
+                    and m.get("dominant_delta", 0) > 0.10,
+                say="Box regression weak (Δ {dominant_delta:.3f}). Try IoU/GIoU "
+                    "loss weight↑, anchor priors, or higher input resolution.",
+            ),
+            Rule(
+                when=lambda m: m.get("dominant_mode") == "class_confusion"
+                    and m.get("dominant_delta", 0) > 0.05,
+                say="Class boundary fuzzy (Δ {dominant_delta:.3f}). Try class-"
+                    "balanced sampling, or inspect chart 04 for label noise on "
+                    "the top-confused pair.",
+            ),
+            Rule(
+                when=lambda m: m.get("dominant_mode") == "duplicate"
+                    and m.get("dominant_delta", 0) > 0.05,
+                say="Duplicates dominate (Δ {dominant_delta:.3f}). Tighter NMS / "
+                    "lower IoU NMS threshold, or inspect for overlapping anchors / "
+                    "query collisions.",
+            ),
+            # Fallbacks (kept for backward-compat) when delta is below the
+            # action thresholds above but still the dominant mode.
+            Rule(
                 when=lambda m: m.get("dominant_mode") == "missed",
-                say="Most loss comes from missed detections. Increase recall via "
-                    "lower conf threshold, more diverse training data, or better "
-                    "small-object augmentations.",
-            ),
-            Rule(
-                when=lambda m: m.get("dominant_mode") == "localization",
-                say="Boxes land on the right class but miss the right location. "
-                    "Increase bbox loss weight, use stronger geometric augs, or "
-                    "check for coarse annotations.",
-            ),
-            Rule(
-                when=lambda m: m.get("dominant_mode") == "class_confusion",
-                say="Most loss is class confusion — labels may be ambiguous. "
-                    "Check confusion matrix above and consider class merges or "
-                    "a label-studio QA pass on the top-confused pair.",
-            ),
-            Rule(
-                when=lambda m: m.get("dominant_mode") == "duplicate",
-                say="Duplicates dominate — tune NMS IoU threshold, or inspect "
-                    "for overlapping anchors / query collisions.",
+                say="Most loss comes from missed detections (Δ {dominant_delta:.3f}). "
+                    "Below the high-leverage threshold but still the top mode — "
+                    "consider lower conf or +mosaic before model changes.",
             ),
             Rule(
                 when=lambda m: m.get("dominant_mode") == "background_fp",
-                say="Most loss is background false-positives. Raise the conf "
-                    "threshold, or add hard-negative background images.",
+                say="Most loss is background false-positives (Δ {dominant_delta:.3f}). "
+                    "Raise conf threshold or add hard-negative images.",
+            ),
+            Rule(
+                when=lambda m: m.get("dominant_mode") == "localization",
+                say="Boxes land on the right class but miss the right location "
+                    "(Δ {dominant_delta:.3f}). Increase bbox loss weight or input size.",
+            ),
+            Rule(
+                when=lambda m: m.get("dominant_mode") == "class_confusion",
+                say="Class confusion dominates (Δ {dominant_delta:.3f}). Inspect "
+                    "the top-confused pair on the confusion matrix.",
+            ),
+            Rule(
+                when=lambda m: m.get("dominant_mode") == "duplicate",
+                say="Duplicates dominate (Δ {dominant_delta:.3f}). Tune NMS IoU "
+                    "threshold or query overlap.",
             ),
         ),
     ),
@@ -399,6 +484,29 @@ CHART_META: dict[str, ChartMeta] = {
             "ratio, and scene crowdedness. A steep climb at the small-size "
             "bucket means the model is scale-sensitive; a climb at high "
             "crowdedness means NMS / detector saturation."
+        ),
+        signal_template="Steepest slope: {worst_axis} ({worst_axis_delta:+.2f} miss-rate).",
+        next_step_rules=(
+            Rule(
+                when=lambda m: m.get("worst_axis") == "size"
+                    and m.get("worst_axis_delta", 0) > 0.20,
+                say="Miss-rate climbs sharply on small objects (Δ "
+                    "{worst_axis_delta:+.2f} small vs large). Bump input_size, add "
+                    "mosaic / copy-paste, or upsample small-object crops.",
+            ),
+            Rule(
+                when=lambda m: m.get("worst_axis") == "crowdedness"
+                    and m.get("worst_axis_delta", 0) > 0.20,
+                say="Miss-rate climbs sharply in crowded scenes (Δ "
+                    "{worst_axis_delta:+.2f}). Bump query / proposal counts or "
+                    "loosen NMS.",
+            ),
+            Rule(
+                when=lambda m: m.get("worst_axis_delta", 0) > 0.15,
+                say="Miss-rate is attribute-sensitive on `{worst_axis}` (Δ "
+                    "{worst_axis_delta:+.2f}). Slice the training data along this "
+                    "axis to confirm coverage gap.",
+            ),
         ),
     ),
 
@@ -476,9 +584,20 @@ CHART_META: dict[str, ChartMeta] = {
         signal_template="FN: true_miss={true_miss:.0%}  under_conf={under_conf:.0%}  loc_fail={loc_fail:.0%}.",
         next_step_rules=(
             Rule(
+                when=lambda m: m.get("true_miss", 0) > 0.5,
+                say="{true_miss:.0%} of FNs are true misses — capacity / data gap, "
+                    "not threshold. Augment + train longer, or inspect data "
+                    "distribution for missing scenes.",
+            ),
+            Rule(
                 when=lambda m: m.get("under_conf", 0) > 0.3,
                 say="{under_conf:.0%} of FNs are under-confidence detections. "
-                    "Lower the detection threshold before changing the model.",
+                    "Lower the deploy threshold, or recalibrate (temperature scaling).",
+            ),
+            Rule(
+                when=lambda m: m.get("loc_fail", 0) > 0.3,
+                say="{loc_fail:.0%} of FNs are localization failures. Tighten the "
+                    "regression head, raise input size, or add IoU-loss weight.",
             ),
         ),
     ),
@@ -508,6 +627,22 @@ CHART_META: dict[str, ChartMeta] = {
             "medium (32²–96² px), large (> 96² px). Small-object recall is "
             "the most commonly gappy — augmentations or input-size bumps are "
             "the usual levers."
+        ),
+        signal_template="Recall — small={recall_small:.2f}  medium={recall_medium:.2f}  large={recall_large:.2f}.",
+        next_step_rules=(
+            Rule(
+                when=lambda m: m.get("recall_small", 1.0) < 0.5,
+                say="Small-object recall {recall_small:.2f} is < 0.5. Try "
+                    "input_size↑, mosaic, or upsample small-object crops at load.",
+            ),
+            Rule(
+                when=lambda m: (
+                    m.get("recall_large", 0) - m.get("recall_small", 0) > 0.3
+                ),
+                say="Recall gap small vs large is "
+                    "{recall_small:.2f} → {recall_large:.2f}. Scale-sensitive — "
+                    "raise input resolution and/or strengthen scale aug.",
+            ),
         ),
     ),
 

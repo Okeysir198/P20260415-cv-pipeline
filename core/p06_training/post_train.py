@@ -121,6 +121,27 @@ def _forward_batch_detection(
 # ---------------------------------------------------------------------------
 
 
+def _read_operating_thresholds(summary_json: Path) -> dict[int, float] | None:
+    """Pull the per-class F1-optimal thresholds out of summary.json, if present.
+
+    Returns None when the file/block is missing or the policy isn't per-class —
+    the caller then falls back to the scalar `conf_threshold`.
+    """
+    import json  # noqa: PLC0415
+    if not summary_json.exists():
+        return None
+    try:
+        op = json.loads(summary_json.read_text()).get("operating_point") or {}
+    except Exception:
+        return None
+    if op.get("policy") != "f1_optimal_per_class":
+        return None
+    thr = op.get("thresholds")
+    if not isinstance(thr, dict):
+        return None
+    return {int(k): float(v) for k, v in thr.items()}
+
+
 def render_prediction_grid(
     model,
     dataset,
@@ -133,6 +154,7 @@ def render_prediction_grid(
     style: VizStyle,
     task: str = "detection",
     conf_threshold: float = 0.3,
+    thresholds: dict[int, float] | None = None,
     grid_cols: int = 4,
     dpi: int = 150,
 ) -> Path | None:
@@ -184,17 +206,34 @@ def render_prediction_grid(
     rows: list[np.ndarray] = []
 
     if task == "detection":
+        # When per-class thresholds are supplied, run the forward at the
+        # smallest of them so every kept-by-some-class prediction reaches
+        # the post-hoc filter. Falls back to the caller's scalar otherwise.
+        fwd_conf = (
+            min(min(thresholds.values()), conf_threshold)
+            if thresholds else conf_threshold
+        )
         target_sizes = torch.tensor(
             [[input_h, input_w]] * len(samples), dtype=torch.int64
         )
         decoded = _forward_batch_detection(
-            model, [s[3] for s in samples], target_sizes, conf_threshold,
+            model, [s[3] for s in samples], target_sizes, fwd_conf,
         )
         for i, (real_idx, orig_image, _resized, _tensor, gt_targets) in enumerate(samples):
             pred = decoded[i] if i < len(decoded) else {}
             pred_boxes = np.asarray(pred.get("boxes", []), dtype=np.float64).reshape(-1, 4)
             pred_labels = np.asarray(pred.get("labels", []), dtype=np.int64).ravel()
             pred_scores = np.asarray(pred.get("scores", []), dtype=np.float64).ravel()
+
+            if thresholds and len(pred_scores) > 0:
+                keep = np.array(
+                    [s >= thresholds.get(int(c), conf_threshold)
+                     for s, c in zip(pred_scores, pred_labels, strict=True)],
+                    dtype=bool,
+                )
+                pred_boxes = pred_boxes[keep]
+                pred_labels = pred_labels[keep]
+                pred_scores = pred_scores[keep]
 
             orig_h, orig_w = orig_image.shape[:2]
             if len(pred_boxes) > 0:
@@ -439,11 +478,11 @@ def run_post_train_artifacts(
     if task is None:
         task = _task_from_output_format(getattr(model, "output_format", None))
 
-    # YOLOX scores are obj*cls (sigmoid×sigmoid) — TPs sit ~0.5+, FPs flood
-    # at 0.05 and overwhelm the analyzer (137k FPs vs 207 GTs observed on
-    # CPPE-5 → baseline mAP=0 in summary.md while test_results.json=0.74).
-    # DETR-family scores rarely exceed 0.2 even for TPs, so 0.05 is correct
-    # there. Pick a sane default per output_format; explicit caller value wins.
+    # Detection now derives per-class F1-optimal thresholds from chart 15's
+    # sweep (see core.p08_evaluation.threshold_policy). The per-arch auto-pick
+    # below only applies to non-detection tasks (cls/seg/kpt) where the
+    # operating-point sweep doesn't apply — those analyzers still consume the
+    # scalar threshold.
     if error_analysis_conf_threshold is None:
         output_format = (getattr(model, "output_format", "") or "").lower()
         error_analysis_conf_threshold = 0.25 if output_format == "yolox" else 0.05
@@ -462,26 +501,15 @@ def run_post_train_artifacts(
         logger.warning("error_analysis_runner unavailable: %s", e)
         run_error_analysis = None  # type: ignore[assignment]
 
-    # -------- val best grid + error analysis --------
-    if val_dataset is not None and len(val_dataset) > 0:
-        n = len(val_dataset)
-        k = min(best_num_samples, n)
-        val_indices = sorted(random.sample(range(n), k)) if k > 0 else []
-        val_title = (
-            f"Best checkpoint (val) — mAP50: {log_history_best_map:.4f}"
-            if log_history_best_map is not None
-            else "Best checkpoint (val)"
-        )
-        p = render_prediction_grid(
-            model, val_dataset, val_indices,
-            save_dir / "val_predictions" / "best.png",
-            title=val_title, class_names=class_names,
-            input_size=input_size, style=style, task=task,
-            conf_threshold=best_conf_threshold,
-        )
-        if p is not None:
-            artifacts["val_best_png"] = p
+    # Detection drives threshold-sensitive charts off per-class F1-optimal
+    # cutoffs derived from the same predictions chart 15 plots; cls/seg/kpt
+    # analyzers ignore `threshold_policy` and continue using the scalar
+    # `error_analysis_conf_threshold` above.
+    threshold_policy = "f1_optimal_per_class" if task == "detection" else "fixed"
 
+    # -------- val error analysis → best grid (best.png uses derived thresholds) --------
+    if val_dataset is not None and len(val_dataset) > 0:
+        val_ea_thresholds: dict[int, float] | None = None
         if run_error_analysis is not None:
             try:
                 val_report = run_error_analysis(
@@ -497,31 +525,38 @@ def run_post_train_artifacts(
                     max_samples=error_analysis_max_samples,
                     hard_images_per_class=error_analysis_hard_images_per_class,
                     training_config=training_config,
+                    threshold_policy=threshold_policy,
+                    split="val",
                 )
                 artifacts["val_error_analysis"] = val_report
+                val_ea_thresholds = _read_operating_thresholds(
+                    save_dir / "val_predictions" / "error_analysis" / "summary.json"
+                )
             except Exception as e:
                 logger.warning("val error analysis skipped: %s", e, exc_info=True)
 
-    # -------- test best grid + error analysis --------
-    if test_dataset is not None and len(test_dataset) > 0:
-        n = len(test_dataset)
+        n = len(val_dataset)
         k = min(best_num_samples, n)
-        test_indices = sorted(random.sample(range(n), k)) if k > 0 else []
-        test_title = (
-            f"Best checkpoint (test) — mAP50: {log_history_test_map:.4f}"
-            if log_history_test_map is not None
-            else "Best checkpoint (test)"
+        val_indices = sorted(random.sample(range(n), k)) if k > 0 else []
+        val_title = (
+            f"Best checkpoint (val) — mAP50: {log_history_best_map:.4f}"
+            if log_history_best_map is not None
+            else "Best checkpoint (val)"
         )
         p = render_prediction_grid(
-            model, test_dataset, test_indices,
-            save_dir / "test_predictions" / "best.png",
-            title=test_title, class_names=class_names,
+            model, val_dataset, val_indices,
+            save_dir / "val_predictions" / "best.png",
+            title=val_title, class_names=class_names,
             input_size=input_size, style=style, task=task,
             conf_threshold=best_conf_threshold,
+            thresholds=val_ea_thresholds,
         )
         if p is not None:
-            artifacts["test_best_png"] = p
+            artifacts["val_best_png"] = p
 
+    # -------- test error analysis → best grid --------
+    if test_dataset is not None and len(test_dataset) > 0:
+        test_ea_thresholds: dict[int, float] | None = None
         if run_error_analysis is not None:
             try:
                 test_report = run_error_analysis(
@@ -537,10 +572,34 @@ def run_post_train_artifacts(
                     max_samples=error_analysis_max_samples,
                     hard_images_per_class=error_analysis_hard_images_per_class,
                     training_config=training_config,
+                    threshold_policy=threshold_policy,
+                    split="test",
                 )
                 artifacts["test_error_analysis"] = test_report
+                test_ea_thresholds = _read_operating_thresholds(
+                    save_dir / "test_predictions" / "error_analysis" / "summary.json"
+                )
             except Exception as e:
                 logger.warning("test error analysis skipped: %s", e, exc_info=True)
+
+        n = len(test_dataset)
+        k = min(best_num_samples, n)
+        test_indices = sorted(random.sample(range(n), k)) if k > 0 else []
+        test_title = (
+            f"Best checkpoint (test) — mAP50: {log_history_test_map:.4f}"
+            if log_history_test_map is not None
+            else "Best checkpoint (test)"
+        )
+        p = render_prediction_grid(
+            model, test_dataset, test_indices,
+            save_dir / "test_predictions" / "best.png",
+            title=test_title, class_names=class_names,
+            input_size=input_size, style=style, task=task,
+            conf_threshold=best_conf_threshold,
+            thresholds=test_ea_thresholds,
+        )
+        if p is not None:
+            artifacts["test_best_png"] = p
 
     val_ea_dir = save_dir / "val_predictions" / "error_analysis"
 

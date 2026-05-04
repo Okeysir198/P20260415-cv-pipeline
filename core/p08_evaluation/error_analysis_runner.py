@@ -173,6 +173,141 @@ def _dispatch_postprocess(model, preds_raw, conf_threshold, target_sizes):
     )
 
 
+def _resolve_forward_batch_size(kwarg: int) -> int:
+    """Read ``EA_FORWARD_BATCH_SIZE`` env override; fall back to ``kwarg``.
+
+    Env var takes precedence (operator override) but only when set + parseable
+    + ≥ 1. Invalid values fall back to the kwarg with a warning.
+    """
+    import os
+    raw = os.environ.get("EA_FORWARD_BATCH_SIZE")
+    if raw is None or raw.strip() == "":
+        return max(1, int(kwarg))
+    try:
+        v = int(raw)
+        if v < 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        logger.warning(
+            "EA_FORWARD_BATCH_SIZE={!r} not a positive int — using kwarg={}",
+            raw, kwarg,
+        )
+        return max(1, int(kwarg))
+    return v
+
+
+class _BatchState:
+    """Per-analyzer mutable batch-size box — survives OOM-driven halving."""
+
+    __slots__ = ("size",)
+
+    def __init__(self, size: int) -> None:
+        self.size = max(1, int(size))
+
+    def halve(self) -> bool:
+        if self.size <= 1:
+            return False
+        self.size = max(1, self.size // 2)
+        return True
+
+
+def _chunked(seq: list, size: int):
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
+def _batched_logits(
+    model, samples: list[dict], device, batch_state: _BatchState,
+) -> list[torch.Tensor] | None:
+    """Stack tensors, run a single forward, return per-sample logits slices.
+
+    Picks ``out.logits`` when available (HF ModelOutput) else treats ``out``
+    as the logits tensor. Returns a list of length ``len(samples)`` where
+    each entry is the per-sample logits slice on CPU. OOM-defended via
+    halving recursion.
+    """
+    if not samples:
+        return []
+    batch = torch.stack([s["tensor"] for s in samples], dim=0).to(device)
+    try:
+        with torch.no_grad():
+            out = _dispatch_forward(model, batch)
+    except torch.cuda.OutOfMemoryError:
+        del batch
+        torch.cuda.empty_cache()
+        if len(samples) == 1:
+            raise
+        new_size = max(1, len(samples) // 2)
+        if batch_state.halve():
+            logger.warning(
+                "EA forward OOM at batch={} — halving to {} for rest of run",
+                len(samples), batch_state.size,
+            )
+        left = _batched_logits(model, samples[:new_size], device, batch_state)
+        right = _batched_logits(model, samples[new_size:], device, batch_state)
+        if left is None or right is None:
+            return None
+        return left + right
+    logits = out.logits if hasattr(out, "logits") else out
+    return [logits[i].detach().cpu() for i in range(logits.shape[0])]
+
+
+def _batched_forward_decode(
+    model, samples: list[dict], input_size: tuple[int, int],
+    conf_threshold: float, device, batch_state: _BatchState,
+) -> list[dict] | None:
+    """Stack preprocessed tensors, forward once, decode once.
+
+    ``samples`` is a list of dicts with key ``"tensor"`` (a CHW float tensor
+    on CPU, identical shape across the chunk). Returns a list of decoded
+    per-sample dicts of equal length, or ``None`` if forward + decode could
+    not be performed at any batch size (caller should fall back to per-sample).
+
+    OOM defense: on ``torch.cuda.OutOfMemoryError`` the chunk is split in half
+    via recursion and ``batch_state.size`` is halved for the rest of the run.
+    Recurses until success or batch=1 — if batch=1 OOMs, the exception is
+    re-raised.
+    """
+    if not samples:
+        return []
+    input_h, input_w = int(input_size[0]), int(input_size[1])
+    batch = torch.stack([s["tensor"] for s in samples], dim=0).to(device)
+    target_sizes = torch.tensor(
+        [[input_h, input_w]] * len(samples), device=device,
+    )
+    try:
+        with torch.no_grad():
+            preds_raw = _dispatch_forward(model, batch)
+        decoded = _dispatch_postprocess(
+            model, preds_raw, conf_threshold, target_sizes,
+        )
+    except torch.cuda.OutOfMemoryError:
+        del batch, target_sizes
+        torch.cuda.empty_cache()
+        if len(samples) == 1:
+            raise
+        new_size = max(1, len(samples) // 2)
+        if batch_state.halve():
+            logger.warning(
+                "EA forward OOM at batch={} — halving to {} for rest of run",
+                len(samples), batch_state.size,
+            )
+        # Recurse: split this chunk in half regardless of state.size.
+        left = _batched_forward_decode(
+            model, samples[:new_size], input_size, conf_threshold, device, batch_state,
+        )
+        right = _batched_forward_decode(
+            model, samples[new_size:], input_size, conf_threshold, device, batch_state,
+        )
+        if left is None or right is None:
+            return None
+        return left + right
+    if not isinstance(decoded, list) or len(decoded) != len(samples):
+        # Postprocessor doesn't tolerate batched input — caller must fall back.
+        return None
+    return decoded
+
+
 def _sampling_indices(n: int, max_samples: int | None) -> list[int]:
     if max_samples is None or max_samples >= n:
         return list(range(n))
@@ -189,11 +324,186 @@ def _rotate_xticks(ax, labels: list[str], *, threshold: int = 5) -> None:
         ax.set_xticklabels(labels)
 
 
-def _savefig(fig, path: Path) -> Path:
+def _savefig(fig, path: Path, *, decorate: tuple | None = None) -> Path:
+    """Save and close a figure, optionally stamping it with the chart context.
+
+    ``decorate``, when provided, is ``(stem, ctx, metrics)`` — see
+    ``_save_decorated`` for the contract. When ``decorate`` is None this is
+    the original byte-identical save+close path used by all non-detection
+    callers and by detection charts that opt out of decoration.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    if decorate is not None:
+        stem, ctx, metrics = decorate
+        _decorate_figure(fig, stem=stem, ctx=ctx, metrics=metrics)
     fig.savefig(str(path))
     plt.close(fig)
     return path
+
+
+# ---------------------------------------------------------------------------
+# In-image annotation: subtitle (IoU + thr + n + policy) + footer (next step)
+# + glossary side-panels for charts 10 / 16 / 17.
+# ---------------------------------------------------------------------------
+#
+# `ctx` is built once in each task analyzer and threaded into every
+# `_savefig(..., decorate=(stem, ctx, metrics))` call. Detection passes a
+# rich ctx (operating-point thresholds dict, policy, n, eps_floor, IoU,
+# class_names); cls/seg/kpt pass a minimal ctx (`policy="fixed"`, scalar
+# `conf`, `n`).
+
+_GLOSSARY_CHARTS = {"10_failure_mode_contribution",
+                    "16_recoverable_map_vs_iou",
+                    "17_confidence_attribution"}
+
+
+def _format_subtitle(stem: str, ctx: dict | None) -> str | None:
+    """One-line context stamp under the chart title."""
+    if not ctx:
+        return None
+    parts: list[str] = []
+    iou = ctx.get("iou_threshold")
+    if iou is not None and stem != "16_recoverable_map_vs_iou":
+        parts.append(f"IoU ≥ {float(iou):.2f}")
+    policy = ctx.get("policy", "fixed")
+    thresholds = ctx.get("thresholds")
+    # Charts that do NOT show an operating-point threshold band — full-curve
+    # / GT-only / sweep charts (matches APPLIED_TO_CHARTS in threshold_policy).
+    agnostic = stem not in {
+        "07_per_class_performance", "08_confusion_matrix",
+        "08_top_confused_pairs", "10_failure_mode_contribution",
+        "11_failure_by_attribute", "12_hardest_images",
+        "13_failure_mode_examples",
+    }
+    if policy == "fixed":
+        if not agnostic and thresholds is not None:
+            parts.append(f"policy=fixed · thr={float(thresholds):.3f}")
+        else:
+            parts.append("policy=fixed")
+    else:
+        if not agnostic and isinstance(thresholds, dict) and ctx.get("class_names"):
+            cn = ctx["class_names"]
+            thr_strs = ", ".join(
+                f"{cn.get(int(cid), str(cid))}={float(v):.3f}"
+                for cid, v in sorted(thresholds.items())
+            )
+            parts.append(f"operating thr: {thr_strs}")
+        parts.append(f"policy={policy}")
+    n = ctx.get("n")
+    if n is not None:
+        parts.append(f"n={n}")
+    return "  ·  ".join(parts) if parts else None
+
+
+def _format_glossary_block(stem: str) -> str | None:
+    """Side-panel text for charts 10 / 16 / 17."""
+    from core.p08_evaluation.chart_annotations import (
+        FAILURE_MODE_GLOSSARY,
+        FAILURE_MODE_REMEDIES,
+        FN_CAUSE_GLOSSARY,
+        FN_CAUSE_REMEDIES,
+    )
+
+    if stem == "17_confidence_attribution":
+        glossary = FN_CAUSE_GLOSSARY
+        remedies = FN_CAUSE_REMEDIES
+        header = "FN cause glossary"
+        show_remedies = True
+    elif stem == "10_failure_mode_contribution":
+        glossary = FAILURE_MODE_GLOSSARY
+        remedies = FAILURE_MODE_REMEDIES
+        header = "Failure-mode glossary"
+        show_remedies = True
+    elif stem == "16_recoverable_map_vs_iou":
+        glossary = FAILURE_MODE_GLOSSARY
+        remedies = None
+        header = "Failure-mode glossary"
+        show_remedies = False
+    else:
+        return None
+
+    lines = [header]
+    for k, desc in glossary.items():
+        lines.append(f"  • {k}: {desc}")
+    if show_remedies and remedies:
+        lines.append("Improvement levers")
+        for k, hint in remedies.items():
+            lines.append(f"  • {k} → {hint}")
+    return "\n".join(lines)
+
+
+def _decorate_figure(fig, *, stem: str | None, ctx: dict | None,
+                     metrics: dict | None) -> None:
+    """Stamp subtitle (top), footer-suggestion (bottom), and optional
+    glossary side-panel onto ``fig`` before save.
+
+    Pure-text decoration via ``fig.text`` and ``fig.suptitle`` — does not
+    mutate axes content.
+    """
+    if stem is None:
+        return
+    from core.p08_evaluation.chart_annotations import (
+        CHART_META,
+        evaluate_next_step,
+    )
+
+    subtitle = _format_subtitle(stem, ctx)
+    if subtitle:
+        # Two paths: constrained_layout figures honour suptitle (it reserves
+        # space automatically); explicit subplots_adjust callers don't, so
+        # for those we lower ``top`` ourselves and drop the subtitle in the
+        # reserved strip via fig.text.
+        try:
+            uses_constrained = bool(fig.get_constrained_layout())
+        except Exception:
+            uses_constrained = False
+        if uses_constrained:
+            fig.suptitle(subtitle, fontsize=8.5, family="monospace",
+                         color="#444444")
+        else:
+            # Lower the top edge so the per-axes ``set_title`` (sits just above
+            # the axes top) and our subtitle (in the reserved strip) can't
+            # collide. ``min`` keeps callers that already reserved more space.
+            current_top = fig.subplotpars.top
+            fig.subplots_adjust(top=min(current_top, 0.86))
+            fig.text(0.5, 0.955, subtitle, ha="center", va="center",
+                     fontsize=8.5, family="monospace", color="#444444")
+
+    meta = CHART_META.get(stem)
+    advice = evaluate_next_step(metrics, meta) if meta else None
+
+    glossary_text = (
+        _format_glossary_block(stem) if stem in _GLOSSARY_CHARTS else None
+    )
+
+    # Bottom block (rendered top → bottom inside the reserved strip):
+    #   Suggested:  ← single advice line, full-width
+    #   <glossary>  ← bullet points, no box
+    # For constrained_layout figures with no glossary, use supxlabel so
+    # matplotlib reserves real space and the footer can't crash into the
+    # x-tick labels / x-axis label. For the glossary charts (10/16/17) the
+    # caller already does subplots_adjust(bottom=0.30+), so place explicitly.
+    if advice:
+        text = f"Suggested: {advice}"
+        try:
+            uses_constrained = bool(fig.get_constrained_layout())
+        except Exception:
+            uses_constrained = False
+        if uses_constrained and not glossary_text:
+            fig.supxlabel(text, fontsize=8.5, color="#1f3b66", wrap=True)
+        else:
+            if not glossary_text:
+                current_bottom = fig.subplotpars.bottom
+                fig.subplots_adjust(bottom=max(current_bottom, 0.14))
+            fig.text(0.5, 0.24 if glossary_text else 0.04, text,
+                     ha="center", va="bottom",
+                     fontsize=8.5, color="#1f3b66", wrap=True)
+    if glossary_text:
+        fig.text(
+            0.06, 0.20, glossary_text,
+            ha="left", va="top",
+            fontsize=7.5, family="monospace",
+        )
 
 
 def _bgr_to_rgb(image: np.ndarray) -> np.ndarray:
@@ -209,6 +519,7 @@ def _bgr_to_rgb(image: np.ndarray) -> np.ndarray:
 
 def _plot_overview(
     title: str, lines: list[str], path: Path,
+    *, decorate: tuple | None = None,
 ) -> Path:
     """01_overview.png — headline metrics card. Text-only panel."""
     fig, ax = new_figure(n_items=1, figsize=(11, 5.5))
@@ -221,7 +532,7 @@ def _plot_overview(
         0.01, 0.88, "\n".join(lines), fontsize=11, family="monospace", va="top",
         transform=ax.transAxes,
     )
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_per_class_bars(
@@ -232,6 +543,7 @@ def _plot_per_class_bars(
     ylabel: str,
     ylim: tuple[float, float] | None = (0, 1.2),
     value_fmt: str = "{:.2f}",
+    decorate: tuple | None = None,
 ) -> Path:
     """Generic per-class bar chart (single series) — used for IoU, PCK, etc."""
     names = [shorten_label(k) for k in counts]
@@ -249,7 +561,7 @@ def _plot_per_class_bars(
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.grid(axis="y", alpha=0.3)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_pixel_confusion_matrix(
@@ -289,6 +601,7 @@ def _plot_pixel_confusion_matrix(
 def _plot_per_class_prf1(
     per_class: dict[int, dict], class_names: dict[int, str], path: Path,
     *, conf_threshold: float | None = None, title_prefix: str = "Per-class",
+    decorate: tuple | None = None,
 ) -> Path:
     """03_per_class_performance.png for detection/classification."""
     names = [shorten_label(class_names.get(cid, str(cid))) for cid in per_class]
@@ -318,12 +631,13 @@ def _plot_per_class_prf1(
         title += f"\n(conf ≥ {conf_threshold})"
     ax.set_title(title)
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_confusion_matrix(
     cm: np.ndarray, class_names: dict[int, str], path: Path,
     *, conf_threshold: float | None = None,
+    decorate: tuple | None = None,
 ) -> Path:
     """04_confusion_matrix.png. Cell text shrinks with class count."""
     labels = [shorten_label(class_names.get(cid, str(cid))) for cid in class_names] + ["(none)"]
@@ -350,11 +664,12 @@ def _plot_confusion_matrix(
                 continue
             ax.text(j, i, str(int(v)), ha="center", va="center",
                     color="white" if v > cm.max() / 2 else "black", fontsize=font_size)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_top_confused_pairs(
     cm: np.ndarray, class_names: dict[int, str], path: Path, top_k: int = 20,
+    *, decorate: tuple | None = None,
 ) -> Path:
     """04_top_confused_pairs.png — horizontal bars for top off-diagonal cells."""
     n_cls = len(class_names)
@@ -374,7 +689,7 @@ def _plot_top_confused_pairs(
         ax.text(0.5, 0.5, "no confusion — all diagonal", ha="center", va="center",
                 transform=ax.transAxes, fontsize=12, color="#999999")
         ax.set_axis_off()
-        return _savefig(fig, path)
+        return _savefig(fig, path, decorate=decorate)
     labels = [p[0] for p in pairs]
     counts = [p[1] for p in pairs]
     ax.barh(labels, counts, color="#c44e52")
@@ -384,11 +699,12 @@ def _plot_top_confused_pairs(
     ax.set_xlabel("count")
     ax.set_title(f"Top {len(pairs)} confused class pairs  (GT → Pred)")
     ax.grid(axis="x", alpha=0.3)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_confidence_hist(
     correct_scores: list[float], wrong_scores: list[float], path: Path,
+    *, decorate: tuple | None = None,
 ) -> Path:
     """05_confidence_calibration.png — TP/correct vs FP/wrong score histograms."""
     fig, ax = new_figure(n_items=10, figsize=(10, 5.5))
@@ -410,11 +726,12 @@ def _plot_confidence_hist(
     ax.set_title("Confidence calibration — correct vs wrong")
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9)
     ax.grid(alpha=0.3)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_hardest_images_grid(
     images: list[np.ndarray], titles: list[str], path: Path, *, header: str,
+    decorate: tuple | None = None,
 ) -> Path | None:
     """08_hardest_images.png — simple matplotlib grid."""
     if not images:
@@ -437,7 +754,7 @@ def _plot_hardest_images_grid(
             if i < len(titles):
                 ax.set_title(titles[i], fontsize=9)
     fig.suptitle(header, fontsize=12)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +910,9 @@ def run_error_analysis(
     max_samples: int | None = 500,
     hard_images_per_class: int = 20,
     training_config: dict | None = None,
+    threshold_policy: str = "f1_optimal_per_class",
+    split: str | None = None,
+    forward_batch_size: int = 8,
 ) -> dict[str, Any]:
     """Dispatch error analysis to the task-specific analyzer.
 
@@ -604,6 +924,18 @@ def run_error_analysis(
     output_dir.mkdir(parents=True, exist_ok=True)
     style = style or VizStyle()
 
+    # Force `fixed` policy on the train split — picking F1-optimal thresholds
+    # from training data is overfit by construction.
+    if split == "train" and threshold_policy != "fixed":
+        logger.warning(
+            "split='train' forces threshold_policy='fixed' (was {!r}) — "
+            "F1-optimal thresholds derived from train data overfit.",
+            threshold_policy,
+        )
+        threshold_policy = "fixed"
+
+    fbs = _resolve_forward_batch_size(forward_batch_size)
+
     if task == "detection":
         result = _analyze_detection(
             model=model, dataset=dataset, output_dir=output_dir,
@@ -612,6 +944,8 @@ def run_error_analysis(
             max_samples=max_samples,
             hard_images_per_class=hard_images_per_class,
             training_config=training_config,
+            threshold_policy=threshold_policy,
+            forward_batch_size=fbs,
         )
     elif task == "classification":
         result = _analyze_classification(
@@ -619,6 +953,7 @@ def run_error_analysis(
             class_names=class_names, input_size=input_size, style=style,
             max_samples=max_samples,
             hard_images_per_class=hard_images_per_class,
+            forward_batch_size=fbs,
         )
     elif task == "segmentation":
         result = _analyze_segmentation(
@@ -626,6 +961,7 @@ def run_error_analysis(
             class_names=class_names, input_size=input_size, style=style,
             max_samples=max_samples,
             hard_images_per_class=hard_images_per_class,
+            forward_batch_size=fbs,
         )
     elif task == "keypoint":
         result = _analyze_keypoint(
@@ -635,6 +971,7 @@ def run_error_analysis(
             max_samples=max_samples,
             hard_images_per_class=hard_images_per_class,
             training_config=training_config,
+            forward_batch_size=fbs,
         )
     else:
         raise ValueError(f"Unknown task for error analysis: {task!r}")
@@ -726,25 +1063,277 @@ def _iou(a, b) -> float:
     return float(inter / union) if union > 0 else 0.0
 
 
+_LOCALIZATION_IOU_LOW = 0.3
+_AR_BUCKETS_T = ("tall", "square", "wide")
+_CROWD_BUCKETS_T = ("1-2", "3-5", "6-10", "11+")
+
+
+def _ar_bucket(ar: float) -> str:
+    return "tall" if ar < 0.5 else ("wide" if ar > 2.0 else "square")
+
+
+def _crowd_bucket(n: int) -> str:
+    if n <= 2:
+        return "1-2"
+    if n <= 5:
+        return "3-5"
+    if n <= 10:
+        return "6-10"
+    return "11+"
+
+
+def _match_predictions_to_gt(
+    *,
+    pb: np.ndarray, pl: np.ndarray, ps: np.ndarray,
+    gt_xyxy: np.ndarray, gt_cls: np.ndarray,
+    real_idx: int, path: str,
+    class_names: dict[int, str], iou_threshold: float,
+    # Mutable accumulators (filled in-place)
+    per_class: dict, confusion: np.ndarray,
+    confidence_tp: list, confidence_fp: list,
+    size_stats: dict, mode_counts: dict, mode_galleries: dict,
+    fn_attribution: dict, missed_by_size: dict, missed_by_ar: dict,
+    missed_by_crowd: dict,
+    # Optional: per-detection mode tagging output (for the eps pass)
+    detections_out: list | None = None,
+) -> tuple[int, int, int]:
+    """Match preds to GT for one image and update accumulators in place.
+
+    Returns ``(img_tp, img_fp, img_fn)`` for per-image hardness ranking.
+
+    Same matching logic as the original analyzer; just hoisted into a helper
+    so the threshold-policy refactor can run it twice (once at eps for
+    threshold-agnostic charts, once at the operating point for sensitive
+    charts) without code duplication.
+    """
+    n_cls = len(class_names)
+    matched_gt = np.zeros(len(gt_xyxy), dtype=bool)
+    img_tp = img_fp = img_fn = 0
+
+    for bi in range(len(pb)):
+        best_iou, best_j = 0.0, -1
+        best_same_class_iou, best_same_class_j = 0.0, -1
+        for j in range(len(gt_xyxy)):
+            if matched_gt[j]:
+                continue
+            iou = _iou(pb[bi], gt_xyxy[j])
+            if iou > best_iou:
+                best_iou, best_j = iou, j
+            if gt_cls[j] == pl[bi] and iou > best_same_class_iou:
+                best_same_class_iou, best_same_class_j = iou, j
+
+        area = max(0.0, (pb[bi, 2] - pb[bi, 0])) * max(0.0, (pb[bi, 3] - pb[bi, 1]))
+        size = _size_category(area)
+        det_record = {
+            "pred_cls": int(pl[bi]),
+            "score": float(ps[bi]),
+            "best_iou_same_class": float(best_same_class_iou),
+            "best_iou_any": float(best_iou),
+            "gt_cls_at_best_iou": int(gt_cls[best_j]) if best_j >= 0 else -1,
+        }
+
+        det_mode = "background_fp"
+        pcid = int(pl[bi])
+
+        if best_same_class_iou >= iou_threshold:
+            if matched_gt[best_same_class_j]:
+                det_mode = "duplicate"
+                per_class[pcid]["fp"] += 1
+                size_stats[size]["fp"] += 1
+                confusion[n_cls, pcid] += 1
+                confidence_fp.append(float(ps[bi]))
+                img_fp += 1
+                mode_galleries["duplicate"].setdefault(pcid, []).append({
+                    "image_idx": int(real_idx), "path": path,
+                    "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
+                    "iou": float(best_same_class_iou),
+                    "matched_gt_box": gt_xyxy[best_same_class_j].tolist(),
+                    "matched_gt_cls": int(gt_cls[best_same_class_j]),
+                })
+            else:
+                det_mode = "correct"
+                matched_gt[best_same_class_j] = True
+                per_class[pcid]["tp"] += 1
+                size_stats[size]["tp"] += 1
+                confusion[pcid, pcid] += 1
+                confidence_tp.append(float(ps[bi]))
+                img_tp += 1
+        elif best_iou >= iou_threshold and best_j >= 0 and gt_cls[best_j] != pl[bi]:
+            det_mode = "class_confusion"
+            matched_gt[best_j] = True
+            per_class[pcid]["fp"] += 1
+            size_stats[size]["fp"] += 1
+            gt_true_cls = int(gt_cls[best_j])
+            per_class[gt_true_cls]["fn"] += 1
+            gt_area = max(0.0, (gt_xyxy[best_j, 2] - gt_xyxy[best_j, 0])) * \
+                      max(0.0, (gt_xyxy[best_j, 3] - gt_xyxy[best_j, 1]))
+            size_stats[_size_category(gt_area)]["fn"] += 1
+            confusion[gt_true_cls, pcid] += 1
+            confidence_fp.append(float(ps[bi]))
+            img_fp += 1
+            img_fn += 1
+            key = (gt_true_cls, pcid)
+            mode_galleries["class_confusion"].setdefault(key, []).append({
+                "image_idx": int(real_idx), "path": path,
+                "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
+                "iou": float(best_iou),
+                "gt_box": gt_xyxy[best_j].tolist(),
+                "gt_cls": gt_true_cls, "pred_cls": pcid,
+            })
+        elif _LOCALIZATION_IOU_LOW <= best_same_class_iou < iou_threshold:
+            det_mode = "localization"
+            per_class[pcid]["fp"] += 1
+            size_stats[size]["fp"] += 1
+            confusion[n_cls, pcid] += 1
+            confidence_fp.append(float(ps[bi]))
+            img_fp += 1
+            mode_galleries["localization"].setdefault(pcid, []).append({
+                "image_idx": int(real_idx), "path": path,
+                "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
+                "iou": float(best_same_class_iou),
+                "matched_gt_box": gt_xyxy[best_same_class_j].tolist()
+                    if best_same_class_j >= 0 else None,
+                "matched_gt_cls": int(gt_cls[best_same_class_j])
+                    if best_same_class_j >= 0 else int(pcid),
+            })
+        else:
+            det_mode = "background_fp"
+            per_class[pcid]["fp"] += 1
+            size_stats[size]["fp"] += 1
+            confusion[n_cls, pcid] += 1
+            confidence_fp.append(float(ps[bi]))
+            img_fp += 1
+            mode_galleries["background_fp"].setdefault(pcid, []).append({
+                "image_idx": int(real_idx), "path": path,
+                "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
+                "pred_cls": pcid,
+            })
+
+        mode_counts[det_mode][pcid] = mode_counts[det_mode].get(pcid, 0) + 1
+        det_record["mode"] = det_mode
+        if detections_out is not None:
+            detections_out.append(det_record)
+
+    for j in np.where(~matched_gt)[0]:
+        cid = int(gt_cls[j])
+        per_class[cid]["fn"] += 1
+        bw_gt = max(0.0, (gt_xyxy[j, 2] - gt_xyxy[j, 0]))
+        bh_gt = max(0.0, (gt_xyxy[j, 3] - gt_xyxy[j, 1]))
+        area = bw_gt * bh_gt
+        size_tier = _size_category(area)
+        size_stats[size_tier]["fn"] += 1
+        confusion[cid, n_cls] += 1
+        img_fn += 1
+        mode_counts["missed"][cid] = mode_counts["missed"].get(cid, 0) + 1
+        ar = float(max(1.0, bw_gt) / max(1.0, bh_gt))
+        missed_by_size.setdefault(cid, {"small": 0, "medium": 0, "large": 0})[size_tier] += 1
+        missed_by_ar.setdefault(cid,
+            {k: 0 for k in _AR_BUCKETS_T})[_ar_bucket(ar)] += 1
+        missed_by_crowd.setdefault(cid,
+            {k: 0 for k in _CROWD_BUCKETS_T})[_crowd_bucket(int(len(gt_xyxy)))] += 1
+        best_any, best_same = 0.0, 0.0
+        best_any_pred = None
+        for bi in range(len(pb)):
+            iou_ = _iou(pb[bi], gt_xyxy[j])
+            if iou_ > best_any:
+                best_any = iou_
+                best_any_pred = bi
+            if int(pl[bi]) == cid and iou_ > best_same:
+                best_same = iou_
+        if best_any < _LOCALIZATION_IOU_LOW:
+            fn_sub = "true_miss"
+        elif _LOCALIZATION_IOU_LOW <= best_same < iou_threshold:
+            fn_sub = "localization_fail"
+        else:
+            fn_sub = "under_confidence"
+        fn_attribution.setdefault(cid,
+            {"true_miss": 0, "under_confidence": 0, "localization_fail": 0}
+        )[fn_sub] += 1
+        mode_galleries["missed"].setdefault(cid, []).append({
+            "image_idx": int(real_idx),
+            "path": path,
+            "gt_box": gt_xyxy[j].tolist(),
+            "gt_cls": cid,
+            "size_tier": size_tier,
+            "area": float(area),
+            "fn_sub": fn_sub,
+            "nearest_pred_box": (
+                pb[best_any_pred].tolist() if best_any_pred is not None else None
+            ),
+            "nearest_pred_cls": (
+                int(pl[best_any_pred]) if best_any_pred is not None else None
+            ),
+            "nearest_pred_score": (
+                float(ps[best_any_pred]) if best_any_pred is not None else None
+            ),
+        })
+
+    return img_tp, img_fp, img_fn
+
+
+def _new_match_accumulators(class_names: dict[int, str]) -> dict:
+    """Allocate the full set of empty accumulators consumed by ``_match_predictions_to_gt``.
+
+    Returned as a dict so callers can pass slices into the matcher and still
+    keep references for plotting later.
+    """
+    from core.p08_evaluation.chart_annotations import FAILURE_MODE_GLOSSARY
+    n_cls = len(class_names)
+    # ``"correct"`` is not a failure mode but the matcher tracks it the same way.
+    mode_keys = ("correct", *FAILURE_MODE_GLOSSARY.keys())
+    return {
+        "per_class":     {cid: {"tp": 0, "fp": 0, "fn": 0} for cid in class_names},
+        "confusion":     np.zeros((n_cls + 1, n_cls + 1), dtype=np.int64),
+        "confidence_tp": [],
+        "confidence_fp": [],
+        "size_stats":    {t: {"tp": 0, "fp": 0, "fn": 0} for t in ("small", "medium", "large")},
+        "mode_counts": {m: {c: 0 for c in class_names} for m in mode_keys},
+        "mode_galleries": {
+            "missed":          {c: [] for c in class_names},
+            "localization":    {c: [] for c in class_names},
+            "class_confusion": {},
+            "duplicate":       {c: [] for c in class_names},
+            "background_fp":   {c: [] for c in class_names},
+        },
+        "fn_attribution": {
+            c: {"true_miss": 0, "under_confidence": 0, "localization_fail": 0}
+            for c in class_names
+        },
+        "missed_by_size":  {c: {"small": 0, "medium": 0, "large": 0} for c in class_names},
+        "missed_by_ar":    {c: {k: 0 for k in _AR_BUCKETS_T} for c in class_names},
+        "missed_by_crowd": {c: {k: 0 for k in _CROWD_BUCKETS_T} for c in class_names},
+    }
+
+
 def _analyze_detection(
     *, model, dataset, output_dir: Path,
     class_names: dict[int, str], input_size: tuple[int, int], style: VizStyle,
     conf_threshold: float, iou_threshold: float,
     max_samples: int | None, hard_images_per_class: int,
     training_config: dict | None = None,
+    threshold_policy: str = "f1_optimal_per_class",
+    threshold_smooth: int = 3,
+    forward_batch_size: int = 8,
 ) -> dict[str, Any]:
+    from core.p08_evaluation.threshold_policy import (
+        APPLIED_TO_CHARTS,
+        EPS_FLOOR,
+        VALID_POLICIES,
+        compute_f1_optimal_thresholds,
+        threshold_for,
+    )
+
+    if threshold_policy not in VALID_POLICIES:
+        raise ValueError(
+            f"threshold_policy={threshold_policy!r} not in {VALID_POLICIES}"
+        )
+
     raw_ds, idx_map = _unwrap(dataset)
     indices = _sampling_indices(len(dataset), max_samples)
     device = next(model.parameters()).device
     input_h, input_w = int(input_size[0]), int(input_size[1])
 
-    # Accumulators
-    per_class = {cid: {"tp": 0, "fp": 0, "fn": 0} for cid in class_names}
-    confidence_tp: list[float] = []
-    confidence_fp: list[float] = []
-    confusion = np.zeros((len(class_names) + 1, len(class_names) + 1), dtype=np.int64)
-    size_stats = {t: {"tp": 0, "fp": 0, "fn": 0} for t in ("small", "medium", "large")}
-    per_image: list[dict] = []
+    # Threshold-INDEPENDENT GT counters (filled once during forward pass).
     gt_per_class: dict[int, int] = {c: 0 for c in class_names}
     gt_per_class_size: dict[int, dict[str, int]] = {
         c: {"small": 0, "medium": 0, "large": 0} for c in class_names
@@ -752,274 +1341,216 @@ def _analyze_detection(
     total_images_with_gt = 0
     boxes_per_image_counts: list[int] = []
     gt_aspect_ratios: dict[int, list[float]] = {c: [] for c in class_names}
-    detections: list[dict] = []
-    # Per-mode galleries — each entry stores enough to render a side-by-side.
-    mode_galleries: dict[str, dict] = {
-        "missed":          {c: [] for c in class_names},
-        "localization":    {c: [] for c in class_names},
-        "class_confusion": {},  # keyed by (gt_cid, pred_cid)
-        "duplicate":       {c: [] for c in class_names},
-        "background_fp":   {c: [] for c in class_names},
-    }
-    mode_counts: dict[str, dict[int, int]] = {
-        m: {c: 0 for c in class_names} for m in
-        ("correct", "missed", "localization", "class_confusion", "duplicate", "background_fp")
-    }
-    LOCALIZATION_IOU_LOW = 0.3
-
-    _AR_BUCKETS = ("tall", "square", "wide")
-    _CROWD_BUCKETS = ("1-2", "3-5", "6-10", "11+")
     gt_ar_bucket: dict[int, dict[str, int]] = {
-        c: {k: 0 for k in _AR_BUCKETS} for c in class_names
+        c: {k: 0 for k in _AR_BUCKETS_T} for c in class_names
     }
     gt_crowd_bucket: dict[int, dict[str, int]] = {
-        c: {k: 0 for k in _CROWD_BUCKETS} for c in class_names
+        c: {k: 0 for k in _CROWD_BUCKETS_T} for c in class_names
     }
-    missed_by_size: dict[int, dict[str, int]] = {
-        c: {"small": 0, "medium": 0, "large": 0} for c in class_names
-    }
-    missed_by_ar: dict[int, dict[str, int]] = {
-        c: {k: 0 for k in _AR_BUCKETS} for c in class_names
-    }
-    missed_by_crowd: dict[int, dict[str, int]] = {
-        c: {k: 0 for k in _CROWD_BUCKETS} for c in class_names
-    }
-    fn_attribution: dict[int, dict[str, int]] = {
-        c: {"true_miss": 0, "under_confidence": 0, "localization_fail": 0}
-        for c in class_names
-    }
-
-    def _ar_bucket(ar: float) -> str:
-        return "tall" if ar < 0.5 else ("wide" if ar > 2.0 else "square")
-
-    def _crowd_bucket(n: int) -> str:
-        if n <= 2:
-            return "1-2"
-        if n <= 5:
-            return "3-5"
-        if n <= 10:
-            return "6-10"
-        return "11+"
-
     pred_cache: dict[int, dict] = {}
 
-    for ds_idx in indices:
-        real_idx = idx_map(ds_idx)
-        try:
-            raw = raw_ds.get_raw_item(real_idx)
-        except Exception:
+    # Eps floor for the raw-prediction collection. Under policy="fixed" the
+    # caller's conf_threshold IS the cutoff, so we keep that semantics; under
+    # the policy modes, conf_threshold is documented as the eps floor and we
+    # take the smaller of (caller value, EPS_FLOOR) to be safe.
+    if threshold_policy == "fixed":
+        collect_threshold = float(conf_threshold)
+    else:
+        collect_threshold = min(float(conf_threshold), EPS_FLOOR)
+
+    # ---- Pass 1: forward each image once at the eps floor + GT stats ----
+    batch_state = _BatchState(forward_batch_size)
+    _cursor = 0
+    while _cursor < len(indices):
+        chunk_indices = indices[_cursor : _cursor + batch_state.size]
+        _cursor += len(chunk_indices)
+        # Gather valid samples for this chunk (skip get_raw_item failures /
+        # None images) and preprocess each. ``batch_state.size`` may shrink
+        # mid-run on OOM; the next outer iteration picks that up.
+        chunk_samples: list[dict] = []
+        for ds_idx in chunk_indices:
+            real_idx = idx_map(ds_idx)
+            try:
+                raw = raw_ds.get_raw_item(real_idx)
+            except Exception:
+                continue
+            image = raw["image"]
+            if image is None:
+                continue
+            tensor = _preprocess_for_model(
+                image, (input_h, input_w), model=model,
+            )
+            chunk_samples.append({
+                "real_idx": int(real_idx), "raw": raw,
+                "image": image, "tensor": tensor,
+            })
+        if not chunk_samples:
             continue
-        image = raw["image"]
-        if image is None:
-            continue
-        orig_h, orig_w = image.shape[:2]
-        tensor = (
-            _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
+        decoded_list = _batched_forward_decode(
+            model, chunk_samples, (input_h, input_w),
+            collect_threshold, device, batch_state,
         )
-        with torch.no_grad():
-            preds_raw = _dispatch_forward(model, tensor)
-        target_sizes = torch.tensor([[input_h, input_w]], device=device)
-        decoded = _dispatch_postprocess(model, preds_raw, conf_threshold, target_sizes)[0]
+        if decoded_list is None:
+            # Postprocessor refused batched input — fall back per-sample.
+            decoded_list = []
+            for s in chunk_samples:
+                fb = _batched_forward_decode(
+                    model, [s], (input_h, input_w),
+                    collect_threshold, device, batch_state,
+                )
+                decoded_list.append(fb[0] if fb else {})
 
-        pb = np.asarray(decoded.get("boxes", []), dtype=np.float64).reshape(-1, 4)
-        pl = np.asarray(decoded.get("labels", []), dtype=np.int64).ravel()
-        ps = np.asarray(decoded.get("scores", []), dtype=np.float64).ravel()
-        if len(pb) > 0:
-            pb[:, [0, 2]] *= orig_w / input_w
-            pb[:, [1, 3]] *= orig_h / input_h
+        for s, decoded in zip(chunk_samples, decoded_list, strict=True):
+            real_idx = s["real_idx"]
+            raw = s["raw"]
+            image = s["image"]
+            orig_h, orig_w = image.shape[:2]
 
-        gt_xyxy, gt_cls = yolo_targets_to_xyxy(raw.get("targets"), orig_w, orig_h)
+            pb = np.asarray(decoded.get("boxes", []), dtype=np.float64).reshape(-1, 4)
+            pl = np.asarray(decoded.get("labels", []), dtype=np.int64).ravel()
+            ps = np.asarray(decoded.get("scores", []), dtype=np.float64).ravel()
+            if len(pb) > 0:
+                pb[:, [0, 2]] *= orig_w / input_w
+                pb[:, [1, 3]] *= orig_h / input_h
 
-        if len(gt_xyxy) > 0:
-            total_images_with_gt += 1
-        boxes_per_image_counts.append(int(len(gt_xyxy)))
-        img_crowd = _crowd_bucket(int(len(gt_xyxy)))
-        for j in range(len(gt_xyxy)):
-            cid = int(gt_cls[j])
-            gt_per_class[cid] = gt_per_class.get(cid, 0) + 1
-            bw = max(1.0, gt_xyxy[j, 2] - gt_xyxy[j, 0])
-            bh = max(1.0, gt_xyxy[j, 3] - gt_xyxy[j, 1])
-            gt_area = bw * bh
-            tier = _size_category(gt_area)
-            gt_per_class_size.setdefault(cid,
-                {"small": 0, "medium": 0, "large": 0})[tier] += 1
-            ar = float(bw / bh)
-            gt_aspect_ratios.setdefault(cid, []).append(ar)
-            gt_ar_bucket.setdefault(cid,
-                {k: 0 for k in _AR_BUCKETS})[_ar_bucket(ar)] += 1
-            gt_crowd_bucket.setdefault(cid,
-                {k: 0 for k in _CROWD_BUCKETS})[img_crowd] += 1
+            gt_xyxy, gt_cls = yolo_targets_to_xyxy(raw.get("targets"), orig_w, orig_h)
 
-        pred_cache[int(real_idx)] = {
-            "path": raw.get("path", ""),
-            "pb": pb, "pl": pl, "ps": ps,
-            "gt_xyxy": gt_xyxy, "gt_cls": gt_cls,
-            "orig_shape": (orig_h, orig_w),
-        }
-
-        matched_gt = np.zeros(len(gt_xyxy), dtype=bool)
-        img_tp, img_fp, img_fn = 0, 0, 0
-
-        for bi in range(len(pb)):
-            best_iou, best_j = 0.0, -1
-            best_same_class_iou, best_same_class_j = 0.0, -1
+            if len(gt_xyxy) > 0:
+                total_images_with_gt += 1
+            boxes_per_image_counts.append(int(len(gt_xyxy)))
+            img_crowd = _crowd_bucket(int(len(gt_xyxy)))
             for j in range(len(gt_xyxy)):
-                if matched_gt[j]:
-                    continue
-                iou = _iou(pb[bi], gt_xyxy[j])
-                if iou > best_iou:
-                    best_iou, best_j = iou, j
-                if gt_cls[j] == pl[bi] and iou > best_same_class_iou:
-                    best_same_class_iou, best_same_class_j = iou, j
+                cid = int(gt_cls[j])
+                gt_per_class[cid] = gt_per_class.get(cid, 0) + 1
+                bw = max(1.0, gt_xyxy[j, 2] - gt_xyxy[j, 0])
+                bh = max(1.0, gt_xyxy[j, 3] - gt_xyxy[j, 1])
+                gt_area = bw * bh
+                tier = _size_category(gt_area)
+                gt_per_class_size.setdefault(cid,
+                    {"small": 0, "medium": 0, "large": 0})[tier] += 1
+                ar = float(bw / bh)
+                gt_aspect_ratios.setdefault(cid, []).append(ar)
+                gt_ar_bucket.setdefault(cid,
+                    {k: 0 for k in _AR_BUCKETS_T})[_ar_bucket(ar)] += 1
+                gt_crowd_bucket.setdefault(cid,
+                    {k: 0 for k in _CROWD_BUCKETS_T})[img_crowd] += 1
 
-            area = max(0.0, (pb[bi, 2] - pb[bi, 0])) * max(0.0, (pb[bi, 3] - pb[bi, 1]))
-            size = _size_category(area)
-            detections.append({
-                "pred_cls": int(pl[bi]),
-                "score": float(ps[bi]),
-                "best_iou_same_class": float(best_same_class_iou),
-                "best_iou_any": float(best_iou),
-                "gt_cls_at_best_iou": int(gt_cls[best_j]) if best_j >= 0 else -1,
-            })
-
-            det_mode = "background_fp"
-            pcid = int(pl[bi])
-
-            if best_same_class_iou >= iou_threshold:
-                if matched_gt[best_same_class_j]:
-                    det_mode = "duplicate"
-                    per_class[pcid]["fp"] += 1
-                    size_stats[size]["fp"] += 1
-                    confusion[len(class_names), pcid] += 1
-                    confidence_fp.append(float(ps[bi]))
-                    img_fp += 1
-                    mode_galleries["duplicate"].setdefault(pcid, []).append({
-                        "image_idx": int(real_idx), "path": raw.get("path", ""),
-                        "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
-                        "iou": float(best_same_class_iou),
-                        "matched_gt_box": gt_xyxy[best_same_class_j].tolist(),
-                        "matched_gt_cls": int(gt_cls[best_same_class_j]),
-                    })
-                else:
-                    det_mode = "correct"
-                    matched_gt[best_same_class_j] = True
-                    per_class[pcid]["tp"] += 1
-                    size_stats[size]["tp"] += 1
-                    confusion[pcid, pcid] += 1
-                    confidence_tp.append(float(ps[bi]))
-                    img_tp += 1
-            elif best_iou >= iou_threshold and best_j >= 0 and gt_cls[best_j] != pl[bi]:
-                det_mode = "class_confusion"
-                matched_gt[best_j] = True
-                per_class[pcid]["fp"] += 1
-                size_stats[size]["fp"] += 1
-                gt_true_cls = int(gt_cls[best_j])
-                per_class[gt_true_cls]["fn"] += 1
-                gt_area = max(0.0, (gt_xyxy[best_j, 2] - gt_xyxy[best_j, 0])) * \
-                          max(0.0, (gt_xyxy[best_j, 3] - gt_xyxy[best_j, 1]))
-                size_stats[_size_category(gt_area)]["fn"] += 1
-                confusion[gt_true_cls, pcid] += 1
-                confidence_fp.append(float(ps[bi]))
-                img_fp += 1
-                img_fn += 1
-                key = (gt_true_cls, pcid)
-                mode_galleries["class_confusion"].setdefault(key, []).append({
-                    "image_idx": int(real_idx), "path": raw.get("path", ""),
-                    "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
-                    "iou": float(best_iou),
-                    "gt_box": gt_xyxy[best_j].tolist(),
-                    "gt_cls": gt_true_cls, "pred_cls": pcid,
-                })
-            elif LOCALIZATION_IOU_LOW <= best_same_class_iou < iou_threshold:
-                det_mode = "localization"
-                per_class[pcid]["fp"] += 1
-                size_stats[size]["fp"] += 1
-                confusion[len(class_names), pcid] += 1
-                confidence_fp.append(float(ps[bi]))
-                img_fp += 1
-                mode_galleries["localization"].setdefault(pcid, []).append({
-                    "image_idx": int(real_idx), "path": raw.get("path", ""),
-                    "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
-                    "iou": float(best_same_class_iou),
-                    "matched_gt_box": gt_xyxy[best_same_class_j].tolist()
-                        if best_same_class_j >= 0 else None,
-                    "matched_gt_cls": int(gt_cls[best_same_class_j])
-                        if best_same_class_j >= 0 else int(pcid),
-                })
-            else:
-                det_mode = "background_fp"
-                per_class[pcid]["fp"] += 1
-                size_stats[size]["fp"] += 1
-                confusion[len(class_names), pcid] += 1
-                confidence_fp.append(float(ps[bi]))
-                img_fp += 1
-                mode_galleries["background_fp"].setdefault(pcid, []).append({
-                    "image_idx": int(real_idx), "path": raw.get("path", ""),
-                    "pred_box": pb[bi].tolist(), "score": float(ps[bi]),
-                    "pred_cls": pcid,
-                })
-
-            mode_counts[det_mode][pcid] = mode_counts[det_mode].get(pcid, 0) + 1
-            detections[-1]["mode"] = det_mode
-
-        for j in np.where(~matched_gt)[0]:
-            cid = int(gt_cls[j])
-            per_class[cid]["fn"] += 1
-            bw_gt = max(0.0, (gt_xyxy[j, 2] - gt_xyxy[j, 0]))
-            bh_gt = max(0.0, (gt_xyxy[j, 3] - gt_xyxy[j, 1]))
-            area = bw_gt * bh_gt
-            size_tier = _size_category(area)
-            size_stats[size_tier]["fn"] += 1
-            confusion[cid, len(class_names)] += 1
-            img_fn += 1
-            mode_counts["missed"][cid] = mode_counts["missed"].get(cid, 0) + 1
-            ar = float(max(1.0, bw_gt) / max(1.0, bh_gt))
-            missed_by_size.setdefault(cid, {"small": 0, "medium": 0, "large": 0})[size_tier] += 1
-            missed_by_ar.setdefault(cid,
-                {k: 0 for k in _AR_BUCKETS})[_ar_bucket(ar)] += 1
-            missed_by_crowd.setdefault(cid,
-                {k: 0 for k in _CROWD_BUCKETS})[_crowd_bucket(int(len(gt_xyxy)))] += 1
-            best_any, best_same = 0.0, 0.0
-            best_any_pred = None
-            for bi in range(len(pb)):
-                iou_ = _iou(pb[bi], gt_xyxy[j])
-                if iou_ > best_any:
-                    best_any = iou_
-                    best_any_pred = bi
-                if int(pl[bi]) == cid and iou_ > best_same:
-                    best_same = iou_
-            if best_any < LOCALIZATION_IOU_LOW:
-                fn_sub = "true_miss"
-            elif LOCALIZATION_IOU_LOW <= best_same < iou_threshold:
-                fn_sub = "localization_fail"
-            else:
-                fn_sub = "under_confidence"
-            fn_attribution.setdefault(cid,
-                {"true_miss": 0, "under_confidence": 0, "localization_fail": 0}
-            )[fn_sub] += 1
-            mode_galleries["missed"].setdefault(cid, []).append({
-                "image_idx": int(real_idx),
+            pred_cache[int(real_idx)] = {
                 "path": raw.get("path", ""),
-                "gt_box": gt_xyxy[j].tolist(),
-                "gt_cls": cid,
-                "size_tier": size_tier,
-                "area": float(area),
-                "fn_sub": fn_sub,
-                "nearest_pred_box": (
-                    pb[best_any_pred].tolist() if best_any_pred is not None else None
-                ),
-                "nearest_pred_cls": (
-                    int(pl[best_any_pred]) if best_any_pred is not None else None
-                ),
-                "nearest_pred_score": (
-                    float(ps[best_any_pred]) if best_any_pred is not None else None
-                ),
-            })
+                "pb": pb, "pl": pl, "ps": ps,
+                "gt_xyxy": gt_xyxy, "gt_cls": gt_cls,
+                "orig_shape": (orig_h, orig_w),
+            }
 
+    # ---- Pass 2a: match at the eps floor → threshold-AGNOSTIC artefacts ----
+    # `detections` (with per-pred mode tags) drives charts 09 / 14 / 15 /
+    # 16 / 17 (calibration histogram, robustness, threshold-analysis,
+    # recoverable-mAP-vs-IoU, FN-confidence-attribution). Splitting it from
+    # pass 2b means those charts stay full-curve / GT-only by design.
+    detections: list[dict] = []
+    eps_acc = _new_match_accumulators(class_names)
+    for real_idx, c in pred_cache.items():
+        _match_predictions_to_gt(
+            pb=c["pb"], pl=c["pl"], ps=c["ps"],
+            gt_xyxy=c["gt_xyxy"], gt_cls=c["gt_cls"],
+            real_idx=int(real_idx), path=c["path"],
+            class_names=class_names, iou_threshold=iou_threshold,
+            per_class=eps_acc["per_class"],
+            confusion=eps_acc["confusion"],
+            confidence_tp=eps_acc["confidence_tp"],
+            confidence_fp=eps_acc["confidence_fp"],
+            size_stats=eps_acc["size_stats"],
+            mode_counts=eps_acc["mode_counts"],
+            mode_galleries=eps_acc["mode_galleries"],
+            fn_attribution=eps_acc["fn_attribution"],
+            missed_by_size=eps_acc["missed_by_size"],
+            missed_by_ar=eps_acc["missed_by_ar"],
+            missed_by_crowd=eps_acc["missed_by_crowd"],
+            detections_out=detections,
+        )
+
+    # ---- Resolve operating-point thresholds for the SENSITIVE charts ----
+    if threshold_policy == "fixed":
+        thresholds: dict[int, float] | float = float(conf_threshold)
+    else:
+        thresholds = compute_f1_optimal_thresholds(
+            detections, gt_per_class, class_names,
+            iou_thr=iou_threshold, smooth=threshold_smooth,
+            policy=threshold_policy, eps=EPS_FLOOR,
+        )
+
+    # ---- Pass 2b: re-match at the operating point → SENSITIVE artefacts ----
+    op_acc = _new_match_accumulators(class_names)
+    per_class = op_acc["per_class"]
+    confusion = op_acc["confusion"]
+    confidence_tp = op_acc["confidence_tp"]
+    confidence_fp = op_acc["confidence_fp"]
+    size_stats = op_acc["size_stats"]
+    mode_counts = op_acc["mode_counts"]
+    mode_galleries = op_acc["mode_galleries"]
+    fn_attribution = op_acc["fn_attribution"]
+    missed_by_size = op_acc["missed_by_size"]
+    missed_by_ar = op_acc["missed_by_ar"]
+    missed_by_crowd = op_acc["missed_by_crowd"]
+    per_image: list[dict] = []
+    for real_idx, c in pred_cache.items():
+        pb_full = c["pb"]
+        pl_full = c["pl"]
+        ps_full = c["ps"]
+        if len(pb_full) > 0:
+            keep = np.array([
+                ps_full[i] >= threshold_for(thresholds, int(pl_full[i]),
+                                             default=collect_threshold)
+                for i in range(len(pb_full))
+            ], dtype=bool)
+            pb_f = pb_full[keep]
+            pl_f = pl_full[keep]
+            ps_f = ps_full[keep]
+        else:
+            pb_f, pl_f, ps_f = pb_full, pl_full, ps_full
+        img_tp, img_fp, img_fn = _match_predictions_to_gt(
+            pb=pb_f, pl=pl_f, ps=ps_f,
+            gt_xyxy=c["gt_xyxy"], gt_cls=c["gt_cls"],
+            real_idx=int(real_idx), path=c["path"],
+            class_names=class_names, iou_threshold=iou_threshold,
+            per_class=per_class, confusion=confusion,
+            confidence_tp=confidence_tp, confidence_fp=confidence_fp,
+            size_stats=size_stats, mode_counts=mode_counts,
+            mode_galleries=mode_galleries, fn_attribution=fn_attribution,
+            missed_by_size=missed_by_size, missed_by_ar=missed_by_ar,
+            missed_by_crowd=missed_by_crowd,
+        )
         per_image.append({
-            "idx": int(real_idx), "path": raw.get("path", ""),
+            "idx": int(real_idx), "path": c["path"],
             "tp": img_tp, "fp": img_fp, "fn": img_fn,
         })
+
+    # Operating-point summary block surfaced in summary.json + summary.md.
+    if isinstance(thresholds, dict):
+        thr_for_summary = {str(k): round(float(v), 4) for k, v in thresholds.items()}
+    else:
+        thr_for_summary = round(float(thresholds), 4)
+    operating_point = {
+        "policy": threshold_policy,
+        "thresholds": thr_for_summary,
+        "applied_to_charts": list(APPLIED_TO_CHARTS),
+        "eps_floor": EPS_FLOOR if threshold_policy != "fixed" else float(conf_threshold),
+    }
+
+    # ---- Build the chart-decoration ctx ONCE; threaded into every plot. ----
+    # `thresholds` here is the runtime object (dict or float); `class_names`
+    # is included so the subtitle can render `fire=0.031, smoke=0.041`.
+    ctx_decorate: dict[str, Any] = {
+        "split": None,  # populated by run_error_analysis if/when caller plumbs it
+        "iou_threshold": float(iou_threshold),
+        "policy": threshold_policy,
+        "thresholds": thresholds,
+        "eps_floor": EPS_FLOOR if threshold_policy != "fixed" else float(conf_threshold),
+        "n": len(pred_cache),
+        "class_names": class_names,
+    }
+    def _dec(stem: str, m: dict | None = None) -> tuple:
+        return (stem, ctx_decorate, m)
 
     # ---- summary (computational parts kept) ----
     summary = _summarize_detection_counts(per_class, size_stats,
@@ -1062,6 +1593,11 @@ def _analyze_detection(
         ],
         key=lambda r: -r["count"],
     )[:10]
+    # FN-attribution feeds chart 17 (confidence_attribution), which is
+    # threshold-AGNOSTIC by design: it answers "of GT boxes that were never
+    # matched, how many lacked any detection vs were under-confident vs
+    # localized poorly?" — the answer should not depend on the deploy cutoff.
+    fn_attribution_eps = eps_acc["fn_attribution"]
     failure_mode = {
         "baseline_map50": contribution["baseline_map50"],
         "ceiling_map50": round(
@@ -1080,7 +1616,8 @@ def _analyze_detection(
         "confusion_pairs_top": confusion_pairs_top,
         "contribution": contribution["modes"],
         "fn_attribution": {
-            class_names.get(cid, str(cid)): dict(v) for cid, v in fn_attribution.items()
+            class_names.get(cid, str(cid)): dict(v)
+            for cid, v in fn_attribution_eps.items()
         },
         "miss_by_attribute": {
             "by_size": {
@@ -1103,11 +1640,29 @@ def _analyze_detection(
         ),
         "failure_mode": failure_mode,
     }
+    summary["operating_point"] = operating_point
+
+    # ---- Build chart_metrics UP FRONT so each chart's footer rule fires
+    #      against the same numbers `summary.md` will print. ----
+    chart_metrics = _build_chart_metrics(
+        summary=summary, contribution=contribution, gt_per_class=gt_per_class,
+        class_names=class_names, mode_total=mode_total,
+        confusion=confusion, confusion_pairs_top=confusion_pairs_top,
+        fn_attribution_eps=fn_attribution_eps,
+        size_stats=size_stats,
+        missed_by_size=missed_by_size, gt_per_class_size=gt_per_class_size,
+        missed_by_ar=missed_by_ar, gt_ar_bucket=gt_ar_bucket,
+        missed_by_crowd=missed_by_crowd, gt_crowd_bucket=gt_crowd_bucket,
+    )
 
     artifacts: dict[str, Any] = {}
 
     # --- 01 overview ---
     ap50 = float(np.mean(list(summary["model_metrics"]["ap50_per_class"].values())) or 0)
+    if isinstance(thresholds, dict):
+        thr_summary = "per-class (see operating_point in summary.json)"
+    else:
+        thr_summary = f"{float(thresholds):.3f}"
     artifacts["overview"] = _plot_overview(
         "Detection — Error Analysis Overview",
         [
@@ -1119,39 +1674,54 @@ def _analyze_detection(
             f"mAP50 (if all fixed)  : {failure_mode['ceiling_map50']:.4f}",
             f"Mean AP50 / class     : {ap50:.4f}",
             f"IoU threshold         : {iou_threshold}",
-            f"Confidence threshold  : {conf_threshold}",
+            f"Threshold policy      : {threshold_policy}",
+            f"Operating threshold   : {thr_summary}",
         ],
         _chart_path(output_dir, "overview"),
+        decorate=_dec("01_overview", chart_metrics.get("01_overview")),
     )
     # --- 02 data distribution ---
     artifacts["data_distribution"] = _plot_data_distribution(
         gt_per_class, gt_per_class_size, class_names,
         _chart_path(output_dir, "data_distribution"),
+        decorate=_dec("02_data_distribution",
+                      chart_metrics.get("02_data_distribution")),
     )
-    # --- 03 per-class P/R/F1 ---
+    # --- 03 per-class P/R/F1 --- (threshold-SENSITIVE: operating-point pass)
+    chart_thr_label = thresholds if not isinstance(thresholds, dict) else None
     artifacts["per_class_performance"] = _plot_per_class_prf1(
         per_class, class_names, _chart_path(output_dir, "per_class_performance"),
-        conf_threshold=conf_threshold,
+        conf_threshold=chart_thr_label,
+        decorate=_dec("07_per_class_performance",
+                      chart_metrics.get("07_per_class_performance")),
     )
-    # --- 04 confusion or top pairs ---
+    # --- 04 confusion or top pairs --- (threshold-SENSITIVE)
     if len(class_names) <= _LARGE_CLASS_THRESHOLD:
         artifacts["confusion_matrix"] = _plot_confusion_matrix(
             confusion, class_names, _chart_path(output_dir, "confusion_matrix"),
-            conf_threshold=conf_threshold,
+            conf_threshold=chart_thr_label,
+            decorate=_dec("08_confusion_matrix",
+                          chart_metrics.get("08_confusion_matrix")),
         )
     else:
         artifacts["top_confused_pairs"] = _plot_top_confused_pairs(
             confusion, class_names, _chart_path(output_dir, "top_confused_pairs"),
+            decorate=_dec("08_top_confused_pairs",
+                          chart_metrics.get("08_top_confused_pairs")),
         )
-    # --- 05 confidence calibration ---
+    # --- 05 confidence calibration --- (threshold-AGNOSTIC: full eps pass)
     artifacts["confidence_calibration"] = _plot_confidence_hist(
-        confidence_tp, confidence_fp,
+        eps_acc["confidence_tp"], eps_acc["confidence_fp"],
         _chart_path(output_dir, "confidence_calibration"),
+        decorate=_dec("09_confidence_calibration",
+                      chart_metrics.get("09_confidence_calibration")),
     )
     # --- 06 failure-mode contribution ---
     p = _plot_failure_mode_contribution(
         mode_total, contribution,
         _chart_path(output_dir, "failure_mode_contribution"),
+        decorate=_dec("10_failure_mode_contribution",
+                      chart_metrics.get("10_failure_mode_contribution")),
     )
     if p is not None:
         artifacts["failure_mode_contribution"] = p
@@ -1162,6 +1732,8 @@ def _analyze_detection(
         missed_by_crowd, gt_crowd_bucket,
         confusion_pairs_top, class_names,
         _chart_path(output_dir, "failure_by_attribute"),
+        decorate=_dec("11_failure_by_attribute",
+                      chart_metrics.get("11_failure_by_attribute")),
     )
     # --- 08 hardest images overview ---
     per_image.sort(key=lambda r: -(r["fn"] + r["fp"]))
@@ -1180,10 +1752,25 @@ def _analyze_detection(
         if image is None:
             continue
         rgb = _bgr_to_rgb(image)
+        # Apply the operating-point thresholds before drawing — chart 12 is
+        # threshold-SENSITIVE; rendering the eps-floor preds would flood the
+        # panel with low-conf boxes that no one would deploy.
+        pb_disp = entry["pb"]
+        pl_disp = entry["pl"]
+        ps_disp = entry["ps"]
+        if len(pb_disp) > 0:
+            keep_disp = np.array([
+                ps_disp[i] >= threshold_for(thresholds, int(pl_disp[i]),
+                                             default=collect_threshold)
+                for i in range(len(pb_disp))
+            ], dtype=bool)
+            pb_disp = pb_disp[keep_disp]
+            pl_disp = pl_disp[keep_disp]
+            ps_disp = ps_disp[keep_disp]
         pred_dets = sv.Detections(
-            xyxy=entry["pb"] if len(entry["pb"]) > 0 else np.zeros((0, 4)),
-            class_id=entry["pl"].astype(int),
-            confidence=entry["ps"].astype(np.float32),
+            xyxy=pb_disp if len(pb_disp) > 0 else np.zeros((0, 4)),
+            class_id=pl_disp.astype(int),
+            confidence=ps_disp.astype(np.float32),
         )
         panel = render_gt_pred_side_by_side(
             rgb, (entry["gt_xyxy"], entry["gt_cls"]), pred_dets,
@@ -1194,6 +1781,8 @@ def _analyze_detection(
     p = _plot_hardest_images_grid(
         top_rows, top_titles, _chart_path(output_dir, "hardest_images"),
         header="Hardest images — top 12 by (FP + FN).  GT (purple) | Pred (green)",
+        decorate=_dec("12_hardest_images",
+                      chart_metrics.get("12_hardest_images")),
     )
     if p is not None:
         artifacts["hardest_images"] = p
@@ -1202,24 +1791,36 @@ def _analyze_detection(
     artifacts["threshold_analysis"] = _plot_threshold_analysis(
         detections, gt_per_class, class_names, iou_threshold,
         _chart_path(output_dir, "threshold_analysis"),
+        decorate=_dec("15_threshold_analysis",
+                      chart_metrics.get("15_threshold_analysis")),
     )
     artifacts["recoverable_map_vs_iou"] = _plot_recoverable_map_vs_iou(
         detections, gt_per_class, missed_per_class, class_names,
         _chart_path(output_dir, "recoverable_map_vs_iou"),
+        decorate=_dec("16_recoverable_map_vs_iou",
+                      chart_metrics.get("16_recoverable_map_vs_iou")),
     )
     artifacts["confidence_attribution"] = _plot_confidence_attribution(
-        fn_attribution, class_names,
+        fn_attribution_eps, class_names,
         _chart_path(output_dir, "confidence_attribution"),
+        decorate=_dec("17_confidence_attribution",
+                      chart_metrics.get("17_confidence_attribution")),
     )
     artifacts["boxes_per_image"] = _plot_boxes_per_image(
         boxes_per_image_counts, _chart_path(output_dir, "boxes_per_image"),
+        decorate=_dec("18_boxes_per_image",
+                      chart_metrics.get("18_boxes_per_image")),
     )
     artifacts["bbox_aspect_ratio"] = _plot_bbox_aspect_ratio(
         gt_aspect_ratios, class_names,
         _chart_path(output_dir, "bbox_aspect_ratio"),
+        decorate=_dec("19_bbox_aspect_ratio",
+                      chart_metrics.get("19_bbox_aspect_ratio")),
     )
     artifacts["size_recall"] = _plot_size_recall(
         size_stats, _chart_path(output_dir, "size_recall"),
+        decorate=_dec("20_size_recall",
+                      chart_metrics.get("20_size_recall")),
     )
 
     # --- 09 failure-mode examples (side-by-side, only failed samples) ---
@@ -1435,32 +2036,74 @@ def _analyze_detection(
         "recoverable_map_vs_iou", "confidence_attribution",
         "boxes_per_image", "bbox_aspect_ratio", "size_recall",
     )]
-    # Populate chart_metrics for rule-driven next-step text.
+    # `chart_metrics` was built up-front so chart footers + summary.md text
+    # are byte-identical (same input dict to evaluate_next_step).
+    json_path, md_path = _write_json_md(
+        output_dir, summary,
+        title="Detection Error Analysis",
+        header=[
+            f"- Samples analyzed: **{len(per_image)}**",
+            f"- Images with ≥1 GT box: **{total_images_with_gt}**",
+            f"- Total GT boxes: **{int(sum(gt_per_class.values()))}**",
+            f"- IoU threshold: {iou_threshold}",
+            f"- Threshold policy: **{threshold_policy}**  (charts "
+            f"{', '.join(APPLIED_TO_CHARTS)} applied)",
+            f"- Operating threshold: {thr_summary}",
+            "",
+            *ranking_lines,
+        ],
+        chart_refs=chart_refs,
+        chart_metrics=chart_metrics,
+    )
+    artifacts["summary_json"] = json_path
+    artifacts["summary_md"] = md_path
+    return artifacts
+
+
+def _build_chart_metrics(
+    *, summary: dict, contribution: dict, gt_per_class: dict,
+    class_names: dict, mode_total: dict, confusion: np.ndarray,
+    confusion_pairs_top: list[dict], fn_attribution_eps: dict,
+    size_stats: dict,
+    missed_by_size: dict, gt_per_class_size: dict,
+    missed_by_ar: dict, gt_ar_bucket: dict,
+    missed_by_crowd: dict, gt_crowd_bucket: dict,
+) -> dict[str, dict]:
+    """Extract the per-chart metric dicts that drive next-step rules.
+
+    Mirrors the values written into summary.json so the chart footer
+    (rendered by ``_decorate_figure``) matches summary.md byte-for-byte.
+    """
     ap50_per_class = summary["model_metrics"].get("ap50_per_class", {})
-    ap50_items = sorted(ap50_per_class.items(), key=lambda kv: kv[1]) if ap50_per_class else []
+    ap50_items = (sorted(ap50_per_class.items(), key=lambda kv: kv[1])
+                  if ap50_per_class else [])
     worst_cls, worst_ap = ap50_items[0] if ap50_items else ("?", 0.0)
     best_cls, best_ap = ap50_items[-1] if ap50_items else ("?", 0.0)
     present_counts = [v for v in gt_per_class.values() if v > 0]
-    # Failure-mode table has per-mode Δ mAP50. Pick the dominant. The
-    # `contribution` dict nests the per-mode ``delta_map50`` under its mode
-    # name (sometimes as dict, sometimes as plain float depending on
-    # analyzer version); handle both.
+
     mode_deltas: dict[str, float] = {}
     for k, v in contribution.items():
         if isinstance(v, dict) and "delta_map50" in v:
             mode_deltas[k] = float(v["delta_map50"])
         elif isinstance(v, (int, float)) and k not in {"baseline_map50", "ceiling_map50"}:
             mode_deltas[k] = float(v)
+    # `contribution["modes"]` is the canonical per-mode dict in current code.
+    if not mode_deltas and isinstance(contribution.get("modes"), dict):
+        for k, v in contribution["modes"].items():
+            if isinstance(v, dict) and "delta_map50" in v:
+                mode_deltas[k] = float(v["delta_map50"])
     top_mode = max(mode_deltas, key=mode_deltas.get) if mode_deltas else None
     top_mode_delta = mode_deltas[top_mode] if top_mode else 0.0
-    overview_metrics = {
+
+    overview_metrics: dict = {
         "primary_metric_name": "mAP50",
         "primary_metric": float(contribution.get("baseline_map50", 0.0)),
     }
     if top_mode:
         overview_metrics["top_mode"] = top_mode
         overview_metrics["top_mode_delta"] = top_mode_delta
-    chart_metrics = {
+
+    cm: dict[str, dict] = {
         "01_overview": overview_metrics,
         "02_data_distribution": {
             "imbalance_ratio": (
@@ -1475,27 +2118,72 @@ def _analyze_detection(
         },
     }
     if top_mode:
-        chart_metrics["10_failure_mode_contribution"] = {
+        cm["10_failure_mode_contribution"] = {
             "dominant_mode": top_mode, "dominant_delta": top_mode_delta,
         }
-    json_path, md_path = _write_json_md(
-        output_dir, summary,
-        title="Detection Error Analysis",
-        header=[
-            f"- Samples analyzed: **{len(per_image)}**",
-            f"- Images with ≥1 GT box: **{total_images_with_gt}**",
-            f"- Total GT boxes: **{int(sum(gt_per_class.values()))}**",
-            f"- IoU threshold (base): {iou_threshold}",
-            f"- Confidence threshold (base): {conf_threshold}",
-            "",
-            *ranking_lines,
-        ],
-        chart_refs=chart_refs,
-        chart_metrics=chart_metrics,
-    )
-    artifacts["summary_json"] = json_path
-    artifacts["summary_md"] = md_path
-    return artifacts
+
+    # 08 confusion: top off-diagonal pair share of total errors.
+    if confusion_pairs_top:
+        top_pair = confusion_pairs_top[0]
+        total_err = float(sum(p.get("count", 0) for p in confusion_pairs_top)) or 1.0
+        confusion_metrics = {
+            "top_confused_from": top_pair.get("gt", "?"),
+            "top_confused_to":   top_pair.get("pred", "?"),
+            "top_pair_share":    float(top_pair.get("count", 0)) / total_err,
+            "max_off_diagonal":  float(top_pair.get("count", 0)) / total_err,
+        }
+        cm["08_confusion_matrix"] = confusion_metrics
+        cm["08_top_confused_pairs"] = confusion_metrics
+
+    # 11 failure-by-attribute: pick the axis with the steepest miss-rate slope.
+    def _axis_slope(miss: dict, total: dict, buckets: tuple) -> float:
+        if not miss or not total:
+            return 0.0
+        tot_b = {b: 0 for b in buckets}
+        miss_b = {b: 0 for b in buckets}
+        for cid in miss:
+            for b in buckets:
+                tot_b[b] += int(total.get(cid, {}).get(b, 0))
+                miss_b[b] += int(miss.get(cid, {}).get(b, 0))
+        rates = [(miss_b[b] / tot_b[b]) if tot_b[b] > 0 else 0.0 for b in buckets]
+        if not rates:
+            return 0.0
+        return float(max(rates) - min(rates))
+
+    size_slope = _axis_slope(missed_by_size, gt_per_class_size,
+                              ("large", "medium", "small"))
+    ar_slope = _axis_slope(missed_by_ar, gt_ar_bucket, _AR_BUCKETS_T)
+    crowd_slope = _axis_slope(missed_by_crowd, gt_crowd_bucket, _CROWD_BUCKETS_T)
+    axes = {"size": size_slope, "aspect_ratio": ar_slope, "crowdedness": crowd_slope}
+    worst_axis = max(axes, key=axes.get)
+    cm["11_failure_by_attribute"] = {
+        "worst_axis": worst_axis,
+        "worst_axis_delta": axes[worst_axis],
+    }
+
+    # 17 confidence-attribution: FN-cause shares (eps-floor accumulators).
+    tm_total = sum(v.get("true_miss", 0) for v in fn_attribution_eps.values())
+    uc_total = sum(v.get("under_confidence", 0) for v in fn_attribution_eps.values())
+    lf_total = sum(v.get("localization_fail", 0) for v in fn_attribution_eps.values())
+    fn_total = tm_total + uc_total + lf_total
+    if fn_total > 0:
+        cm["17_confidence_attribution"] = {
+            "true_miss":  tm_total / fn_total,
+            "under_conf": uc_total / fn_total,
+            "loc_fail":   lf_total / fn_total,
+        }
+
+    # 20 size-recall: per-tier recall.
+    def _recall(t: str) -> float:
+        s = size_stats.get(t, {})
+        tp, fn = int(s.get("tp", 0)), int(s.get("fn", 0))
+        return (tp / (tp + fn)) if (tp + fn) else 0.0
+    cm["20_size_recall"] = {
+        "recall_small":  _recall("small"),
+        "recall_medium": _recall("medium"),
+        "recall_large":  _recall("large"),
+    }
+    return cm
 
 
 def _summarize_detection_counts(per_class, size_stats, tp_scores, fp_scores, class_names):
@@ -1590,6 +2278,7 @@ def _best_f1_and_threshold(detections, gt_per_class, class_names, iou_thr) -> di
 
 def _plot_threshold_analysis(
     detections, gt_per_class, class_names, iou_thr, path: Path,
+    *, decorate: tuple | None = None,
 ) -> Path:
     """2×2 chart: PR curves + F1 / Precision / Recall vs conf threshold per class.
 
@@ -1690,7 +2379,7 @@ def _plot_threshold_analysis(
 
     fig.suptitle("Threshold analysis — pick deploy threshold from panel (b)", fontsize=13)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _map_at_iou_sweep(detections, gt_per_class, iou_values) -> dict:
@@ -1815,7 +2504,10 @@ def _render_failure_mode_table(mode_total, contribution, *, baseline: float) -> 
     return lines
 
 
-def _plot_failure_mode_contribution(mode_total, contribution, path: Path) -> Path | None:
+def _plot_failure_mode_contribution(
+    mode_total, contribution, path: Path,
+    *, decorate: tuple | None = None,
+) -> Path | None:
     modes_info = contribution["modes"]
     if not modes_info:
         return None
@@ -1828,12 +2520,15 @@ def _plot_failure_mode_contribution(mode_total, contribution, path: Path) -> Pat
 
     modes_pc = contribution.get("modes_per_class", {})
     class_names_list = sorted({c for row in modes_pc.values() for c in row})
-    heatmap_modes = ["missed", "localization", "class_confusion", "duplicate", "background_fp"]
+    from core.p08_evaluation.chart_annotations import FAILURE_MODE_GLOSSARY
+    heatmap_modes = list(FAILURE_MODE_GLOSSARY.keys())
 
+    # ~30% wider than baseline 16 to make room for the right-margin glossary.
     fig, (ax_a, ax_b) = plt.subplots(
-        1, 2, figsize=(16, max(5, 0.35 * max(1, len(class_names_list)) + 3)),
-        constrained_layout=True,
+        1, 2, figsize=(15, max(6.5, 0.35 * max(1, len(class_names_list)) + 4.5)),
+        constrained_layout=False,
     )
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.90, bottom=0.32, wspace=0.25)
     colors_a = ["#c44e52" if d >= 0 else "#999999" for d in deltas]
     bars = ax_a.barh(labels, deltas, color=colors_a)
     for bar, d, n in zip(bars, deltas, counts):
@@ -1870,14 +2565,16 @@ def _plot_failure_mode_contribution(mode_total, contribution, path: Path) -> Pat
         ax_b.set_axis_off()
         ax_b.text(0.5, 0.5, "no per-class data", ha="center", va="center",
                    fontsize=11, color="#999999")
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_recoverable_map_vs_iou(
     detections, gt_per_class, missed_per_class, class_names, path: Path,
+    *, decorate: tuple | None = None,
 ) -> Path | None:
     iou_values = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]
-    modes = ["missed", "localization", "class_confusion", "duplicate", "background_fp"]
+    from core.p08_evaluation.chart_annotations import FAILURE_MODE_GLOSSARY
+    modes = list(FAILURE_MODE_GLOSSARY.keys())
     colors = {
         "missed":          "#c44e52",
         "localization":    "#8172b2",
@@ -1901,7 +2598,9 @@ def _plot_recoverable_map_vs_iou(
             total += max(0.0, d)
         ceilings.append(min(1.0, contrib["baseline_map50"] + total))
 
-    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(16, 5.5), constrained_layout=True)
+    # ~30% wider for the right-margin glossary panel.
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(15, 7.5), constrained_layout=False)
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.88, bottom=0.32, wspace=0.30)
     ax_a.plot(iou_values, baselines, lw=2.5, color="black", marker="o",
                label="baseline mAP")
     ax_a.plot(iou_values, ceilings, lw=2.0, color="#999999", linestyle="--", marker="s",
@@ -1931,7 +2630,7 @@ def _plot_recoverable_map_vs_iou(
     ax_b.set_title("(b) Stacked Δ per IoU")
     ax_b.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8)
     ax_b.grid(axis="y", alpha=0.3)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_failure_by_attribute(
@@ -1940,6 +2639,7 @@ def _plot_failure_by_attribute(
     missed_by_crowd, gt_crowd_totals,
     confusion_pairs_top: list[dict],
     class_names: dict[int, str], path: Path,
+    *, decorate: tuple | None = None,
 ) -> Path:
     def _rates(miss, total, buckets):
         out = {}
@@ -2011,11 +2711,12 @@ def _plot_failure_by_attribute(
         ax_conf.text(0.5, 0.5, "no class-confusion errors", ha="center", va="center",
                       fontsize=11, color="#999999")
         ax_conf.set_title("(d) Top confusion pairs")
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_confidence_attribution(
     fn_attribution: dict[int, dict[str, int]], class_names: dict[int, str], path: Path,
+    *, decorate: tuple | None = None,
 ) -> Path:
     names = [shorten_label(class_names.get(cid, str(cid))) for cid in class_names]
     tm = np.array(
@@ -2036,9 +2737,10 @@ def _plot_confidence_attribution(
         ax.text(0.5, 0.5, "no FN — nothing to attribute", ha="center", va="center",
                 fontsize=12, color="#555555")
         ax.set_axis_off()
-        return _savefig(fig, path)
+        return _savefig(fig, path, decorate=decorate)
 
-    fig, (ax_abs, ax_pct) = plt.subplots(1, 2, figsize=(14, 5.5), constrained_layout=True)
+    fig, (ax_abs, ax_pct) = plt.subplots(1, 2, figsize=(14, 7.0), constrained_layout=False)
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.88, bottom=0.30, wspace=0.30)
     x = np.arange(len(names))
     ax_abs.bar(x, tm, label="true_miss", color="#c44e52")
     ax_abs.bar(x, uc, bottom=tm, label="under_confidence", color="#dd8452")
@@ -2069,15 +2771,16 @@ def _plot_confidence_attribution(
     ax_pct.set_ylabel("share of FN")
     ax_pct.set_title("(b) FN causality — normalized")
     ax_pct.grid(axis="y", alpha=0.3)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
-def _plot_boxes_per_image(counts: list[int], path: Path) -> Path:
+def _plot_boxes_per_image(counts: list[int], path: Path,
+                           *, decorate: tuple | None = None) -> Path:
     if not counts:
         fig, ax = new_figure(n_items=1)
         ax.set_axis_off()
         ax.text(0.5, 0.5, "no GT", ha="center", va="center")
-        return _savefig(fig, path)
+        return _savefig(fig, path, decorate=decorate)
     counts_arr = np.asarray(counts, dtype=np.int32)
     max_n = max(1, int(counts_arr.max()))
     bins = np.arange(0, max_n + 2) - 0.5
@@ -2092,16 +2795,17 @@ def _plot_boxes_per_image(counts: list[int], path: Path) -> Path:
         f"Boxes per image — mean {mean:.1f} / median {median:.0f} / p95 {p95:.0f} / max {max_n}"
     )
     ax.grid(axis="y", alpha=0.3)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
-def _plot_bbox_aspect_ratio(gt_aspect_ratios, class_names, path: Path) -> Path:
+def _plot_bbox_aspect_ratio(gt_aspect_ratios, class_names, path: Path,
+                             *, decorate: tuple | None = None) -> Path:
     flat = [(cid, r) for cid, ratios in gt_aspect_ratios.items() for r in ratios]
     fig, ax = new_figure(n_items=len(class_names), figsize=(10, 5.5))
     if not flat:
         ax.text(0.5, 0.5, "no GT", ha="center", va="center")
         ax.set_axis_off()
-        return _savefig(fig, path)
+        return _savefig(fig, path, decorate=decorate)
     bins = np.logspace(np.log10(0.1), np.log10(10.0), 26)
     colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
     for i, cid in enumerate(sorted(gt_aspect_ratios.keys())):
@@ -2117,10 +2821,11 @@ def _plot_bbox_aspect_ratio(gt_aspect_ratios, class_names, path: Path) -> Path:
     ax.set_title("GT bbox aspect-ratio distribution per class")
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8)
     ax.grid(alpha=0.3, which="both")
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
-def _plot_size_recall(size_stats: dict, path: Path) -> Path:
+def _plot_size_recall(size_stats: dict, path: Path,
+                       *, decorate: tuple | None = None) -> Path:
     tiers = ["small", "medium", "large"]
     rec = []
     prec = []
@@ -2150,11 +2855,12 @@ def _plot_size_recall(size_stats: dict, path: Path) -> Path:
     ax.set_title("Size-stratified detection performance")
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9)
     ax.grid(axis="y", alpha=0.3)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 def _plot_data_distribution(
     gt_per_class, gt_per_class_size, class_names, path: Path,
+    *, decorate: tuple | None = None,
 ) -> Path:
     ordered_cids = sorted(gt_per_class.keys())
     names = [shorten_label(class_names.get(cid, str(cid))) for cid in ordered_cids]
@@ -2199,7 +2905,7 @@ def _plot_data_distribution(
     ax2.set_title("Per-class × per-size-tier")
     ax2.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8)
     ax2.grid(axis="y", alpha=0.3)
-    return _savefig(fig, path)
+    return _savefig(fig, path, decorate=decorate)
 
 
 # ===========================================================================
@@ -2211,6 +2917,7 @@ def _analyze_classification(
     *, model, dataset, output_dir: Path,
     class_names: dict[int, str], input_size: tuple[int, int], style: VizStyle,
     max_samples: int | None, hard_images_per_class: int,
+    forward_batch_size: int = 8,
 ) -> dict[str, Any]:
     raw_ds, idx_map = _unwrap(dataset)
     indices = _sampling_indices(len(dataset), max_samples)
@@ -2234,55 +2941,71 @@ def _analyze_classification(
     # count per-class GT for data distribution
     gt_per_class: dict[int, int] = {c: 0 for c in class_names}
 
-    for ds_idx in indices:
-        real_idx = idx_map(ds_idx)
-        try:
-            raw = raw_ds.get_raw_item(real_idx)
-        except Exception:
+    batch_state = _BatchState(forward_batch_size)
+    _cursor = 0
+    while _cursor < len(indices):
+        chunk_indices = indices[_cursor : _cursor + batch_state.size]
+        _cursor += len(chunk_indices)
+        chunk_samples: list[dict] = []
+        for ds_idx in chunk_indices:
+            real_idx = idx_map(ds_idx)
+            try:
+                raw = raw_ds.get_raw_item(real_idx)
+            except Exception:
+                continue
+            image = raw["image"]
+            gt = raw.get("targets")
+            if image is None or gt is None:
+                continue
+            tensor = _preprocess_for_model(
+                image, (input_h, input_w), model=model,
+            )
+            chunk_samples.append({
+                "real_idx": int(real_idx), "raw": raw,
+                "image": image, "gt": gt, "tensor": tensor,
+            })
+        if not chunk_samples:
             continue
-        image = raw["image"]
-        gt = raw.get("targets")
-        if image is None or gt is None:
-            continue
-        tensor = (
-            _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
+        logits_list = _batched_logits(
+            model, chunk_samples, device, batch_state,
         )
-        with torch.no_grad():
-            out = _dispatch_forward(model, tensor)
-        logits = out.logits if hasattr(out, "logits") else out
-        probs = torch.softmax(logits, dim=-1).cpu().numpy().ravel()
-        pred = int(np.argmax(probs))
-        score = float(probs[pred])
-        gt_cid = int(gt)
-        gt_per_class[gt_cid] = gt_per_class.get(gt_cid, 0) + 1
-        if 0 <= gt_cid < C and 0 <= pred < C:
-            cm[gt_cid, pred] += 1
-        if pred == gt_cid:
-            per_class[gt_cid]["tp"] += 1
-            correct_scores.append(score)
-            if score < _LOW_CONF_THR and gt_cid in low_conf_correct_gallery:
-                low_conf_correct_gallery[gt_cid].append({
+        for s, sample_logits in zip(chunk_samples, logits_list, strict=True):
+            real_idx = s["real_idx"]
+            raw = s["raw"]
+            gt = s["gt"]
+            probs = torch.softmax(sample_logits, dim=-1).numpy().ravel()
+            pred = int(np.argmax(probs))
+            score = float(probs[pred])
+            gt_cid = int(gt)
+            gt_per_class[gt_cid] = gt_per_class.get(gt_cid, 0) + 1
+            if 0 <= gt_cid < C and 0 <= pred < C:
+                cm[gt_cid, pred] += 1
+            if pred == gt_cid:
+                per_class[gt_cid]["tp"] += 1
+                correct_scores.append(score)
+                if score < _LOW_CONF_THR and gt_cid in low_conf_correct_gallery:
+                    low_conf_correct_gallery[gt_cid].append({
+                        "image_idx": int(real_idx),
+                        "path": raw.get("path", ""),
+                        "gt_cid": gt_cid, "pred_cid": pred, "score": score,
+                    })
+            else:
+                per_class[pred]["fp"] += 1
+                per_class[gt_cid]["fn"] += 1
+                wrong_scores.append(score)
+                rec = {
                     "image_idx": int(real_idx),
                     "path": raw.get("path", ""),
                     "gt_cid": gt_cid, "pred_cid": pred, "score": score,
-                })
-        else:
-            per_class[pred]["fp"] += 1
-            per_class[gt_cid]["fn"] += 1
-            wrong_scores.append(score)
-            rec = {
-                "image_idx": int(real_idx),
-                "path": raw.get("path", ""),
-                "gt_cid": gt_cid, "pred_cid": pred, "score": score,
-            }
-            wrong_gallery.setdefault((gt_cid, pred), []).append(rec)
-            if score >= _HIGH_CONF_THR:
-                high_conf_wrong_gallery.setdefault((gt_cid, pred), []).append(rec)
-        per_image.append({
-            "idx": int(real_idx), "path": raw.get("path", ""),
-            "correct": bool(pred == gt_cid), "score": score,
-            "gt": gt_cid, "pred": pred,
-        })
+                }
+                wrong_gallery.setdefault((gt_cid, pred), []).append(rec)
+                if score >= _HIGH_CONF_THR:
+                    high_conf_wrong_gallery.setdefault((gt_cid, pred), []).append(rec)
+            per_image.append({
+                "idx": int(real_idx), "path": raw.get("path", ""),
+                "correct": bool(pred == gt_cid), "score": score,
+                "gt": gt_cid, "pred": pred,
+            })
 
     # ---- summary ----
     out_classes = {}
@@ -2560,6 +3283,7 @@ def _analyze_segmentation(
     *, model, dataset, output_dir: Path,
     class_names: dict[int, str], input_size: tuple[int, int], style: VizStyle,
     max_samples: int | None, hard_images_per_class: int,
+    forward_batch_size: int = 8,
 ) -> dict[str, Any]:
     raw_ds, idx_map = _unwrap(dataset)
     indices = _sampling_indices(len(dataset), max_samples)
@@ -2584,106 +3308,124 @@ def _analyze_segmentation(
     # CxC pixel confusion matrix accumulator (Phase 2 — seg gap fill).
     pixel_confusion = np.zeros((C, C), dtype=np.int64)
 
-    for ds_idx in indices:
-        real_idx = idx_map(ds_idx)
-        try:
-            raw = raw_ds.get_raw_item(real_idx)
-        except Exception:
+    batch_state = _BatchState(forward_batch_size)
+    _cursor = 0
+    while _cursor < len(indices):
+        chunk_indices = indices[_cursor : _cursor + batch_state.size]
+        _cursor += len(chunk_indices)
+        chunk_samples: list[dict] = []
+        for ds_idx in chunk_indices:
+            real_idx = idx_map(ds_idx)
+            try:
+                raw = raw_ds.get_raw_item(real_idx)
+            except Exception:
+                continue
+            image = raw["image"]
+            gt_mask = raw.get("targets")
+            if image is None or gt_mask is None:
+                continue
+            tensor = _preprocess_for_model(
+                image, (input_h, input_w), model=model,
+            )
+            chunk_samples.append({
+                "real_idx": int(real_idx), "raw": raw,
+                "image": image, "gt_mask": gt_mask, "tensor": tensor,
+            })
+        if not chunk_samples:
             continue
-        image = raw["image"]
-        gt_mask = raw.get("targets")
-        if image is None or gt_mask is None:
-            continue
-        tensor = (
-            _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
+        logits_list = _batched_logits(
+            model, chunk_samples, device, batch_state,
         )
-        with torch.no_grad():
-            out = _dispatch_forward(model, tensor)
-        logits = out.logits if hasattr(out, "logits") else out
-        pred_mask = logits.argmax(dim=1)[0].cpu().numpy()
-        if pred_mask.shape != gt_mask.shape:
-            pred_mask = cv2.resize(pred_mask.astype(np.int32),
-                                    (gt_mask.shape[1], gt_mask.shape[0]),
-                                    interpolation=cv2.INTER_NEAREST)
-        # Accumulate the pixel confusion matrix in one shot via histogram2d.
-        try:
-            valid = (gt_mask >= 0) & (gt_mask < C) & (pred_mask >= 0) & (pred_mask < C)
-            if valid.any():
-                hist, _, _ = np.histogram2d(
-                    gt_mask[valid].ravel(), pred_mask[valid].ravel(),
-                    bins=(C, C), range=[[0, C], [0, C]],
-                )
-                pixel_confusion += hist.astype(np.int64)
-        except Exception as _e:  # pragma: no cover
-            logger.warning("pixel_confusion accumulation failed: %s", _e)
+        for s, sample_logits in zip(chunk_samples, logits_list, strict=True):
+            real_idx = s["real_idx"]
+            raw = s["raw"]
+            image = s["image"]
+            gt_mask = s["gt_mask"]
+            # sample_logits is (C, H, W) on CPU.
+            pred_mask = sample_logits.argmax(dim=0).numpy()
+            if pred_mask.shape != gt_mask.shape:
+                pred_mask = cv2.resize(pred_mask.astype(np.int32),
+                                        (gt_mask.shape[1], gt_mask.shape[0]),
+                                        interpolation=cv2.INTER_NEAREST)
+            # Accumulate the pixel confusion matrix in one shot via histogram2d.
+            try:
+                valid = (gt_mask >= 0) & (gt_mask < C) & (pred_mask >= 0) & (pred_mask < C)
+                if valid.any():
+                    hist, _, _ = np.histogram2d(
+                        gt_mask[valid].ravel(), pred_mask[valid].ravel(),
+                        bins=(C, C), range=[[0, C], [0, C]],
+                    )
+                    pixel_confusion += hist.astype(np.int64)
+            except Exception as _e:  # pragma: no cover
+                logger.warning("pixel_confusion accumulation failed: %s", _e)
 
-        img_inter = 0.0
-        img_union = 0.0
-        for cid in range(C):
-            gt_bin = (gt_mask == cid)
-            pr_bin = (pred_mask == cid)
-            inter = float(np.logical_and(gt_bin, pr_bin).sum())
-            uni = float(np.logical_or(gt_bin, pr_bin).sum())
-            intersect[cid] += inter
-            union[cid] += uni
-            img_inter += inter
-            img_union += uni
-            gt_pixel_counts[cid] = gt_pixel_counts.get(cid, 0) + int(gt_bin.sum())
-            if uni > 0:
-                per_class_iou_per_image[cid].append({
-                    "image_idx": int(real_idx), "path": raw.get("path", ""),
-                    "iou": float(inter / uni),
-                    "gt_mask": gt_bin, "pred_mask": pr_bin,
-                })
-            # ---- new failure-mode buckets ----
-            gt_area = int(gt_bin.sum())
-            pr_area = int(pr_bin.sum())
-            if gt_area > _MIN_GT_AREA_PX and pr_area == 0:
-                missed_gallery[cid].append({
-                    "image_idx": int(real_idx), "path": raw.get("path", ""),
-                    "gt_area": gt_area, "gt_mask": gt_bin, "pred_mask": pr_bin,
-                })
-            elif gt_area == 0 and pr_area > _MIN_GT_AREA_PX:
-                fp_gallery[cid].append({
-                    "image_idx": int(real_idx), "path": raw.get("path", ""),
-                    "pr_area": pr_area, "gt_mask": gt_bin, "pred_mask": pr_bin,
-                })
-            elif gt_area > 0 and pr_area > 0 and uni > 0:
-                iou = float(inter / uni)
-                if iou >= _BOUNDARY_INTERIOR_IOU_THR:
-                    try:
-                        k = np.ones(
-                            (2 * _BOUNDARY_DILATE_PX + 1, 2 * _BOUNDARY_DILATE_PX + 1),
-                            dtype=np.uint8,
-                        )
-                        gt_edge = cv2.dilate(gt_bin.astype(np.uint8), k) & (
-                            ~cv2.erode(gt_bin.astype(np.uint8), k).astype(bool)
-                        )
-                        pr_edge = cv2.dilate(pr_bin.astype(np.uint8), k) & (
-                            ~cv2.erode(pr_bin.astype(np.uint8), k).astype(bool)
-                        )
-                        gt_edge_b = gt_edge.astype(bool)
-                        pr_edge_b = pr_edge.astype(bool)
-                        tp = int(np.logical_and(gt_edge_b, pr_edge_b).sum())
-                        fp_e = int(np.logical_and(~gt_edge_b, pr_edge_b).sum())
-                        fn_e = int(np.logical_and(gt_edge_b, ~pr_edge_b).sum())
-                        prec = tp / max(tp + fp_e, 1)
-                        recl = tp / max(tp + fn_e, 1)
-                        f1 = 2 * prec * recl / max(prec + recl, 1e-9)
-                        if f1 < _BOUNDARY_F1_THR:
-                            boundary_gallery[cid].append({
-                                "image_idx": int(real_idx),
-                                "path": raw.get("path", ""),
-                                "iou": iou, "boundary_f1": float(f1),
-                                "gt_mask": gt_bin, "pred_mask": pr_bin,
-                            })
-                    except Exception:
-                        pass
-        per_image_records.append({
-            "idx": int(real_idx), "path": raw.get("path", ""),
-            "miou": float(img_inter / img_union) if img_union > 0 else 0.0,
-            "gt_mask": gt_mask, "pred_mask": pred_mask,
-        })
+            img_inter = 0.0
+            img_union = 0.0
+            for cid in range(C):
+                gt_bin = (gt_mask == cid)
+                pr_bin = (pred_mask == cid)
+                inter = float(np.logical_and(gt_bin, pr_bin).sum())
+                uni = float(np.logical_or(gt_bin, pr_bin).sum())
+                intersect[cid] += inter
+                union[cid] += uni
+                img_inter += inter
+                img_union += uni
+                gt_pixel_counts[cid] = gt_pixel_counts.get(cid, 0) + int(gt_bin.sum())
+                if uni > 0:
+                    per_class_iou_per_image[cid].append({
+                        "image_idx": int(real_idx), "path": raw.get("path", ""),
+                        "iou": float(inter / uni),
+                        "gt_mask": gt_bin, "pred_mask": pr_bin,
+                    })
+                # ---- new failure-mode buckets ----
+                gt_area = int(gt_bin.sum())
+                pr_area = int(pr_bin.sum())
+                if gt_area > _MIN_GT_AREA_PX and pr_area == 0:
+                    missed_gallery[cid].append({
+                        "image_idx": int(real_idx), "path": raw.get("path", ""),
+                        "gt_area": gt_area, "gt_mask": gt_bin, "pred_mask": pr_bin,
+                    })
+                elif gt_area == 0 and pr_area > _MIN_GT_AREA_PX:
+                    fp_gallery[cid].append({
+                        "image_idx": int(real_idx), "path": raw.get("path", ""),
+                        "pr_area": pr_area, "gt_mask": gt_bin, "pred_mask": pr_bin,
+                    })
+                elif gt_area > 0 and pr_area > 0 and uni > 0:
+                    iou = float(inter / uni)
+                    if iou >= _BOUNDARY_INTERIOR_IOU_THR:
+                        try:
+                            k = np.ones(
+                                (2 * _BOUNDARY_DILATE_PX + 1, 2 * _BOUNDARY_DILATE_PX + 1),
+                                dtype=np.uint8,
+                            )
+                            gt_edge = cv2.dilate(gt_bin.astype(np.uint8), k) & (
+                                ~cv2.erode(gt_bin.astype(np.uint8), k).astype(bool)
+                            )
+                            pr_edge = cv2.dilate(pr_bin.astype(np.uint8), k) & (
+                                ~cv2.erode(pr_bin.astype(np.uint8), k).astype(bool)
+                            )
+                            gt_edge_b = gt_edge.astype(bool)
+                            pr_edge_b = pr_edge.astype(bool)
+                            tp = int(np.logical_and(gt_edge_b, pr_edge_b).sum())
+                            fp_e = int(np.logical_and(~gt_edge_b, pr_edge_b).sum())
+                            fn_e = int(np.logical_and(gt_edge_b, ~pr_edge_b).sum())
+                            prec = tp / max(tp + fp_e, 1)
+                            recl = tp / max(tp + fn_e, 1)
+                            f1 = 2 * prec * recl / max(prec + recl, 1e-9)
+                            if f1 < _BOUNDARY_F1_THR:
+                                boundary_gallery[cid].append({
+                                    "image_idx": int(real_idx),
+                                    "path": raw.get("path", ""),
+                                    "iou": iou, "boundary_f1": float(f1),
+                                    "gt_mask": gt_bin, "pred_mask": pr_bin,
+                                })
+                        except Exception:
+                            pass
+            per_image_records.append({
+                "idx": int(real_idx), "path": raw.get("path", ""),
+                "miou": float(img_inter / img_union) if img_union > 0 else 0.0,
+                "gt_mask": gt_mask, "pred_mask": pred_mask,
+            })
 
     ious = np.where(union > 0, intersect / (union + 1e-9), 0.0)
     mean_iou = float(ious.mean()) if ious.size else 0.0
@@ -2967,6 +3709,7 @@ def _analyze_keypoint(
     conf_threshold: float,
     max_samples: int | None, hard_images_per_class: int,
     training_config: dict | None = None,
+    forward_batch_size: int = 8,
 ) -> dict[str, Any]:
     """PCK@0.2 per keypoint — visibility-gated."""
     raw_ds, idx_map = _unwrap(dataset)
@@ -3000,111 +3743,141 @@ def _analyze_keypoint(
     swapped_gallery: dict[tuple[int, int], list[dict]] = {}
     _OCCL_CONF_THR = 0.5
 
-    for ds_idx in indices:
-        real_idx = idx_map(ds_idx)
-        try:
-            raw = raw_ds.get_raw_item(real_idx)
-        except Exception:
+    batch_state = _BatchState(forward_batch_size)
+    _cursor = 0
+    while _cursor < len(indices):
+        chunk_indices = indices[_cursor : _cursor + batch_state.size]
+        _cursor += len(chunk_indices)
+        chunk_samples: list[dict] = []
+        for ds_idx in chunk_indices:
+            real_idx = idx_map(ds_idx)
+            try:
+                raw = raw_ds.get_raw_item(real_idx)
+            except Exception:
+                continue
+            image = raw["image"]
+            gt = raw.get("targets")
+            if image is None or gt is None:
+                continue
+            gt_kp = np.asarray(
+                gt.get("keypoints") if isinstance(gt, dict) else gt,
+                dtype=np.float32,
+            ).reshape(-1, 3)
+            if gt_kp.size == 0:
+                continue
+            tensor = _preprocess_for_model(
+                image, (input_h, input_w), model=model,
+            )
+            chunk_samples.append({
+                "real_idx": int(real_idx), "raw": raw,
+                "image": image, "gt_kp": gt_kp, "tensor": tensor,
+            })
+        if not chunk_samples:
             continue
-        image = raw["image"]
-        gt = raw.get("targets")
-        if image is None or gt is None:
-            continue
-        gt_kp = np.asarray(gt.get("keypoints") if isinstance(gt, dict) else gt,
-                           dtype=np.float32).reshape(-1, 3)
-        if gt_kp.size == 0:
-            continue
-        tensor = (
-            _preprocess_for_model(image, (input_h, input_w), model=model).unsqueeze(0).to(device)
+        decoded_list = _batched_forward_decode(
+            model, chunk_samples, (input_h, input_w),
+            conf_threshold, device, batch_state,
         )
-        with torch.no_grad():
-            preds_raw = _dispatch_forward(model, tensor)
-        target_sizes = torch.tensor([[input_h, input_w]], device=device)
-        decoded = _dispatch_postprocess(model, preds_raw, conf_threshold, target_sizes)[0]
-        pred_kp = np.asarray(decoded.get("keypoints", []), dtype=np.float32).reshape(-1, 3)
+        if decoded_list is None:
+            decoded_list = []
+            for s in chunk_samples:
+                fb = _batched_forward_decode(
+                    model, [s], (input_h, input_w),
+                    conf_threshold, device, batch_state,
+                )
+                decoded_list.append(fb[0] if fb else {})
 
-        vis = gt_kp[:, 2] > 0
-        if vis.any():
-            x_min, y_min = gt_kp[vis, :2].min(axis=0)
-            x_max, y_max = gt_kp[vis, :2].max(axis=0)
-        else:
-            x_min = y_min = 0
-            x_max = y_max = 1
-        diag = max(1.0, float(np.hypot(x_max - x_min, y_max - y_min)))
-        thr = 0.2 * diag
+        for s, decoded in zip(chunk_samples, decoded_list, strict=True):
+            real_idx = s["real_idx"]
+            raw = s["raw"]
+            image = s["image"]
+            gt_kp = s["gt_kp"]
+            pred_kp = np.asarray(
+                decoded.get("keypoints", []), dtype=np.float32,
+            ).reshape(-1, 3)
 
-        correct = total = 0
-        per_kp_err = {}
-        K_pred = len(pred_kp)
-        for k in range(len(gt_kp)):
-            if gt_kp[k, 2] <= 0:
-                continue
-            per_kp_total[k] = per_kp_total.get(k, 0) + 1
-            total += 1
-            err_px = float("inf")
-            ok = False
-            if k < K_pred and pred_kp[k, 2] > 0:
-                d = float(np.hypot(pred_kp[k, 0] - gt_kp[k, 0],
-                                    pred_kp[k, 1] - gt_kp[k, 1]))
-                err_px = d
-                if d <= thr:
-                    per_kp_correct[k] = per_kp_correct.get(k, 0) + 1
-                    correct += 1
-                    ok = True
-            per_kp_err[k] = err_px
-            if not ok:
-                per_kp_errors.setdefault(k, []).append({
-                    "image_idx": int(real_idx), "path": raw.get("path", ""),
-                    "joint": k, "err_px": err_px,
-                    "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
-                })
-        per_image_records.append({
-            "idx": int(real_idx), "path": raw.get("path", ""),
-            "pck": (correct / max(1, total)),
-            "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
-        })
+            vis = gt_kp[:, 2] > 0
+            if vis.any():
+                x_min, y_min = gt_kp[vis, :2].min(axis=0)
+                x_max, y_max = gt_kp[vis, :2].max(axis=0)
+            else:
+                x_min = y_min = 0
+                x_max = y_max = 1
+            diag = max(1.0, float(np.hypot(x_max - x_min, y_max - y_min)))
+            thr = 0.2 * diag
 
-        # -- occluded_misprediction: GT vis=0 but pred placed on-image w/ conf>0.5
-        H, W = image.shape[:2]
-        for k in range(len(gt_kp)):
-            if gt_kp[k, 2] > 0:
-                continue  # GT visible — not "occluded"
-            if k >= K_pred:
-                continue
-            px, py, pconf = float(pred_kp[k, 0]), float(pred_kp[k, 1]), float(pred_kp[k, 2])
-            if pconf <= _OCCL_CONF_THR:
-                continue
-            if not (0 <= px < W and 0 <= py < H):
-                continue
-            occluded_gallery.setdefault(k, []).append({
-                "image_idx": int(real_idx), "path": raw.get("path", ""),
-                "joint": k, "pred_conf": pconf,
+            correct = total = 0
+            per_kp_err = {}
+            K_pred = len(pred_kp)
+            for k in range(len(gt_kp)):
+                if gt_kp[k, 2] <= 0:
+                    continue
+                per_kp_total[k] = per_kp_total.get(k, 0) + 1
+                total += 1
+                err_px = float("inf")
+                ok = False
+                if k < K_pred and pred_kp[k, 2] > 0:
+                    d = float(np.hypot(pred_kp[k, 0] - gt_kp[k, 0],
+                                        pred_kp[k, 1] - gt_kp[k, 1]))
+                    err_px = d
+                    if d <= thr:
+                        per_kp_correct[k] = per_kp_correct.get(k, 0) + 1
+                        correct += 1
+                        ok = True
+                per_kp_err[k] = err_px
+                if not ok:
+                    per_kp_errors.setdefault(k, []).append({
+                        "image_idx": int(real_idx), "path": raw.get("path", ""),
+                        "joint": k, "err_px": err_px,
+                        "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
+                    })
+            per_image_records.append({
+                "idx": int(real_idx), "path": raw.get("path", ""),
+                "pck": (correct / max(1, total)),
                 "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
             })
 
-        # -- swapped_pair: L/R indices swapped
-        for a, b in keypoint_pairs:
-            if a >= len(gt_kp) or b >= len(gt_kp):
-                continue
-            if gt_kp[a, 2] <= 0 or gt_kp[b, 2] <= 0:
-                continue
-            if a >= K_pred or b >= K_pred:
-                continue
-            if pred_kp[a, 2] <= 0 or pred_kp[b, 2] <= 0:
-                continue
-            def _d(p, q):
-                return float(np.hypot(p[0] - q[0], p[1] - q[1]))
-            d_aa = _d(pred_kp[a], gt_kp[a])
-            d_ab = _d(pred_kp[a], gt_kp[b])
-            d_ba = _d(pred_kp[b], gt_kp[a])
-            d_bb = _d(pred_kp[b], gt_kp[b])
-            if d_ab < d_aa and d_ba < d_bb:
-                swapped_gallery.setdefault((a, b), []).append({
+            # -- occluded_misprediction: GT vis=0 but pred placed on-image w/ conf>0.5
+            H, W = image.shape[:2]
+            for k in range(len(gt_kp)):
+                if gt_kp[k, 2] > 0:
+                    continue  # GT visible — not "occluded"
+                if k >= K_pred:
+                    continue
+                px, py, pconf = float(pred_kp[k, 0]), float(pred_kp[k, 1]), float(pred_kp[k, 2])
+                if pconf <= _OCCL_CONF_THR:
+                    continue
+                if not (0 <= px < W and 0 <= py < H):
+                    continue
+                occluded_gallery.setdefault(k, []).append({
                     "image_idx": int(real_idx), "path": raw.get("path", ""),
-                    "pair": (a, b),
-                    "d_aa": d_aa, "d_bb": d_bb, "d_ab": d_ab, "d_ba": d_ba,
+                    "joint": k, "pred_conf": pconf,
                     "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
                 })
+
+            # -- swapped_pair: L/R indices swapped
+            for a, b in keypoint_pairs:
+                if a >= len(gt_kp) or b >= len(gt_kp):
+                    continue
+                if gt_kp[a, 2] <= 0 or gt_kp[b, 2] <= 0:
+                    continue
+                if a >= K_pred or b >= K_pred:
+                    continue
+                if pred_kp[a, 2] <= 0 or pred_kp[b, 2] <= 0:
+                    continue
+                def _d(p, q):
+                    return float(np.hypot(p[0] - q[0], p[1] - q[1]))
+                d_aa = _d(pred_kp[a], gt_kp[a])
+                d_ab = _d(pred_kp[a], gt_kp[b])
+                d_ba = _d(pred_kp[b], gt_kp[a])
+                d_bb = _d(pred_kp[b], gt_kp[b])
+                if d_ab < d_aa and d_ba < d_bb:
+                    swapped_gallery.setdefault((a, b), []).append({
+                        "image_idx": int(real_idx), "path": raw.get("path", ""),
+                        "pair": (a, b),
+                        "d_aa": d_aa, "d_bb": d_bb, "d_ab": d_ab, "d_ba": d_ba,
+                        "gt_kp": gt_kp.copy(), "pred_kp": pred_kp.copy(),
+                    })
 
     per_kp = {}
     for k in sorted(per_kp_total):

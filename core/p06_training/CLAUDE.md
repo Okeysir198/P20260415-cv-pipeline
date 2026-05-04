@@ -72,7 +72,7 @@ fast at the top of `train_with_hf` rather than silently degrading.
 
 Every training run produces a uniform per-run artifact tree — no per-config opt-in. Driven by `post_train.run_post_train_artifacts` + `core/p08_evaluation/error_analysis_runner.run_error_analysis`.
 
-> **`error_analysis_conf_threshold` is per-arch auto-defaulted** — `run_post_train_artifacts` resolves it from `model.output_format` when no explicit value is passed: **0.05 for DETR-family / HF detection** (RT-DETRv2, D-FINE produce TPs in the 0.05–0.20 range), **0.25 for YOLOX** (scores are `obj_sigmoid * cls_sigmoid`, FPs flood at 0.05). Override per-config via `training.post_train.error_conf_threshold` only when ops calibration requires it. Without this split, `error_analysis/summary.md` shows baseline mAP=0 even when `test_results.json` reports a healthy mAP50. Full incident detail in the Gotchas section below.
+> **Detection threshold-sensitive charts use per-class F1-optimal cutoffs** — `run_post_train_artifacts` calls the analyzer with `threshold_policy="f1_optimal_per_class"` for detection. `run_error_analysis` collects raw predictions once at an eps floor (1e-3) for the threshold-AGNOSTIC charts (07 per-class AP, 09 calibration, 14 robustness, 15 threshold-analysis, 16–21 deep dives), then derives per-class thresholds from the same sweep chart 15 plots and applies them to the threshold-SENSITIVE charts (08 confusion, 10 failure_mode_contribution, 11 failure_by_attribute, 12 hardest, 13 mode-examples gallery). The dict lands in `summary.json::operating_point.thresholds` so anyone reading the report knows which charts reflect deploy cutoffs. Override per-call with `threshold_policy ∈ {fixed, f1_optimal, f1_optimal_per_class}`. The legacy per-arch scalar (`error_analysis_conf_threshold`) is now used **only for cls/seg/kpt** (still 0.05 for DETR-family / 0.25 for YOLOX). Train-split error analysis is hard-forced to `fixed` — picking thresholds from train would be overfit. Helper lives in `core/p08_evaluation/threshold_policy.py`.
 
 ```
 runs/<ts>/
@@ -273,17 +273,19 @@ Gotchas
   in `build_hf_model`; any new HF detection wrapper MUST do the same or wire
   a custom preprocess path. YOLOX (`output_format == "yolox"`) bypasses this
   and feeds raw [0, 255] to match the Megvii recipe.
-- **`error_analysis_conf_threshold` is per-arch auto-defaulted** —
-  `run_post_train_artifacts` defaults it to `None` and resolves at runtime
-  based on `model.output_format`: **0.05 for DETR-family / HF detection**
-  (RT-DETRv2, D-FINE produce TPs in the 0.05–0.20 range; on CPPE-5 RT-DETRv2's
-  max score on a typical val image was 0.176, so 0.3 dropped almost every
-  prediction and left TP≈0 in summary.json even when HF Trainer's own eval
-  reported mAP50=0.82) and **0.25 for YOLOX** (scores are `obj_sigmoid * cls_sigmoid`,
-  TPs sit at ~0.5+, FPs flood at 0.05 — observed 137k FPs vs 207 GTs on
-  CPPE-5, baseline mAP=0 in summary.md while test_results.json=0.74). Override
-  via `training.post_train.error_conf_threshold` if you need different ops
-  calibration; an explicit value always wins over the per-arch default.
+- **Detection error-analysis: per-class F1-optimal threshold policy** (replaces the per-arch scalar auto-pick).
+  `run_error_analysis(..., threshold_policy="f1_optimal_per_class")` is the new default for detection.
+  Pass 1 collects raw predictions once at the eps floor (`core.p08_evaluation.threshold_policy.EPS_FLOOR = 1e-3`)
+  → drives the agnostic charts (07 / 09 / 14 / 15 / 16 / 17 / 18 / 19 / 20).
+  Pass 2 applies the per-class dict computed from the same sweep that chart 15 plots
+  (3-point smoothed argmax over the F1 curve) → drives the sensitive charts (08 / 10 / 11 / 12 / 13).
+  The dict + the list of charts it gates lands in `summary.json::operating_point` and the head
+  of `summary.md`. Set `threshold_policy="fixed"` for deterministic CI / back-compat — the old
+  scalar `conf_threshold` then applies to all charts. Set `"f1_optimal"` for a single global
+  cutoff. `split="train"` forces `"fixed"` (avoid overfitting). The per-arch scalar
+  (`error_analysis_conf_threshold`: 0.05 DETR-family / 0.25 YOLOX) survives in `post_train.py`
+  but only flows into cls/seg/kpt analyzers; detection ignores it. Override via
+  `training.post_train.error_conf_threshold` for cls/seg/kpt only.
 - **Failure-mode Δ mAP is a counterfactual simulation, not a ground-truth gain**
   — `error_analysis_runner._compute_recoverable_map` iterates each of the 5
   modes, mutates the detection list (inject synthetic TPs for `missed`, flip
