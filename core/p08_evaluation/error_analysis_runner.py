@@ -98,14 +98,15 @@ CHART_FILENAMES: dict[str, str] = {
     "hardest_images":            "12_hardest_images.png",
     "failure_mode_examples":     "13_failure_mode_examples",
     "robustness_sweep":          "14_robustness_sweep.png",
-    # Detection-specific (shifted from old 10..14 → 15..19).
-    "recoverable_map_vs_iou":    "15_recoverable_map_vs_iou.png",
-    "confidence_attribution":    "16_confidence_attribution.png",
-    "boxes_per_image":           "17_boxes_per_image.png",
-    "bbox_aspect_ratio":         "18_bbox_aspect_ratio.png",
-    "size_recall":               "19_size_recall.png",
-    # Segmentation-specific (shifted from old 15 → 20).
-    "pixel_confusion_matrix":    "20_pixel_confusion_matrix.png",
+    # Detection-specific.
+    "threshold_analysis":        "15_threshold_analysis.png",
+    "recoverable_map_vs_iou":    "16_recoverable_map_vs_iou.png",
+    "confidence_attribution":    "17_confidence_attribution.png",
+    "boxes_per_image":           "18_boxes_per_image.png",
+    "bbox_aspect_ratio":         "19_bbox_aspect_ratio.png",
+    "size_recall":               "20_size_recall.png",
+    # Segmentation-specific.
+    "pixel_confusion_matrix":    "21_pixel_confusion_matrix.png",
 }
 
 _LARGE_CLASS_THRESHOLD = 20  # confusion-matrix → top-K swap
@@ -1097,6 +1098,9 @@ def _analyze_detection(
         "ap50_per_class": _per_class_ap(detections, gt_per_class, class_names, 0.5),
         "map_vs_iou": _map_at_iou_sweep(detections, gt_per_class,
                                          np.arange(0.5, 1.0, 0.05)),
+        "best_f1_per_class": _best_f1_and_threshold(
+            detections, gt_per_class, class_names, 0.5,
+        ),
         "failure_mode": failure_mode,
     }
 
@@ -1194,7 +1198,11 @@ def _analyze_detection(
     if p is not None:
         artifacts["hardest_images"] = p
 
-    # --- 10–13: detection-specific extras ---
+    # --- 15–20: detection-specific extras ---
+    artifacts["threshold_analysis"] = _plot_threshold_analysis(
+        detections, gt_per_class, class_names, iou_threshold,
+        _chart_path(output_dir, "threshold_analysis"),
+    )
     artifacts["recoverable_map_vs_iou"] = _plot_recoverable_map_vs_iou(
         detections, gt_per_class, missed_per_class, class_names,
         _chart_path(output_dir, "recoverable_map_vs_iou"),
@@ -1423,6 +1431,7 @@ def _analyze_detection(
         "confusion_matrix" if len(class_names) <= _LARGE_CLASS_THRESHOLD else "top_confused_pairs",
         "confidence_calibration", "failure_mode_contribution",
         "failure_by_attribute", "hardest_images",
+        "threshold_analysis",
         "recoverable_map_vs_iou", "confidence_attribution",
         "boxes_per_image", "bbox_aspect_ratio", "size_recall",
     )]
@@ -1545,6 +1554,143 @@ def _per_class_ap(detections, gt_per_class, class_names, iou_thr) -> dict:
         _, _, ap = _per_class_ap_curve(detections, int(gt_per_class.get(cid, 0)), cid, iou_thr)
         out[class_names.get(cid, str(cid))] = round(float(ap), 4)
     return out
+
+
+def _best_f1_and_threshold(detections, gt_per_class, class_names, iou_thr) -> dict:
+    """Per-class F1 sweep across [0.01, 0.99] step 0.01 → best (thr, F1, P, R)."""
+    thresholds = np.round(np.arange(0.01, 1.00, 0.01), 3)
+    out: dict[str, dict] = {}
+    for cid in sorted(class_names):
+        class_dets = [d for d in detections if d["pred_cls"] == cid]
+        gt_count = int(gt_per_class.get(cid, 0))
+        if not class_dets or gt_count == 0:
+            out[class_names.get(cid, str(cid))] = {
+                "best_threshold": 0.0, "best_f1": 0.0, "precision": 0.0, "recall": 0.0,
+            }
+            continue
+        best_f1 = -1.0; best = (0.0, 0.0, 0.0, 0.0)
+        for thr in thresholds:
+            kept = [d for d in class_dets if d["score"] >= thr]
+            tp = sum(1 for d in kept if d["best_iou_same_class"] >= iou_thr)
+            fp = len(kept) - tp
+            fn = gt_count - tp
+            p = tp / (tp + fp) if (tp + fp) else 0.0
+            r = tp / (tp + fn) if (tp + fn) else 0.0
+            f1 = 2 * p * r / (p + r) if (p + r) else 0.0
+            if f1 > best_f1:
+                best_f1 = f1; best = (float(thr), f1, p, r)
+        out[class_names.get(cid, str(cid))] = {
+            "best_threshold": round(best[0], 3),
+            "best_f1": round(best[1], 4),
+            "precision": round(best[2], 4),
+            "recall": round(best[3], 4),
+        }
+    return out
+
+
+def _plot_threshold_analysis(
+    detections, gt_per_class, class_names, iou_thr, path: Path,
+) -> Path:
+    """2×2 chart: PR curves + F1 / Precision / Recall vs conf threshold per class.
+
+    All four panels share per-class colors so the deploy-threshold trade-off
+    is readable at a glance. Panel (b) marks each class's F1-optimal threshold.
+    """
+    thresholds = np.round(np.arange(0.01, 1.00, 0.01), 3)
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(class_names), 10)))
+
+    per_class_curves: dict[int, dict] = {}
+    aps: list[float] = []
+    for cid in sorted(class_names):
+        gt_count = int(gt_per_class.get(cid, 0))
+        rec_ap, prec_ap, ap = _per_class_ap_curve(detections, gt_count, cid, iou_thr)
+        aps.append(ap)
+        class_dets = [d for d in detections if d["pred_cls"] == cid]
+        if not class_dets or gt_count == 0:
+            per_class_curves[cid] = {
+                "ap": ap, "pr_curve": (rec_ap, prec_ap),
+                "precisions": None, "recalls": None, "f1s": None,
+            }
+            continue
+        precisions, recalls, f1s = [], [], []
+        for thr in thresholds:
+            kept = [d for d in class_dets if d["score"] >= thr]
+            tp = sum(1 for d in kept if d["best_iou_same_class"] >= iou_thr)
+            fp = len(kept) - tp
+            fn = gt_count - tp
+            p = tp / (tp + fp) if (tp + fp) else 0.0
+            r = tp / (tp + fn) if (tp + fn) else 0.0
+            precisions.append(p); recalls.append(r)
+            f1s.append(2 * p * r / (p + r) if (p + r) else 0.0)
+        per_class_curves[cid] = {
+            "ap": ap, "pr_curve": (rec_ap, prec_ap),
+            "precisions": precisions, "recalls": recalls, "f1s": f1s,
+        }
+
+    mean_ap = float(np.mean(aps)) if aps else 0.0
+
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+    (ax_pr, ax_f1), (ax_p, ax_r) = axes
+
+    for i, cid in enumerate(sorted(class_names)):
+        c = per_class_curves[cid]
+        rec_ap, prec_ap = c["pr_curve"]
+        ax_pr.plot(rec_ap, prec_ap, color=colors[i % 10], lw=1.8,
+                   label=f"{class_names.get(cid, str(cid))} AP@{iou_thr}={c['ap']:.3f}")
+    ax_pr.set_xlabel("Recall (= TP / total GT)")
+    ax_pr.set_ylabel("Precision (= TP / TP+FP)")
+    ax_pr.set_xlim(0, 1); ax_pr.set_ylim(0, 1.02)
+    ax_pr.set_title(f"(a) Precision–Recall curves @ IoU ≥ {iou_thr}   "
+                    f"mean AP = mAP = {mean_ap:.3f}")
+    ax_pr.grid(alpha=0.3)
+    ax_pr.legend(loc="lower left", fontsize=8)
+
+    for i, cid in enumerate(sorted(class_names)):
+        c = per_class_curves[cid]
+        if c["f1s"] is None:
+            continue
+        best_idx = int(np.argmax(c["f1s"]))
+        ax_f1.plot(thresholds, c["f1s"], color=colors[i % 10], lw=1.8,
+                   label=f"{class_names.get(cid, str(cid))} best F1={c['f1s'][best_idx]:.2f} @ conf={thresholds[best_idx]:.2f}")
+        ax_f1.axvline(thresholds[best_idx], color=colors[i % 10], ls=":", alpha=0.5)
+        ax_f1.scatter([thresholds[best_idx]], [c["f1s"][best_idx]],
+                      color=colors[i % 10], s=30, zorder=5)
+    ax_f1.set_xlabel("Confidence threshold applied at inference")
+    ax_f1.set_ylabel("F1 = harmonic mean of P & R")
+    ax_f1.set_xlim(0.01, 0.99); ax_f1.set_ylim(0, 1.02)
+    ax_f1.set_title("(b) F1 vs conf threshold   (peak = best deploy threshold per class)")
+    ax_f1.grid(alpha=0.3)
+    ax_f1.legend(loc="lower center", fontsize=8)
+
+    for i, cid in enumerate(sorted(class_names)):
+        c = per_class_curves[cid]
+        if c["precisions"] is None:
+            continue
+        ax_p.plot(thresholds, c["precisions"], color=colors[i % 10], lw=1.8,
+                  label=class_names.get(cid, str(cid)))
+    ax_p.set_xlabel("Confidence threshold applied at inference")
+    ax_p.set_ylabel("Precision = TP / (TP+FP)")
+    ax_p.set_xlim(0.01, 0.99); ax_p.set_ylim(0, 1.02)
+    ax_p.set_title("(c) Precision vs conf threshold   (rises → fewer FPs as thr↑)")
+    ax_p.grid(alpha=0.3)
+    ax_p.legend(loc="lower right", fontsize=8)
+
+    for i, cid in enumerate(sorted(class_names)):
+        c = per_class_curves[cid]
+        if c["recalls"] is None:
+            continue
+        ax_r.plot(thresholds, c["recalls"], color=colors[i % 10], lw=1.8,
+                  label=class_names.get(cid, str(cid)))
+    ax_r.set_xlabel("Confidence threshold applied at inference")
+    ax_r.set_ylabel("Recall = TP / (TP+FN)")
+    ax_r.set_xlim(0.01, 0.99); ax_r.set_ylim(0, 1.02)
+    ax_r.set_title("(d) Recall vs conf threshold   (falls → more misses as thr↑)")
+    ax_r.grid(alpha=0.3)
+    ax_r.legend(loc="upper right", fontsize=8)
+
+    fig.suptitle("Threshold analysis — pick deploy threshold from panel (b)", fontsize=13)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    return _savefig(fig, path)
 
 
 def _map_at_iou_sweep(detections, gt_per_class, iou_values) -> dict:
@@ -2794,7 +2940,7 @@ def _analyze_segmentation(
         },
     }
     if top_pair:
-        chart_metrics["20_pixel_confusion_matrix"] = top_pair
+        chart_metrics["21_pixel_confusion_matrix"] = top_pair
     json_path, md_path = _write_json_md(
         output_dir, summary,
         title="Segmentation Error Analysis",

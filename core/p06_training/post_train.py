@@ -47,40 +47,73 @@ from utils.viz import annotate_keypoints, classification_banner
 # ---------------------------------------------------------------------------
 
 
-def _forward_batch_detection(model, tensors, target_sizes, conf_threshold):
-    """Run a detection model forward and decode to xyxy-pixel preds.
+def _forward_batch_detection(
+    model, tensors, target_sizes, conf_threshold, *, forward_batch_size: int = 4,
+):
+    """Run a detection model forward in chunks and decode to xyxy-pixel preds.
 
     Returns a list of dicts ``{boxes, scores, labels}`` aligned to ``tensors``.
 
+    Forward is chunked at ``forward_batch_size`` to bound peak GPU memory
+    during val_viz (which may pass num_samples=40+ images at once). Each chunk
+    runs under ``torch.no_grad()``.
+
     Two dispatch paths:
     * Model has ``.postprocess(predictions, conf_threshold, target_sizes)`` —
-      HF detection wrappers (`HFDetectionModel`). Call directly.
+      HF detection wrappers (`HFDetectionModel`). Call directly per chunk.
     * Model has no ``.postprocess`` — YOLOX / custom. Use the shared
-      :func:`core.p06_training.postprocess.postprocess` dispatcher which knows
-      each arch's nms_threshold vs target_sizes parameter order via the
-      :data:`POSTPROCESSOR_REGISTRY`.
+      :func:`core.p06_training.postprocess.postprocess` dispatcher.
     """
     device = next(model.parameters()).device
-    batch = torch.stack(tensors).to(device)
-    with torch.no_grad():
-        preds_raw = model(pixel_values=batch) if hasattr(model, "hf_model") else model(batch)
-    if hasattr(model, "postprocess"):
-        return model.postprocess(preds_raw, conf_threshold, target_sizes.to(device))
+    n = len(tensors)
+    if n == 0:
+        return []
+
+    # Move target_sizes once to the right device
+    ts_dev = target_sizes.to(device) if hasattr(target_sizes, "to") else target_sizes
+
     from core.p06_training.postprocess import postprocess as _registry_postprocess
     output_format = getattr(model, "output_format", "yolox")
-    try:
-        return _registry_postprocess(
-            output_format=output_format,
-            model=model,
-            predictions=preds_raw,
-            conf_threshold=conf_threshold,
-            target_sizes=target_sizes.to(device) if hasattr(target_sizes, "to") else target_sizes,
-        )
-    except Exception as e:
-        logger.warning("post-train decode failed for output_format=%s: %s",
-                       output_format, e)
-        return [{"boxes": np.zeros((0, 4)), "scores": np.zeros(0),
-                 "labels": np.zeros(0, dtype=np.int64)}] * len(tensors)
+    has_pp = hasattr(model, "postprocess")
+
+    out_list: list = []
+    for start in range(0, n, forward_batch_size):
+        end = min(start + forward_batch_size, n)
+        chunk_tensors = tensors[start:end]
+        chunk_target_sizes = ts_dev[start:end] if hasattr(ts_dev, "__getitem__") else ts_dev
+        batch = torch.stack(chunk_tensors).to(device)
+        try:
+            with torch.no_grad():
+                preds_raw = (
+                    model(pixel_values=batch) if hasattr(model, "hf_model") else model(batch)
+                )
+            if has_pp:
+                chunk_decoded = model.postprocess(
+                    preds_raw, conf_threshold, chunk_target_sizes
+                )
+            else:
+                chunk_decoded = _registry_postprocess(
+                    output_format=output_format,
+                    model=model,
+                    predictions=preds_raw,
+                    conf_threshold=conf_threshold,
+                    target_sizes=chunk_target_sizes,
+                )
+            out_list.extend(chunk_decoded)
+            # Free the per-chunk forward state ASAP — important when the caller
+            # is val_viz invoked at end-of-epoch where memory is already tight.
+            del preds_raw, batch
+        except Exception as e:
+            logger.warning(
+                "post-train decode failed for output_format=%s on chunk [%d:%d]: %s",
+                output_format, start, end, e,
+            )
+            out_list.extend(
+                [{"boxes": np.zeros((0, 4)), "scores": np.zeros(0),
+                  "labels": np.zeros(0, dtype=np.int64)}]
+                * (end - start)
+            )
+    return out_list
 
 
 # ---------------------------------------------------------------------------
@@ -185,12 +218,20 @@ def render_prediction_grid(
             ))
 
     elif task == "classification":
+        # Chunked forward to bound peak GPU memory during viz (may receive
+        # num_samples=40+ at once). Same `torch.no_grad()` semantics as before.
         device = next(model.parameters()).device
-        batch = torch.stack([s[3] for s in samples]).to(device)
-        with torch.no_grad():
-            logits = model(pixel_values=batch) if hasattr(model, "hf_model") else model(batch)
-        if hasattr(logits, "logits"):
-            logits = logits.logits
+        FWD_BS = 4
+        all_logits = []
+        for start in range(0, len(samples), FWD_BS):
+            chunk = samples[start:start + FWD_BS]
+            batch = torch.stack([s[3] for s in chunk]).to(device)
+            with torch.no_grad():
+                out = model(pixel_values=batch) if hasattr(model, "hf_model") else model(batch)
+            chunk_logits = out.logits if hasattr(out, "logits") else out
+            all_logits.append(chunk_logits.detach().cpu())
+            del out, batch
+        logits = torch.cat(all_logits, dim=0)
         preds = logits.argmax(dim=-1).cpu().numpy()
         scores = torch.softmax(logits, dim=-1).max(dim=-1).values.cpu().numpy()
         for i, (real_idx, orig_image, _resized, _tensor, gt_cls) in enumerate(samples):
@@ -218,12 +259,21 @@ def render_prediction_grid(
             rows.append(cv2.cvtColor(stacked_rgb, cv2.COLOR_RGB2BGR))
 
     elif task == "segmentation":
+        # Chunked forward (segmentation logits at full resolution dominate
+        # memory). num_samples=40 at 640x640 with C classes can be > 5 GB
+        # in a single batch — chunk to bound the peak.
         device = next(model.parameters()).device
-        batch = torch.stack([s[3] for s in samples]).to(device)
-        with torch.no_grad():
-            out = model(pixel_values=batch) if hasattr(model, "hf_model") else model(batch)
-        seg_logits = out.logits if hasattr(out, "logits") else out
-        pred_masks = seg_logits.argmax(dim=1).cpu().numpy()  # (B, H', W')
+        FWD_BS = 4
+        all_pred_masks = []
+        for start in range(0, len(samples), FWD_BS):
+            chunk = samples[start:start + FWD_BS]
+            batch = torch.stack([s[3] for s in chunk]).to(device)
+            with torch.no_grad():
+                out = model(pixel_values=batch) if hasattr(model, "hf_model") else model(batch)
+            seg_logits = out.logits if hasattr(out, "logits") else out
+            all_pred_masks.append(seg_logits.argmax(dim=1).detach().cpu().numpy())
+            del out, seg_logits, batch
+        pred_masks = np.concatenate(all_pred_masks, axis=0)  # (B, H', W')
         for i, (real_idx, orig_image, _resized, _tensor, gt_mask) in enumerate(samples):
             orig_h, orig_w = orig_image.shape[:2]
             pm = pred_masks[i]

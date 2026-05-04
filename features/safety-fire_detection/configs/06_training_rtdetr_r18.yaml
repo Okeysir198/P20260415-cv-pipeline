@@ -71,7 +71,13 @@ training:
   lr: 0.0001                      # paper Table 1, R18 row — single LR (no backbone split)
   weight_decay: 0.0001
   warmup_steps: 2000              # paper LinearWarmup
-  scheduler: constant_with_warmup # paper uses MultiStepLR (flat after warmup); HF closest
+  # Cosine decay 1e-4 → 1e-5 over the run. Paper uses MultiStepLR with milestone
+  # past run end (effectively flat); for our 30-epoch fine-tune a cooldown phase
+  # helps the model settle near the end instead of overshooting (early peak then
+  # noisy plateau observed at flat LR).
+  scheduler: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr: 0.00001               # absolute floor (1e-5 = 10% of initial 1e-4)
   max_grad_norm: 0.1
   bf16: true
   amp: false                      # fp16 AMP overflows DETR decoder

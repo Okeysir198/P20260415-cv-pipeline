@@ -934,17 +934,25 @@ def _render_topdown_keypoint_grid(
         return
 
     device = next(model.parameters()).device
-    pixel_batch = torch.stack([s[1]["pixel_values"] for s in samples]).to(device)
     target_hms = np.stack([s[1]["target_heatmap"].cpu().numpy() for s in samples])
     target_ws = np.stack([s[1]["target_weight"].cpu().numpy() for s in samples])
 
-    with torch.inference_mode():
-        out = model(pixel_values=pixel_batch)
-    pred_hms_t = out["heatmaps"] if isinstance(out, dict) and "heatmaps" in out \
-        else getattr(out, "heatmaps", None)
-    if pred_hms_t is None:
-        pred_hms_t = getattr(out, "logits", None)
-    pred_hms = pred_hms_t.detach().float().cpu().numpy()
+    # Chunked forward (heatmap logits at high resolution = several GB at
+    # num_samples=40+ in one batch). Bound peak memory at FWD_BS=4.
+    FWD_BS = 4
+    pred_hms_chunks = []
+    for start in range(0, len(samples), FWD_BS):
+        chunk = samples[start:start + FWD_BS]
+        pixel_batch = torch.stack([s[1]["pixel_values"] for s in chunk]).to(device)
+        with torch.inference_mode():
+            out = model(pixel_values=pixel_batch)
+        pred_hms_t = out["heatmaps"] if isinstance(out, dict) and "heatmaps" in out \
+            else getattr(out, "heatmaps", None)
+        if pred_hms_t is None:
+            pred_hms_t = getattr(out, "logits", None)
+        pred_hms_chunks.append(pred_hms_t.detach().float().cpu().numpy())
+        del out, pred_hms_t, pixel_batch
+    pred_hms = np.concatenate(pred_hms_chunks, axis=0)
 
     stride = int(inner.input_hw[0] // pred_hms.shape[2])
     pred_xy, pred_scores = decode_heatmaps_to_xy(pred_hms, stride=stride)

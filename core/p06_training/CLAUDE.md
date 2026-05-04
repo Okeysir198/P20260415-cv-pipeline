@@ -116,14 +116,15 @@ runs/<ts>/
 │       │   │  keypoint: high_error/kp_<k>_<name>/, ghost/kp_<k>_<name>/, swapped_pair/<L>__<R>/
 │       ├── 14_robustness_sweep.{png,json}        metric vs corruption — det: blur/jpeg/brightness/rotation;
 │       │                                          kpt: blur/brightness/jpeg (no rotation — heatmap geometry breaks); 3 severities
-│       ├── 15_recoverable_map_vs_iou.png         (detection) per-mode Δ mAP across IoU 0.5→0.9
-│       ├── 16_confidence_attribution.png         (detection) FN causality: true_miss / under_conf / loc_fail
-│       ├── 17_boxes_per_image.png                (detection) crowdedness
-│       ├── 18_bbox_aspect_ratio.png              (detection) per-class log-scale w/h
-│       ├── 19_size_recall.png                    (detection) recall by COCO size bands
-│       └── 20_pixel_confusion_matrix.png         (segmentation) row-normalised C×C pixel cross-tab
-│           OR 20_bbox_padding_sweep.png          (keypoint top-down) AP/PCK vs bbox_padding ∈ {1.0..2.0}
-├── test_predictions/           same flat 01..20 layout as val_predictions/error_analysis/
+│       ├── 15_threshold_analysis.png             (detection) 2×2: PR + F1/P/R vs conf threshold; F1-optimal marked
+│       ├── 16_recoverable_map_vs_iou.png         (detection) per-mode Δ mAP across IoU 0.5→0.9
+│       ├── 17_confidence_attribution.png         (detection) FN causality: true_miss / under_conf / loc_fail
+│       ├── 18_boxes_per_image.png                (detection) crowdedness
+│       ├── 19_bbox_aspect_ratio.png              (detection) per-class log-scale w/h
+│       ├── 20_size_recall.png                    (detection) recall by COCO size bands
+│       └── 21_pixel_confusion_matrix.png         (segmentation) row-normalised C×C pixel cross-tab
+│           OR 21_bbox_padding_sweep.png          (keypoint top-down) AP/PCK vs bbox_padding ∈ {1.0..2.0}
+├── test_predictions/           same flat 01..21 layout as val_predictions/error_analysis/
 └── test_results.json           HF Trainer metrics on the test split
 ```
 
@@ -316,6 +317,21 @@ Gotchas
   `train_with_hf` strips `EarlyStoppingCallback` from the callback handler
   before invoking `trainer.evaluate(test_dataset, ...)` to suppress the noise
   (2026-05-04). Do not re-add it after — test eval is the last action.
+- **`eval_accumulation_steps=4` is mandatory for DETR-family with val ≥ 1000**
+  (verified 2026-05-04 on R18 fire OOM). Without it HF Trainer accumulates
+  ALL eval batches' `ModelOutput`s on GPU before transferring to CPU. RT-DETRv2
+  / D-FINE return logits + pred_boxes + intermediate decoder layer outputs +
+  encoder feature maps + auxiliary outputs per batch — at val=2606 imgs /
+  eval_batch_size=4 = 651 batches, that's several GB of eval-time growth on
+  top of train state. End-of-epoch eval then OOMs even though train phase
+  fits. `_config_to_training_args` sets this unconditionally; do not unset.
+  Speed cost of more frequent CPU flushes is negligible (<0.5s per eval).
+- **`_DetectionTrainer.evaluate()` runs `gc.collect() + torch.cuda.empty_cache()`
+  before super.evaluate()** — partial defense against fragmentation when
+  pre-existing GPU tenants take ≥10 GB. ~200ms overhead per eval cycle. Useful
+  but NOT a fix on its own — `eval_accumulation_steps` above is the structural
+  fix; the cache reset only helps when fragmentation (not actual usage) is
+  the bottleneck.
 - **Paddle: separate package, not a backend in this dispatcher.** Train via `.venv-paddle/bin/python core/p06_paddle/train.py`; the unified dispatcher just prints a redirect when `backend: paddle` is selected. Paddle ships its own bundled CUDA incompatible with the main venv's CUDA 13 PyTorch wheels — sibling venv keeps them apart. Bootstrap: `bash scripts/setup-paddle-venv.sh`.
 - **Paddle ↔ pipeline convergence is ONNX.** `core/p06_paddle/export.py` writes `model.onnx`; from there the standard main-venv path handles eval, error analysis, inference, demo. No torch ↔ paddle tensor bridge. Don't try to `torch.load` a `.pdparams` file.
 - **Paddle ORT INT8** — PicoDet / PP-YOLOE (CNN) generally hit real INT8 speedup on ORT CUDA EP. For any future transformer-y paddle arch, reuse the DETR-family exclusion list in `core/p09_export/quantize.py` (`LayerNormalization`/`Softmax`/`Gather` opt-out + `percentile` calibration default).

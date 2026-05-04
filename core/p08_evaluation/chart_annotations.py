@@ -439,8 +439,22 @@ CHART_META: dict[str, ChartMeta] = {
         ),
     ),
 
-    # ---------------- Detection-specific (15..19) ---------------------
-    "15_recoverable_map_vs_iou": ChartMeta(
+    # ---------------- Detection-specific (15..20) ---------------------
+    "15_threshold_analysis": ChartMeta(
+        title="Threshold analysis (PR + F1/P/R vs conf)",
+        description=(
+            "Four-panel deployment chart: (a) per-class precision-recall "
+            "curves @ IoU≥0.5 with AP, (b) F1 vs confidence threshold with "
+            "the F1-optimal operating point marked per class, (c) precision "
+            "vs threshold (rises as thr↑ → fewer FPs), (d) recall vs "
+            "threshold (falls as thr↑ → more misses). Read panel (b) for the "
+            "deploy threshold; cross-check (c)/(d) against your precision / "
+            "recall budget. The matching JSON in summary.model_metrics."
+            "best_f1_per_class records the (threshold, F1, P, R) per class."
+        ),
+    ),
+
+    "16_recoverable_map_vs_iou": ChartMeta(
         title="Recoverable mAP across IoU",
         description=(
             "How much mAP each failure mode would recover across the COCO "
@@ -450,7 +464,7 @@ CHART_META: dict[str, ChartMeta] = {
         ),
     ),
 
-    "16_confidence_attribution": ChartMeta(
+    "17_confidence_attribution": ChartMeta(
         title="Confidence attribution of FN",
         description=(
             "Decomposes false negatives into three causal buckets: "
@@ -469,7 +483,7 @@ CHART_META: dict[str, ChartMeta] = {
         ),
     ),
 
-    "17_boxes_per_image": ChartMeta(
+    "18_boxes_per_image": ChartMeta(
         title="Boxes per image (crowdedness)",
         description=(
             "Distribution of GT boxes per image — mean / median / p95 / max. "
@@ -478,7 +492,7 @@ CHART_META: dict[str, ChartMeta] = {
         ),
     ),
 
-    "18_bbox_aspect_ratio": ChartMeta(
+    "19_bbox_aspect_ratio": ChartMeta(
         title="Bbox aspect ratio",
         description=(
             "Per-class log-scale width / height distribution. Extreme tails "
@@ -487,7 +501,7 @@ CHART_META: dict[str, ChartMeta] = {
         ),
     ),
 
-    "19_size_recall": ChartMeta(
+    "20_size_recall": ChartMeta(
         title="Size recall",
         description=(
             "Recall broken down by COCO area bands: small (< 32² px), "
@@ -497,8 +511,8 @@ CHART_META: dict[str, ChartMeta] = {
         ),
     ),
 
-    # ---------------- Segmentation-specific (20) ----------------------
-    "20_pixel_confusion_matrix": ChartMeta(
+    # ---------------- Segmentation-specific (21) ----------------------
+    "21_pixel_confusion_matrix": ChartMeta(
         title="Pixel confusion matrix",
         description=(
             "Class × class pixel-confusion matrix for semantic segmentation: "

@@ -194,6 +194,26 @@ class _DetectionTrainer(Trainer):
     override `_save` directly instead.
     """
 
+    def evaluate(self, *args, **kwargs):
+        """Force a CUDA cache reset before each eval pass.
+
+        HF Trainer transitions train→eval without freeing the train-phase
+        caching allocator blocks. With pre-existing GPU tenants (other
+        services consuming a chunk of VRAM) the train activation pool stays
+        fragmented and eval's first forward — even at small `eval_batch_size`
+        — can fail with `CUDA out of memory` while reporting plenty of "free"
+        memory. The PyTorch error message itself recommends
+        `expandable_segments:True`; calling `empty_cache()` here achieves the
+        same effect deterministically without env-var coupling. Cheap (~ms)
+        and called only N times per training run (once per eval cycle).
+        """
+        import gc  # noqa: PLC0415
+        import torch  # noqa: PLC0415
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return super().evaluate(*args, **kwargs)
+
     def _save(self, output_dir=None, state_dict=None):
         import torch  # local import — trainer.py set up determinism already
         output_dir = output_dir or self.args.output_dir
@@ -970,6 +990,10 @@ def _config_to_training_args(
     # lr scheduler: pass through from config (cosine/linear/...). HF Trainer
     # defaults to "linear"; keep that behaviour when config doesn't specify.
     lr_scheduler_type = train_cfg.get("scheduler", "linear")
+    # Optional per-scheduler kwargs (e.g. {"min_lr_rate": 0.1} for
+    # cosine_with_min_lr). Pass through verbatim — HF Trainer forwards to
+    # `transformers.optimization.get_scheduler`.
+    lr_scheduler_kwargs = train_cfg.get("lr_scheduler_kwargs") or None
     # For non-detection tasks we keep the current concat-batch behaviour.
     eval_do_concat_batches = output_format != "detr"
 
@@ -1009,6 +1033,7 @@ def _config_to_training_args(
         warmup_steps=warmup_steps or 0,
         warmup_ratio=warmup_ratio,
         lr_scheduler_type=lr_scheduler_type,
+        lr_scheduler_kwargs=lr_scheduler_kwargs,
         fp16=train_cfg.get("amp", False),
         bf16=train_cfg.get("bf16", False),
         max_grad_norm=train_cfg.get("max_grad_norm", train_cfg.get("grad_clip", 35.0)),
@@ -1028,6 +1053,13 @@ def _config_to_training_args(
         dataloader_pin_memory=data_cfg.get("pin_memory", True),
         remove_unused_columns=False,  # Our datasets return custom dicts
         eval_do_concat_batches=eval_do_concat_batches,
+        # Flush eval predictions GPU → CPU every N batches. Without this HF
+        # accumulates ALL N_val/eval_batch_size batches' ModelOutputs on GPU
+        # before transfer (HF default), which on RT-DETRv2 / D-FINE costs
+        # several GB at val=2k images and triggers end-of-epoch eval OOM
+        # even though train phase fits comfortably. 4 is a conservative cap;
+        # speed cost of more frequent flushes is negligible vs OOM risk.
+        eval_accumulation_steps=4,
         logging_steps=10,
     )
     # Layered LR — stashed as a dynamic attribute (TrainingArguments is a
