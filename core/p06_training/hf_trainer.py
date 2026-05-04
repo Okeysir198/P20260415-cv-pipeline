@@ -612,6 +612,15 @@ def train_with_hf(
     # val-prediction callback could render best-checkpoint grids on it).
     if test_dataset is not None:
         logger.info("Running final test-set evaluation on best checkpoint...")
+        # Strip EarlyStoppingCallback before test eval. Otherwise it fires on
+        # `on_evaluate` looking for `eval_map_50`, but test eval uses prefix
+        # `test_*` so the metric is missing → benign but noisy WARNING:
+        # "early stopping required metric_for_best_model, but did not find
+        # eval_map_50 so early stopping is disabled". Training is over by now.
+        trainer.callback_handler.callbacks = [
+            cb for cb in trainer.callback_handler.callbacks
+            if not isinstance(cb, EarlyStoppingCallback)
+        ]
         try:
             test_metrics = trainer.evaluate(eval_dataset=test_dataset, metric_key_prefix="test")
             summary["test_metrics"] = test_metrics

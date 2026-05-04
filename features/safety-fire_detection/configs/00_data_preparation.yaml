@@ -1,8 +1,7 @@
-# Fire Detection — Data Preparation Config (v1, 2026-04-15)
+# Fire Detection — Data Preparation Config
 #
-# Quality-first selection: 3 clean, diverse sources. fasdd_cv (95K) and
-# roboflow_fire_seg (seg masks) are deferred to v2; site_collected stays
-# as optional overlay when populated.
+# Quality-first selection: 3 clean, diverse sources. site_collected is an
+# optional on-site overlay populated as available.
 
 task: detection
 dataset_name: "fire_detection"
@@ -71,24 +70,18 @@ sources:
       "smoke": "smoke"
 
 splits:
-  train: 0.8
-  val: 0.1
-  test: 0.1
+  # NOTE: dedup.split_ratios overrides these when dedup is enabled.
+  # Kept here for legacy resplit-only flow.
+  train: 0.7
+  val: 0.15
+  test: 0.15
   seed: 42
 
 # ---------------------------------------------------------------------------
-# Deduplication + smart split (added 2026-05-03)
+# Deduplication + smart split.
 # Controls how the post-merge dataset is re-split to (a) eliminate
 # train↔val↔test near-duplicate leakage and (b) keep every source family
 # proportionally represented in all 3 splits.
-# Pipeline:
-#   1. Compute pHash for every image.
-#   2. Build connected components (groups) at hamming distance ≤ thresh.
-#   3. Assign whole groups to splits — never split a group across train/val/test.
-#   4. While assigning, balance per-class box counts AND per-source image
-#      counts toward target ratios (joint stratification).
-#   5. Optionally cap per-group survivors in val/test to fight video-sequence
-#      bloat (where ~thousands of near-identical frames inflate eval metrics).
 # Disable only if your dataset has zero near-duplicates AND only one source.
 # ---------------------------------------------------------------------------
 dedup:
@@ -105,16 +98,25 @@ dedup:
   # consecutive frames must be detected as the same group (this dataset).
   hamming_thresh: 6
 
-  # Whether to cap the number of group representatives kept in val/test.
-  # null = off (keep all). Integer N = keep ≤N evenly-strided members per group
-  # in eval splits, drop the rest. Train is never capped.
-  # 50 here compresses long video sequences in val/test that would otherwise
-  # inflate eval metrics through within-split near-duplicate redundancy.
-  max_per_group_eval: 50
+  # Splitting strategy:
+  #   per_source_with_temporal — primary stratification by source (each source
+  #     gets its own 70/15/15 split). Video pHash groups are split temporally
+  #     with a buffer gap to test generalization to "future" frames. Still
+  #     groups are whole-group assigned. Eliminates source-imbalance bug
+  #     where one source dominated train and another dominated eval.
+  #   class_aware (legacy) — global class-balanced split with whole-group
+  #     assignment for all groups. Kept for back-compat.
+  split_strategy: per_source_with_temporal
 
-  # Joint stratification axes.
-  #   class  - per-class box-count balance
-  #   source - per-source image-count balance
+  # Per-split target ratios. Sum to 1.0. 70/15/15 yields ~2k val/test for
+  # stable mAP estimation (variance ±0.02 vs ±0.05 at 80/10/10 + eval cap).
+  split_ratios: [0.70, 0.15, 0.15]
+
+  # Eval cap is bypassed under per_source_with_temporal — temporal split
+  # replaces it. Set to null.
+  max_per_group_eval: null
+
+  # Joint stratification axes (used by class_aware strategy only).
   stratify_by: [class, source]
 
   # How to identify a sample's source:
@@ -124,6 +126,21 @@ dedup:
 
   # Verify zero cross-split leakage at hamming ≤ thresh after splitting.
   verify_no_leakage: true
+
+  # Temporal split parameters (only used when split_strategy includes
+  # "temporal"). For each VIDEO pHash group:
+  #   first  ratio[0]      → train
+  #   gap_fraction         → DROP (prevents temporal leakage at boundary)
+  #   ratio[1]             → val
+  #   gap_fraction         → DROP
+  #   ratio[2]             → test
+  # A pHash group is treated as VIDEO when its size is >= min_group_size_for_video
+  # AND filenames have monotonically increasing numeric suffix.
+  temporal:
+    enabled: true
+    min_group_size_for_video: 20
+    gap_fraction: 0.05
+    min_gap_frames: 5
 
 options:
   copy_images: true

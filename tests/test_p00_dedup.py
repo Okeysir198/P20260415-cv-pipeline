@@ -12,9 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.p00_data_prep.core.dedup import (  # noqa: E402
+    _is_video_group,
+    _temporal_split_video_group,
     apply_max_per_group_eval,
     build_groups,
     compute_phashes,
+    per_source_split,
     stratified_group_split,
     validate_dedup_config,
     verify_no_leakage,
@@ -199,3 +202,177 @@ def test_validate_dedup_config_bad_thresh() -> None:
 def test_validate_dedup_config_bad_source_from() -> None:
     with pytest.raises(ValueError):
         validate_dedup_config({"source_from": "magic"})
+
+
+# ---------------------------------------------------------------------------
+# New per-source + temporal split tests (added 2026-05-03)
+# ---------------------------------------------------------------------------
+
+
+def test_video_group_detection(tmp_path: Path) -> None:
+    """Video group: monotonic numeric suffix, size >= 20."""
+    # Sequential numeric filenames → video
+    video = [tmp_path / f"frame_{i:03d}.jpg" for i in range(25)]
+    assert _is_video_group(video, min_size=20) is True
+
+    # Random hash filenames → not video
+    random_hash = [tmp_path / f"img_{c}.jpg" for c in "abcdefghijklmnopqrstuvwxy"]
+    assert _is_video_group(random_hash, min_size=20) is False
+
+    # Too small → not video
+    small_seq = [tmp_path / f"frame_{i:03d}.jpg" for i in range(10)]
+    assert _is_video_group(small_seq, min_size=20) is False
+
+    # Realistic AoF naming
+    aof = [tmp_path / f"AoF{i:05d}.jpg" for i in range(1000, 1030)]
+    assert _is_video_group(aof, min_size=20) is True
+
+    # Roboflow-style augmentation hashes (no trailing digits before extension)
+    rf = [tmp_path / f"000051_jpg.rf.{c * 8}.jpg" for c in "abcdefghijklmnopqrstuvwxy"]
+    assert _is_video_group(rf, min_size=20) is False
+
+
+def test_temporal_split_with_gap(tmp_path: Path) -> None:
+    imgs = [tmp_path / f"frame_{i:04d}.jpg" for i in range(100)]
+    mapping = _temporal_split_video_group(
+        imgs, target_ratios=(0.7, 0.15, 0.15), gap_fraction=0.05, min_gap_frames=5
+    )
+    splits = [mapping[p] for p in imgs]
+    n_train = sum(1 for s in splits if s == "train")
+    n_val = sum(1 for s in splits if s == "val")
+    n_test = sum(1 for s in splits if s == "test")
+    n_drop = sum(1 for s in splits if s is None)
+
+    # Layout: 2 gaps of 5 = 10 dropped; remaining 90 split 70/15/15
+    assert n_drop == 10
+    assert n_train == 63  # round(90 * 0.7)
+    assert n_val == 14   # round(90 * 0.15)
+    assert n_test == 13  # remainder
+    assert n_train + n_val + n_test + n_drop == 100
+
+    # No overlap; gap frames sit between train→val and val→test
+    train_idx = [i for i, s in enumerate(splits) if s == "train"]
+    val_idx = [i for i, s in enumerate(splits) if s == "val"]
+    test_idx = [i for i, s in enumerate(splits) if s == "test"]
+    assert max(train_idx) < min(val_idx)
+    assert max(val_idx) < min(test_idx)
+
+
+def test_per_source_split_proportionality(tmp_path: Path) -> None:
+    """3 sources × 100 imgs each → each source ~70/15/15 ±5%."""
+    img_to_group: dict[Path, int] = {}
+    img_to_source: dict[Path, str] = {}
+    img_to_classes: dict[Path, list[int]] = {}
+    gid = 0
+    for s_idx in range(3):
+        for i in range(100):
+            # Each img gets its own group (still groups, not video)
+            p = tmp_path / f"src{s_idx}_unique_{i:03d}.png"
+            img_to_group[p] = gid
+            img_to_source[p] = f"src{s_idx}"
+            img_to_classes[p] = [i % 2]
+            gid += 1
+
+    # Disable temporal — these are still groups (singletons)
+    out = per_source_split(
+        img_to_group, img_to_classes, img_to_source,
+        target_ratios=(0.70, 0.15, 0.15),
+        enable_temporal=False,
+        seed=42,
+    )
+
+    # Per-source counts
+    per_src_split: dict[str, dict[str, int]] = {
+        s: {"train": 0, "val": 0, "test": 0} for s in ("src0", "src1", "src2")
+    }
+    for img, sp in out.items():
+        if sp is None:
+            continue
+        per_src_split[img_to_source[img]][sp] += 1
+
+    for src in ("src0", "src1", "src2"):
+        total = sum(per_src_split[src].values())
+        assert total == 100
+        train_frac = per_src_split[src]["train"] / total
+        val_frac = per_src_split[src]["val"] / total
+        test_frac = per_src_split[src]["test"] / total
+        assert 0.65 <= train_frac <= 0.75, f"{src} train_frac={train_frac}"
+        assert 0.10 <= val_frac <= 0.20, f"{src} val_frac={val_frac}"
+        assert 0.10 <= test_frac <= 0.20, f"{src} test_frac={test_frac}"
+
+
+def test_per_source_split_no_leakage(tmp_path: Path) -> None:
+    paths, src_map, cls_map = _make_synthetic_dataset(tmp_path, n_sources=3, per_source=40)
+    img_to_hash = compute_phashes(paths, n_workers=2)
+    img_to_group = build_groups(img_to_hash, hamming_thresh=3)
+
+    img_to_classes = {p: cls_map[p] for p in paths}
+
+    out = per_source_split(
+        img_to_group, img_to_classes, src_map,
+        target_ratios=(0.70, 0.15, 0.15),
+        enable_temporal=False,
+        seed=42,
+    )
+
+    img_to_split = {p: s for p, s in out.items() if s is not None}
+    leaks = verify_no_leakage(img_to_hash, img_to_split, hamming_thresh=3)
+    assert leaks == 0
+
+
+def test_per_source_split_tiny_source_to_train(tmp_path: Path) -> None:
+    """Source with <7 imgs → all to train."""
+    img_to_group: dict[Path, int] = {}
+    img_to_source: dict[Path, str] = {}
+    img_to_classes: dict[Path, list[int]] = {}
+    gid = 0
+    # Tiny source: 5 imgs
+    for i in range(5):
+        p = tmp_path / f"tiny_{i:03d}.png"
+        img_to_group[p] = gid
+        img_to_source[p] = "tiny_src"
+        img_to_classes[p] = [0]
+        gid += 1
+    # Normal source: 50 imgs
+    for i in range(50):
+        p = tmp_path / f"big_{i:03d}.png"
+        img_to_group[p] = gid
+        img_to_source[p] = "big_src"
+        img_to_classes[p] = [0]
+        gid += 1
+
+    out = per_source_split(
+        img_to_group, img_to_classes, img_to_source,
+        target_ratios=(0.70, 0.15, 0.15),
+        enable_temporal=False,
+        seed=42,
+    )
+
+    tiny_splits = {out[p] for p in img_to_group if img_to_source[p] == "tiny_src"}
+    assert tiny_splits == {"train"}, f"tiny source spread across {tiny_splits}"
+
+
+def test_validate_dedup_config_per_source_strategy() -> None:
+    merged = validate_dedup_config({
+        "split_strategy": "per_source_with_temporal",
+        "split_ratios": [0.7, 0.15, 0.15],
+        "temporal": {"enabled": True, "min_group_size_for_video": 30},
+    })
+    assert merged["split_strategy"] == "per_source_with_temporal"
+    assert merged["split_ratios"] == (0.7, 0.15, 0.15)
+    assert merged["temporal"]["min_group_size_for_video"] == 30
+    assert merged["temporal"]["gap_fraction"] == 0.05  # default preserved
+
+
+def test_validate_dedup_config_bad_split_ratios() -> None:
+    with pytest.raises(ValueError, match="sum to 1.0"):
+        validate_dedup_config({"split_ratios": [0.5, 0.3, 0.3]})
+    with pytest.raises(ValueError, match="list of 3"):
+        validate_dedup_config({"split_ratios": [0.7, 0.3]})
+
+
+def test_validate_dedup_config_bad_temporal() -> None:
+    with pytest.raises(ValueError, match="unknown keys"):
+        validate_dedup_config({"temporal": {"badkey": 1}})
+    with pytest.raises(ValueError, match="gap_fraction"):
+        validate_dedup_config({"temporal": {"gap_fraction": 0.9}})

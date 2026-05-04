@@ -296,22 +296,26 @@ Gotchas
   reuses those same tags but recomputes mAP at each IoU step — so `localization`
   Δ climbs at stricter IoUs because more of the "correct-at-0.5" bucket falls
   back into the fix-list as the threshold tightens.
-- **HF `load_best_model_at_end` + wrapper-prefixed state dict** — our
-  `_DetectionTrainer._save` writes state dicts with `hf_model.*` prefix.
-  HF Trainer's `_load_best_model` loads into the **inner** `hf_model` module,
-  not the wrapper, so it silently misses every prefixed key and reinits weights.
-  The final `pytorch_model.bin` at run root therefore has **untrained class
-  heads**; the true best weights live in `<run_dir>/checkpoint-N/pytorch_model.bin`
-  where `N` is the step pointed to by `trainer_state.json::best_model_checkpoint`.
-  HF Trainer's OWN test eval (run in-memory after the broken save) still sees
-  the correct weights — so `test_results.json` is trustworthy even when
-  `pytorch_model.bin` is not. Any analyzer-rerun script must load from the
-  best-checkpoint folder, not the root.
-  **Downstream reload is now safe**: `core/p08_evaluation/evaluate.py`,
-  `core/p09_export/export.py`, and `core/p10_inference/predictor.py` all run
-  `utils.checkpoint.strip_hf_prefix` before `load_state_dict(strict=False)`
-  and warn on unexpected-key counts. The hazard above is specifically HF
-  Trainer's in-process `_load_best_model`, which bypasses our reload sites.
+- **HF `load_best_model_at_end` works correctly** (verified 2026-05-04 via
+  md5sum: root `pytorch_model.bin` is bit-identical to
+  `checkpoint-<best_step>/pytorch_model.bin`). The earlier note in this file
+  claiming the in-process `_load_best_model` silently fails was based on
+  incomplete diagnosis — the wrapper-prefix path actually round-trips
+  correctly through `self.model.load_state_dict(state)` because both the
+  wrapper module and the saved state dict use the same `hf_model.*` prefix.
+  Root `pytorch_model.bin` and `test_results.json` are both trustworthy.
+  Downstream reload sites (`core/p08_evaluation/evaluate.py`,
+  `core/p09_export/export.py`, `core/p10_inference/predictor.py`) still use
+  `utils.checkpoint.strip_hf_prefix` defensively — keep that, it makes
+  cross-format checkpoints robust.
+- **`EarlyStoppingCallback` warning during final test eval** — HF's callback
+  fires `on_evaluate` regardless of `metric_key_prefix`, so during the final
+  test eval (prefix `test_*`) it looks for `eval_map_50` and emits
+  `"early stopping required metric_for_best_model, but did not find
+  eval_map_50 so early stopping is disabled"`. Benign (training is over).
+  `train_with_hf` strips `EarlyStoppingCallback` from the callback handler
+  before invoking `trainer.evaluate(test_dataset, ...)` to suppress the noise
+  (2026-05-04). Do not re-add it after — test eval is the last action.
 - **Paddle: separate package, not a backend in this dispatcher.** Train via `.venv-paddle/bin/python core/p06_paddle/train.py`; the unified dispatcher just prints a redirect when `backend: paddle` is selected. Paddle ships its own bundled CUDA incompatible with the main venv's CUDA 13 PyTorch wheels — sibling venv keeps them apart. Bootstrap: `bash scripts/setup-paddle-venv.sh`.
 - **Paddle ↔ pipeline convergence is ONNX.** `core/p06_paddle/export.py` writes `model.onnx`; from there the standard main-venv path handles eval, error analysis, inference, demo. No torch ↔ paddle tensor bridge. Don't try to `torch.load` a `.pdparams` file.
 - **Paddle ORT INT8** — PicoDet / PP-YOLOE (CNN) generally hit real INT8 speedup on ORT CUDA EP. For any future transformer-y paddle arch, reuse the DETR-family exclusion list in `core/p09_export/quantize.py` (`LayerNormalization`/`Softmax`/`Gather` opt-out + `percentile` calibration default).

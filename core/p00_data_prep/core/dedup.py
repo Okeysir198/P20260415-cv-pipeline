@@ -3,22 +3,27 @@
 Pure-function module used by p00 data prep and the legacy `scripts/dedup_split.py`
 wrapper. No filesystem I/O beyond `compute_phashes` (which only reads images).
 
-Pipeline:
-    1. compute_phashes  — pHash every image
-    2. build_groups     — connected components at hamming ≤ thresh
-    3. stratified_group_split  — assign whole groups to splits while balancing
-       per-class box counts AND per-source image counts toward target ratios
-    4. apply_max_per_group_eval (optional)  — cap eval-split groups
-    5. verify_no_leakage — sanity-check zero cross-split near-dupes
+Two split strategies are supported:
 
-The splitter never breaks a group across splits, eliminating near-dup leakage
-by construction. Joint stratification on `class` + `source` prevents the
-known failure mode where one source family lands entirely in train (e.g.
-the `industrial_hazards` source in `safety-fire_detection`).
+  * `class_aware` (legacy) — stratified by class (and optionally source) at the
+    group level via `stratified_group_split`, optionally followed by
+    `apply_max_per_group_eval` to cap val/test groups.
+  * `per_source_with_temporal` (recommended for multi-source / video-heavy
+    datasets) — primary stratification by source: each source gets its own
+    70/15/15 split independently. pHash groups detected as VIDEO (size ≥ N
+    AND filenames have monotonically increasing numeric suffix) are split
+    *temporally* with a buffer gap to prevent adjacent-frame leakage; STILL
+    groups are whole-group assigned via greedy size-deficit fitting. See
+    `per_source_split`.
+
+The splitter never breaks a group's *neighbours-by-pHash* across splits within
+a single source for STILL groups (whole-group assignment), and uses temporal
+gaps for VIDEO groups so the train/val/test partitions remain near-dup-clean.
 """
 from __future__ import annotations
 
 import random
+import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from multiprocessing import Pool
@@ -411,6 +416,232 @@ def apply_max_per_group_eval(
 
 
 # ---------------------------------------------------------------------------
+# Per-source + temporal-aware split (added 2026-05-03)
+# ---------------------------------------------------------------------------
+
+
+_TRAILING_DIGITS_RE = re.compile(r"(\d+)(?=\D*$)")
+
+
+def _trailing_number(name: str) -> int | None:
+    """Extract trailing numeric suffix from filename stem; None if absent.
+
+    Examples:
+        'AoF01029.jpg'        → 1029
+        'frame_001.jpg'       → 1
+        'video1_clip2_50.png' → 50
+        '000051_jpg.rf.abc.jpg' → None  (no trailing digits before extension)
+        'random_hash_xyz.jpg' → None
+    """
+    stem = Path(name).stem
+    m = _TRAILING_DIGITS_RE.search(stem)
+    if m is None:
+        return None
+    return int(m.group(1))
+
+
+def _is_video_group(imgs: list[Path], min_size: int = 20) -> bool:
+    """Detect if a pHash group is a sequential video (vs random scenes/augs).
+
+    Heuristic:
+      1. Group size >= min_size.
+      2. Every filename has a trailing numeric suffix.
+      3. After sorting by filename, the numeric values are strictly increasing
+         and have no gap > 10× the median step.
+
+    Returns False for groups of random images that happen to pHash-cluster
+    (e.g. Roboflow `*_jpg.rf.<hash>.jpg` augmentations of the same source).
+    """
+    if len(imgs) < min_size:
+        return False
+    nums: list[tuple[str, int]] = []
+    for p in imgs:
+        n = _trailing_number(p.name)
+        if n is None:
+            return False
+        nums.append((p.name, n))
+    nums.sort(key=lambda x: x[0])
+    seq = [n for _, n in nums]
+    if len(set(seq)) != len(seq):
+        return False
+    if not all(seq[i] < seq[i + 1] for i in range(len(seq) - 1)):
+        return False
+    steps = [seq[i + 1] - seq[i] for i in range(len(seq) - 1)]
+    if not steps:
+        return False
+    median_step = float(np.median(steps))
+    if median_step <= 0:
+        return False
+    max_gap = max(steps)
+    return max_gap <= 10 * median_step
+
+
+def _temporal_split_video_group(
+    imgs: list[Path],
+    target_ratios: tuple[float, float, float],
+    gap_fraction: float = 0.05,
+    min_gap_frames: int = 5,
+) -> dict[Path, str | None]:
+    """Split a video group temporally: train | gap | val | gap | test.
+
+    `imgs` are sorted by filename (which corresponds to temporal order for
+    video-derived data). Gap frames are dropped (returned as None) to prevent
+    adjacent-frame leakage at split boundaries.
+    """
+    sorted_imgs = sorted(imgs, key=lambda p: p.name)
+    n = len(sorted_imgs)
+    gap = max(min_gap_frames, int(n * gap_fraction))
+    r_train, r_val, r_test = target_ratios
+
+    # Budget layout: train | gap | val | gap | test
+    # Allocate gaps from total first, then split remainder by ratios.
+    avail = max(0, n - 2 * gap)
+    train_n = int(round(avail * r_train))
+    val_n = int(round(avail * r_val))
+    test_n = avail - train_n - val_n  # absorb rounding
+
+    out: dict[Path, str | None] = {}
+    idx = 0
+
+    def _take(label: str | None, k: int) -> None:
+        nonlocal idx
+        for _ in range(k):
+            if idx >= n:
+                return
+            out[sorted_imgs[idx]] = label
+            idx += 1
+
+    _take("train", train_n)
+    _take(None, gap)
+    _take("val", val_n)
+    _take(None, gap)
+    _take("test", test_n)
+    # Any leftover (shouldn't happen, but be safe) → test
+    while idx < n:
+        out[sorted_imgs[idx]] = "test"
+        idx += 1
+    return out
+
+
+def _resolve_group_source(
+    imgs: list[Path], img_to_source: dict[Path, str]
+) -> str:
+    """Majority source for a group; alphabetical-first on tie."""
+    cnt = Counter(img_to_source.get(img, "unknown") for img in imgs)
+    most = cnt.most_common()
+    top_count = most[0][1]
+    tied = sorted(s for s, c in most if c == top_count)
+    return tied[0]
+
+
+def per_source_split(
+    img_to_group: dict[Path, int],
+    img_to_classes: dict[Path, list[int]],
+    img_to_source: dict[Path, str],
+    target_ratios: tuple[float, float, float] = (0.70, 0.15, 0.15),
+    *,
+    enable_temporal: bool = True,
+    min_video_size: int = 20,
+    gap_fraction: float = 0.05,
+    min_gap_frames: int = 5,
+    seed: int = 42,
+) -> dict[Path, str | None]:
+    """Source-strict + temporal-aware split.
+
+    1. Bucket pHash groups by majority source (alphabetical tie-break).
+    2. Within each source: classify each group as VIDEO or STILL.
+    3. STILL groups: greedy assign (largest first) to the split with the
+       largest deficit relative to per-source target image counts.
+    4. VIDEO groups: temporal split with buffer gap inside the group.
+
+    Tiny sources (< 7 imgs total) are dumped entirely into train (eval would
+    be statistically meaningless).
+
+    Returns {img: split or None}. None = dropped (gap frame).
+    """
+    rng = random.Random(seed)
+
+    # Build group → list[Path] and group → source map
+    group_to_imgs: dict[int, list[Path]] = defaultdict(list)
+    for img, gid in img_to_group.items():
+        group_to_imgs[gid].append(img)
+
+    group_to_source: dict[int, str] = {
+        gid: _resolve_group_source(imgs, img_to_source)
+        for gid, imgs in group_to_imgs.items()
+    }
+
+    # Bucket groups by source
+    source_to_gids: dict[str, list[int]] = defaultdict(list)
+    for gid, src in group_to_source.items():
+        source_to_gids[src].append(gid)
+
+    out: dict[Path, str | None] = {}
+
+    for src, gids in sorted(source_to_gids.items()):
+        src_imgs_total = sum(len(group_to_imgs[g]) for g in gids)
+
+        # Tiny source → all to train
+        if src_imgs_total < 7:
+            for g in gids:
+                for img in group_to_imgs[g]:
+                    out[img] = "train"
+            continue
+
+        # Classify groups
+        video_gids: list[int] = []
+        still_gids: list[int] = []
+        for g in gids:
+            imgs = group_to_imgs[g]
+            if enable_temporal and _is_video_group(imgs, min_size=min_video_size):
+                video_gids.append(g)
+            else:
+                still_gids.append(g)
+
+        target_imgs = {
+            s: r * src_imgs_total for s, r in zip(SPLITS, target_ratios)
+        }
+        actual = {s: 0 for s in SPLITS}
+
+        # Apply temporal split first — videos pre-commit to all 3 splits
+        for g in video_gids:
+            mapping = _temporal_split_video_group(
+                group_to_imgs[g],
+                target_ratios=target_ratios,
+                gap_fraction=gap_fraction,
+                min_gap_frames=min_gap_frames,
+            )
+            for img, split in mapping.items():
+                out[img] = split
+                if split is not None:
+                    actual[split] += 1
+
+        # Greedy assign STILL groups: largest first to split with largest deficit
+        rng.shuffle(still_gids)
+        still_gids.sort(key=lambda g: -len(group_to_imgs[g]))
+        for g in still_gids:
+            sz = len(group_to_imgs[g])
+            # Deficit-driven choice; cap overshoot at 10% above target.
+            def cost(s: str, _sz: int = sz) -> float:
+                new_val = actual[s] + _sz
+                tgt = target_imgs[s]
+                if tgt <= 0:
+                    return float("inf")
+                if new_val > tgt * 1.10:
+                    # Penalize overshoot heavily but still allow if every split overshoots
+                    return (new_val - tgt) / tgt + 100.0
+                # Prefer the split with largest current deficit
+                return -(tgt - actual[s]) / max(1.0, tgt)
+
+            chosen = min(SPLITS, key=cost)
+            for img in group_to_imgs[g]:
+                out[img] = chosen
+            actual[chosen] += sz
+
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Leakage verification
 # ---------------------------------------------------------------------------
 
@@ -455,10 +686,22 @@ _DEDUP_DEFAULTS = {
     "stratify_by": ["class", "source"],
     "source_from": "adapter",
     "verify_no_leakage": True,
+    "split_strategy": "class_aware",
+    "split_ratios": None,  # if None, p00 falls back to top-level `splits.*`
+    "temporal": {
+        "enabled": True,
+        "min_group_size_for_video": 20,
+        "gap_fraction": 0.05,
+        "min_gap_frames": 5,
+    },
 }
 
 _VALID_SOURCE_FROM = {"adapter", "filename_prefix"}
 _VALID_STRATIFY = {"class", "source"}
+_VALID_SPLIT_STRATEGY = {"class_aware", "per_source_with_temporal"}
+_VALID_TEMPORAL_KEYS = {
+    "enabled", "min_group_size_for_video", "gap_fraction", "min_gap_frames"
+}
 
 
 def validate_dedup_config(config: dict) -> dict:
@@ -500,5 +743,45 @@ def validate_dedup_config(config: dict) -> dict:
 
     if not isinstance(merged["verify_no_leakage"], bool):
         raise ValueError("dedup.verify_no_leakage must be bool")
+
+    if merged["split_strategy"] not in _VALID_SPLIT_STRATEGY:
+        raise ValueError(
+            f"dedup.split_strategy must be one of {sorted(_VALID_SPLIT_STRATEGY)}, "
+            f"got '{merged['split_strategy']}'"
+        )
+
+    if merged["split_ratios"] is not None:
+        sr = merged["split_ratios"]
+        if (not isinstance(sr, list) or len(sr) != 3
+                or not all(isinstance(x, (int, float)) for x in sr)):
+            raise ValueError("dedup.split_ratios must be a list of 3 floats")
+        if abs(sum(sr) - 1.0) > 0.01:
+            raise ValueError(f"dedup.split_ratios must sum to 1.0±0.01, got {sum(sr)}")
+        if any(x < 0 for x in sr):
+            raise ValueError("dedup.split_ratios must be non-negative")
+        merged["split_ratios"] = tuple(float(x) for x in sr)
+
+    temporal = merged["temporal"]
+    if not isinstance(temporal, dict):
+        raise ValueError("dedup.temporal must be a dict")
+    unknown_t = set(temporal) - _VALID_TEMPORAL_KEYS
+    if unknown_t:
+        raise ValueError(
+            f"dedup.temporal: unknown keys {sorted(unknown_t)}; "
+            f"valid keys are {sorted(_VALID_TEMPORAL_KEYS)}"
+        )
+    temporal = {**_DEDUP_DEFAULTS["temporal"], **temporal}
+    if not isinstance(temporal["enabled"], bool):
+        raise ValueError("dedup.temporal.enabled must be bool")
+    if (not isinstance(temporal["min_group_size_for_video"], int)
+            or temporal["min_group_size_for_video"] < 2):
+        raise ValueError("dedup.temporal.min_group_size_for_video must be int >= 2")
+    if (not isinstance(temporal["gap_fraction"], (int, float))
+            or not 0.0 <= temporal["gap_fraction"] <= 0.5):
+        raise ValueError("dedup.temporal.gap_fraction must be float in [0, 0.5]")
+    if (not isinstance(temporal["min_gap_frames"], int)
+            or temporal["min_gap_frames"] < 0):
+        raise ValueError("dedup.temporal.min_gap_frames must be int >= 0")
+    merged["temporal"] = temporal
 
     return merged

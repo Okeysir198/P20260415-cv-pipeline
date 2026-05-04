@@ -234,6 +234,7 @@ def run_data_prep(config: dict, args) -> None:
         seed=seed,
         task_type=task_type,
         total=sum(counts.values()),
+        strategy=dedup_cfg.get("split_strategy") if dedup_cfg.get("enabled") else None,
     )
 
     # Count images actually written per source
@@ -272,13 +273,20 @@ def _assign_splits_dedup(
         apply_max_per_group_eval,
         build_groups,
         compute_phashes,
+        per_source_split,
         stratified_group_split,
         verify_no_leakage,
     )
 
+    # Allow dedup config to override the top-level splits ratio (lets
+    # per_source_with_temporal use 70/15/15 even if top-level says 80/10/10).
+    if dedup_cfg.get("split_ratios") is not None:
+        ratios = tuple(dedup_cfg["split_ratios"])
+
+    strategy = dedup_cfg.get("split_strategy", "class_aware")
     print(
         f"\n✂️  Dedup-aware split (hamming ≤ {dedup_cfg['hamming_thresh']}, "
-        f"stratify_by={dedup_cfg['stratify_by']}, "
+        f"strategy={strategy}, "
         f"ratios={ratios[0]:.0%}/{ratios[1]:.0%}/{ratios[2]:.0%})"
     )
 
@@ -293,33 +301,47 @@ def _assign_splits_dedup(
     img_to_hash = compute_phashes(img_paths)
     img_to_group = build_groups(img_to_hash, dedup_cfg["hamming_thresh"])
 
-    group_to_classes: dict[int, list[int]] = {}
-    group_to_images: dict[int, int] = {}
-    group_to_source: dict[int, str] = {}
-    for img, gid in img_to_group.items():
-        group_to_classes.setdefault(gid, []).extend(path_to_classes.get(img, []))
-        group_to_images[gid] = group_to_images.get(gid, 0) + 1
-        group_to_source.setdefault(gid, path_to_source.get(img, "unknown"))
-
-    group_to_split = stratified_group_split(
-        group_to_classes,
-        group_to_images,
-        group_to_source=group_to_source if "source" in dedup_cfg["stratify_by"] else None,
-        target_ratios=ratios,
-        stratify_by=dedup_cfg["stratify_by"],
-        seed=seed,
-    )
-
-    if dedup_cfg["max_per_group_eval"] is not None:
-        img_to_split_nullable = apply_max_per_group_eval(
+    if strategy == "per_source_with_temporal":
+        temporal = dedup_cfg["temporal"]
+        img_to_split_nullable = per_source_split(
             img_to_group,
-            group_to_split,
-            dedup_cfg["max_per_group_eval"],
-            img_to_classes=path_to_classes,
+            path_to_classes,
+            path_to_source,
+            target_ratios=ratios,
+            enable_temporal=temporal["enabled"],
+            min_video_size=temporal["min_group_size_for_video"],
+            gap_fraction=temporal["gap_fraction"],
+            min_gap_frames=temporal["min_gap_frames"],
             seed=seed,
         )
     else:
-        img_to_split_nullable = {img: group_to_split[gid] for img, gid in img_to_group.items()}
+        group_to_classes: dict[int, list[int]] = {}
+        group_to_images: dict[int, int] = {}
+        group_to_source: dict[int, str] = {}
+        for img, gid in img_to_group.items():
+            group_to_classes.setdefault(gid, []).extend(path_to_classes.get(img, []))
+            group_to_images[gid] = group_to_images.get(gid, 0) + 1
+            group_to_source.setdefault(gid, path_to_source.get(img, "unknown"))
+
+        group_to_split = stratified_group_split(
+            group_to_classes,
+            group_to_images,
+            group_to_source=group_to_source if "source" in dedup_cfg["stratify_by"] else None,
+            target_ratios=ratios,
+            stratify_by=dedup_cfg["stratify_by"],
+            seed=seed,
+        )
+
+        if dedup_cfg["max_per_group_eval"] is not None:
+            img_to_split_nullable = apply_max_per_group_eval(
+                img_to_group,
+                group_to_split,
+                dedup_cfg["max_per_group_eval"],
+                img_to_classes=path_to_classes,
+                seed=seed,
+            )
+        else:
+            img_to_split_nullable = {img: group_to_split[gid] for img, gid in img_to_group.items()}
 
     idx_to_split: dict[int, str] = {}
     dropped: set[int] = set()

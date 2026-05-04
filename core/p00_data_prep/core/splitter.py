@@ -231,19 +231,23 @@ def write_audit_snapshot(
     task_type: str = "detection",
     stratified: bool = True,
     total: int | None = None,
+    strategy: str | None = None,
 ) -> None:
     """Write `splits.json` as a tiny audit snapshot (no filename lists)."""
     snapshot_path = Path(snapshot_path)
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "seed": int(seed),
+        "ratios": list(ratios),
+        "stratified": bool(stratified),
+        "total_samples": int(total if total is not None else sum(counts.values())),
+    }
+    if strategy is not None:
+        metadata["split_strategy"] = strategy
     payload = {
         "task_type": task_type,
-        "metadata": {
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "seed": int(seed),
-            "ratios": list(ratios),
-            "stratified": bool(stratified),
-            "total_samples": int(total if total is not None else sum(counts.values())),
-        },
+        "metadata": metadata,
         "counts": {k: int(counts.get(k, 0)) for k in SPLIT_NAMES},
     }
     if DROPPED_DIR in counts:
