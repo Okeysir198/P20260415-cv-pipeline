@@ -8,20 +8,31 @@ model:
   arch: rtdetr-r50
   pretrained: PekingU/rtdetr_v2_r50vd
   num_classes: 2
-  input_size: [640, 640]
-  num_queries: 30                 # fire p99=9 boxes/img → 300 wastes capacity (only deviation from HF default)
+  # 960 → 1024 (2026-05-05 v3) — R50 v2 EA showed small recall stuck at 0.33,
+  # steepest miss-rate slope is size (+0.34 small vs large). Stride-8 cells go
+  # 120 → 128, modest VRAM bump (~22 GB est at bs=4 vs prior 18.8 GB).
+  input_size: [1024, 1024]
+  # 30 → 50 (2026-05-05 v3) — R50 v2 EA showed missed = 53% of error volume,
+  # 51% are TRUE misses (model emitted no candidate). With eos=0.1 firmly
+  # penalising orphan-query background fires, the small extra capacity helps
+  # capture diffuse smoke + crowded fire scenes. 50 = 5.5× p99 headroom.
+  num_queries: 50
   num_denoising: 100              # HF default
-  box_noise_scale: 1.5            # 1.0 → 1.5 — bbox geometry is noisy (smoke boundaries vary; fire boxes split vs merge inconsistently)
-  label_noise_ratio: 0.5          # HF default — boundary ambiguity (smoke boxes sometimes include fire pixels) makes cls regularization useful
-  eos_coefficient: 0.0001         # HF default for RT-DETRv2 (focal-loss world; 0.1 is vanilla DETR)
-  focal_loss_alpha: 0.75          # HF default
-  focal_loss_gamma: 2.0           # HF default
+  # Loss-recipe overhaul (2026-05-05) — mirrors R18 v2 changes that fixed
+  # collapse: HF defaults caused calibration drift (peak at ep3 then collapse).
+  # See R18 yaml + R18 run logs for evidence. Same recipe expected to behave
+  # similarly on R50 (same arch family, just bigger backbone).
+  box_noise_scale: 1.0            # 1.5 → 1.0
+  label_noise_ratio: 0.3          # 0.5 → 0.3
+  eos_coefficient: 0.1            # 0.0001 → 0.1 — penalize orphan-query background FPs
+  focal_loss_alpha: 0.5           # 0.75 → 0.5 — balanced
+  focal_loss_gamma: 1.5           # 2.0 → 1.5 — smoother gradients
 
 # normalize: false — fire dataset stats (mean ~0.39, std ~0.28) diverge from
 # ImageNet (mean ~0.45, std ~0.23). Skipping normalize lets BatchNorm recenter
 # per-batch and yields better convergence on this distribution.
 tensor_prep:
-  input_size: [640, 640]
+  input_size: [1024, 1024]
   rescale: true
   normalize: false
   mean: [0.485, 0.456, 0.406]    # ignored when normalize=false
@@ -30,11 +41,15 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 16
-  eval_batch_size: 4              # OOM safety for RT-DETR eval
-  num_workers: 8                  # HF backend is CPU-aug bound
-  prefetch_factor: 6
-  pin_memory: true
+  # R50 is ~2.1× backbone params vs R18. R18 used 12 GB at bs=8 / 960²; R50
+  # estimate at bs=8/960² is ~22 GB (fits 32 GB GPU but tight if other tenants
+  # are present). Keep bs=4 in YAML as the safe default; override at launch
+  # time (--override data.batch_size=8) if GPU is free.
+  batch_size: 4
+  eval_batch_size: 2
+  num_workers: 4                  # workers reduced (was 8) to bound CPU RAM during fork+COW
+  prefetch_factor: 2              # was 6 — smaller in-flight buffer
+  pin_memory: false               # was true — pinned memory adds RAM pressure
   subset:
     train: null
     val: null
@@ -68,8 +83,10 @@ training:
   backend: hf
   epochs: 30                      # R18/R50 peak before ep15 on this dataset
   optimizer: adamw
-  lr: 0.0001                      # head + encoder + decoder (paper Table 1, R50)
-  lr_backbone: 0.00001             # 1:10 split for R50 ResNet50 backbone (paper)
+  # 1e-4 → 5e-5 (mirrors R18 v2). Halved gradient magnitude prevents the
+  # post-peak overshoot that caused R18 v1 collapse (peak ep3 → 0.19 by ep14).
+  lr: 0.00005                     # head + encoder + decoder
+  lr_backbone: 0.00001             # 1:5 split (1e-5 backbone vs 5e-5 head) — paper LR retained for backbone, head halved for stability
   weight_decay: 0.0001
   warmup_steps: 2000              # paper LinearWarmup
   # Cosine decay 1e-4 → 1e-5 over the run. Paper uses MultiStepLR with milestone
@@ -78,15 +95,23 @@ training:
   # noisy plateau observed at flat LR).
   scheduler: cosine_with_min_lr
   lr_scheduler_kwargs:
-    min_lr: 0.00001               # absolute floor (1e-5 = 10% of initial 1e-4)
-  max_grad_norm: 0.1
+    min_lr: 0.000005              # absolute floor (5e-6 = 10% of new initial 5e-5)
+  # 0.1 → 0.5 (2026-05-05 v3) — R50 v2 logs showed pre-clip grad_norm in 30-150
+  # range, so 0.1 was nuking gradient direction (essentially zero-out clip).
+  # 0.5 lets real signal through; offset by EMA below for stability.
+  max_grad_norm: 0.5
   bf16: true
   amp: false                      # fp16 AMP overflows DETR decoder
   gpu_augment: false              # ignored on HF backend
   ema: true                       # paper default
-  ema_decay: 0.9999
-  ema_warmup_steps: 2000
-  patience: 50
+  # decay 0.9999 → 0.999 (2026-05-05 v3) — at 0.9999 the EMA needs ~1/(1-decay)
+  # = 10000 steps to "warm up" (~3 epochs of bs=4 here), so it never engaged
+  # productively in R50 v2 (best was ep3, ES at ep18). 0.999 → ~1000-step
+  # warmup → EMA averages from ep1 onward, smoothing the late-epoch oscillation
+  # that prevented post-ep3 epochs from beating the early peak.
+  ema_decay: 0.999
+  ema_warmup_steps: 500           # was 2000 — start averaging early
+  patience: 15                    # was 50 — match R18 (peak hits early on this dataset)
 
   val_viz:
     enabled: true

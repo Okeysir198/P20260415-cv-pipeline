@@ -1699,6 +1699,18 @@ class HFValPredictionCallback(VizSamplingMixin, TrainerCallback):
 
         if was_training:
             model.train()
+
+        # Force release of forward-pass tensors / matplotlib figures held by
+        # the per-epoch grid path. Without this, CPU RSS climbs +15-30 GB per
+        # epoch on RT-DETR @ 960² (Python's allocator keeps freed pages and
+        # CUDA's caching allocator keeps eval-time encoder hidden states).
+        # Observed 2026-05-04: post-eval baseline 42 → 57 → 93 GB across
+        # epochs 1-3 without this collect.
+        import gc as _gc
+        import torch as _torch
+        _gc.collect()
+        if _torch.cuda.is_available():
+            _torch.cuda.empty_cache()
         return control
 
     def on_train_end(self, args, state, control, **kwargs):

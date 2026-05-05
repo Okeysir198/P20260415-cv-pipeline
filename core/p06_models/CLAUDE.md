@@ -24,6 +24,10 @@ Separate registries (see `core/CLAUDE.md` for the full table):
 
 Paddle archs (PicoDet, PP-YOLOE) live in `core/p06_paddle/` and run in `.venv-paddle/`. See `core/p06_paddle/CLAUDE.md`.
 
+## HF wrappers
+
+`HFDetectionModel` (`hf_model.py`) wraps any HF `ForObjectDetection` model so HF Trainer can backprop. **Eval-mode invariant**: when `not self.training`, the wrapper sets the heavy `ModelOutput` fields to `None` after the forward — `encoder_last_hidden_state`, `intermediate_hidden_states`, `intermediate_reference_points`, `decoder_hidden_states`, `auxiliary_outputs`, plus their attention/encoder-output siblings. HF's prediction collector accumulates every field across the entire eval split before calling `compute_metrics`; without the strip the encoder hidden state alone (`B × num_tokens × hidden_dim`) hoards ~30 MB/batch at 960² → ~38 GB CPU per eval at val=2606. New HF detection wrappers MUST mirror this behaviour or regress the leak. The compute_metrics path only consumes `loss`/`logits`/`pred_boxes`, so dropping the rest is lossless.
+
 ## Pretrained weight sanity check
 
 `check_pretrained.py` runs COCO inference on YOLOX-M, D-FINE-S, RT-DETRv2-R18 on one image and writes a side-by-side grid — use it to confirm pretrained weights load before training. See `core/CLAUDE.md` for the invocation.

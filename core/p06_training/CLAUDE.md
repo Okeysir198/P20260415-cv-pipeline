@@ -334,6 +334,20 @@ Gotchas
   but NOT a fix on its own — `eval_accumulation_steps` above is the structural
   fix; the cache reset only helps when fragmentation (not actual usage) is
   the bottleneck.
+- **CPU-RAM corollary to `eval_accumulation_steps=4`** (added 2026-05-05).
+  The `eval_accumulation_steps` knob flushes GPU→CPU but doesn't shrink what's
+  on CPU. With HF returning the full `ModelOutput` per batch, CPU RSS grew
+  ~+30 GB per epoch on RT-DETR @ 960² (encoder hidden states + decoder layers
+  + 6 aux outputs accumulating until `compute_metrics` returns and Python's
+  allocator releases the pages, which it often defers). The structural fix
+  is in `core/p06_models/hf_model.py::HFDetectionModel.forward` — eval-mode
+  strip of unused `ModelOutput` fields (encoder_last_hidden_state,
+  intermediate_*, decoder_*, auxiliary_outputs, etc). Pair fix:
+  `HFValPredictionCallback.on_epoch_end` ends with `gc.collect() +
+  torch.cuda.empty_cache()` to release the per-epoch viz forward tensors.
+  Both edits are load-bearing for any DETR-family run > 5 epochs at 960²;
+  without them, CPU RAM OOMs by epoch 3 even on a 128 GB box. See
+  `core/p06_models/CLAUDE.md` for the wrapper-side invariant.
 - **Paddle: separate package, not a backend in this dispatcher.** Train via `.venv-paddle/bin/python core/p06_paddle/train.py`; the unified dispatcher just prints a redirect when `backend: paddle` is selected. Paddle ships its own bundled CUDA incompatible with the main venv's CUDA 13 PyTorch wheels — sibling venv keeps them apart. Bootstrap: `bash scripts/setup-paddle-venv.sh`.
 - **Paddle ↔ pipeline convergence is ONNX.** `core/p06_paddle/export.py` writes `model.onnx`; from there the standard main-venv path handles eval, error analysis, inference, demo. No torch ↔ paddle tensor bridge. Don't try to `torch.load` a `.pdparams` file.
 - **Paddle ORT INT8** — PicoDet / PP-YOLOE (CNN) generally hit real INT8 speedup on ORT CUDA EP. For any future transformer-y paddle arch, reuse the DETR-family exclusion list in `core/p09_export/quantize.py` (`LayerNormalization`/`Softmax`/`Gather` opt-out + `percentile` calibration default).

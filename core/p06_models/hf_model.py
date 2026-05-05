@@ -90,8 +90,57 @@ class HFDetectionModel(DetectionModel):
         `{"class_labels": LongTensor, "boxes": FloatTensor cxcywh-normalized}`).
         """
         if labels is not None:
-            # HF Trainer path — pass through so Trainer.compute_loss finds .loss
-            return self.hf_model(pixel_values=pixel_values, labels=labels, **kwargs)
+            # HF Trainer path — pass through so Trainer.compute_loss finds .loss.
+            outputs = self.hf_model(pixel_values=pixel_values, labels=labels, **kwargs)
+
+            # In eval mode, HF Trainer's prediction_loop accumulates EVERY
+            # field of `ModelOutput` on CPU across the full eval split before
+            # passing them to `compute_metrics`. Our compute_metrics only
+            # uses `loss`, `logits`, `pred_boxes` — everything else is kept
+            # in memory for nothing. The dominant offenders for RT-DETR /
+            # D-FINE at 960² are:
+            #   encoder_last_hidden_state    (B, 14400, 256)  ~30 MB / batch
+            #   intermediate_hidden_states   (B, 6, Q, 256)   per-decoder-layer
+            #   intermediate_reference_points(B, 6, Q, 4)
+            #   decoder_last_hidden_state    (B, Q, 256)
+            #   auxiliary_outputs            list of 6 dicts (deep supervision)
+            # At val=2606 / eval_bs=2 = 1303 batches, that's ~50 GB of CPU
+            # RAM hoarded per eval. Without this strip, RAM grows ~+30 GB
+            # per epoch (Python's allocator doesn't return freed pages to OS).
+            # Verified 2026-05-04: ep1 → ep3 went 38 → 122 GB → OOM.
+            # The strip is eval-only — train mode keeps everything for the
+            # backward pass through aux losses.
+            if not self.training:
+                # NOTE on the placeholder: HF Trainer + accelerate's
+                # `pad_across_processes` walks the model output recursively
+                # and rejects `None` values (TypeError: Unsupported types
+                # NoneType — confirmed on D-FINE 2026-05-05). We use a
+                # 0-element tensor on the same device so the slot still
+                # exists with correct type but costs ~80 bytes (header only).
+                _placeholder = torch.empty(0, device=pixel_values.device)
+                for _f in (
+                    "encoder_last_hidden_state",
+                    "encoder_hidden_states",
+                    "encoder_attentions",
+                    "decoder_hidden_states",
+                    "decoder_attentions",
+                    "cross_attentions",
+                    "intermediate_hidden_states",
+                    "intermediate_reference_points",
+                    "intermediate_logits",
+                    "intermediate_predicted_corners",
+                    "initial_reference_points",
+                    "init_reference_points",
+                    "auxiliary_outputs",
+                    "enc_topk_logits",
+                    "enc_topk_bboxes",
+                    "enc_outputs_class",
+                    "enc_outputs_coord_logits",
+                    "denoising_meta_values",
+                ):
+                    if hasattr(outputs, _f) and outputs.get(_f, None) is not None:
+                        outputs[_f] = _placeholder
+            return outputs
 
         # Legacy inference path for the custom trainer.
         outputs = self.hf_model(pixel_values=pixel_values)

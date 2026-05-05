@@ -13,7 +13,7 @@
 
 | Folder | Type | Mode | Best Pretrained | Pretrained mAP50 | Status |
 |---|---|---|---|---|---|
-| `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | 🔄 Phase B: YOLOX-M + RT-DETRv2-R50 PASS, D-FINE-M 50ep rerun pending · Phase C RT-DETRv2-R50 60ep complete 2026-04-22 (mAP@0.5=0.6844) |
+| `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | 🟢 v2 recipe (2026-05-05): RT-DETRv2-R18 test mAP50=0.555, R50 test mAP50=0.607 (current best). See feature CLAUDE.md for the loss-recipe overhaul + the CPU-RAM leak fix that was required to train at 960². |
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
 | `safety-fall_pose_estimation` | Pose keypoints | 🎯 Fine-tune | dwpose_384_pose (ONNX, interim) | — | ⬜ not started |
 | `safety-poketenashi_phone_usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |

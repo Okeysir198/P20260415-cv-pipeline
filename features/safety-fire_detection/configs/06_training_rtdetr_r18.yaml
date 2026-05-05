@@ -8,20 +8,40 @@ model:
   arch: rtdetr-r18
   pretrained: PekingU/rtdetr_v2_r18vd
   num_classes: 2
-  input_size: [640, 640]
-  num_queries: 30                 # fire p99=9 boxes/img → 300 wastes capacity (only deviation from HF default)
+  # 960×960 (was 640) — strongest single lever for small-object recall.
+  # Train data: 15.4% of boxes are <32² px (small tier); recall on small was
+  # 0.30 at 640. Stride-8 feature map: 80×80 → 120×120, so a 32-px box now
+  # spans ~6 cells (was ~4) — comfortably above the 2-cell detection floor.
+  # Capped at 960 because ~half of source images are native 640×640
+  # (some 416×416), so upscaling beyond this just interpolates fake detail.
+  input_size: [960, 960]
+  # 100 → 30 (reverted, 2026-05-05) — observed background-FP flooding at 100.
+  # Fire data has ~2 GTs / image (p99=9), so 100 queries left ~98 orphan
+  # queries with no real object to assign to. Under focal_loss_alpha=0.75
+  # (positive-favoring), orphans get pulled toward firing on weak background
+  # signals → val PNGs showed dense low-confidence FPs across non-fire areas.
+  # 30 = 3.3× p99 headroom, enough for crowded smoke-fire scenes without
+  # surplus. Also reduces VRAM/RAM accumulation per eval batch.
+  num_queries: 30
   num_denoising: 100              # HF default
-  box_noise_scale: 1.5            # 1.0 → 1.5 — bbox geometry is noisy (smoke boundaries vary; fire boxes split vs merge inconsistently)
-  label_noise_ratio: 0.5          # HF default — boundary ambiguity (smoke boxes sometimes include fire pixels) makes cls regularization useful
-  eos_coefficient: 0.0001         # HF default for RT-DETRv2 (focal-loss world; 0.1 is vanilla DETR)
-  focal_loss_alpha: 0.75          # HF default
-  focal_loss_gamma: 2.0           # HF default
+  # Loss-recipe overhaul (2026-05-05) — first run with HF defaults peaked at
+  # ep3 (mAP=0.445) then collapsed to 0.19 by ep14 with heavy background FPs
+  # AND many FNs simultaneously (calibration squash). Switching to the
+  # "less aggressive" recipe below: penalize orphan-query background FPs,
+  # remove positive-class bias, smooth gradients on hard examples, reduce
+  # denoising-noise injection. Departing from HF defaults intentionally
+  # based on observed behavior, not docs.
+  box_noise_scale: 1.0            # 1.5 → 1.0 — denoising noise was adding variance the model couldn't average over at this dataset size
+  label_noise_ratio: 0.3          # 0.5 → 0.3 — same reason; over-regularizing class targets
+  eos_coefficient: 0.1            # 0.0001 → 0.1 — directly penalize surplus queries firing on background (textbook DETR fix for background FP, even in focal world)
+  focal_loss_alpha: 0.5           # 0.75 → 0.5 — balanced; removes positive-class bias driving score inflation → collapse
+  focal_loss_gamma: 1.5           # 2.0 → 1.5 — less focus on hard examples → smoother gradients → less oscillation
 
 # normalize: false — fire dataset stats (mean ~0.39, std ~0.28) diverge from
 # ImageNet (mean ~0.45, std ~0.23). Skipping normalize lets BatchNorm recenter
 # per-batch and yields better convergence on this distribution.
 tensor_prep:
-  input_size: [640, 640]
+  input_size: [960, 960]
   rescale: true
   normalize: false
   mean: [0.485, 0.456, 0.406]    # ignored when normalize=false
@@ -30,10 +50,15 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 16
-  eval_batch_size: 4              # OOM safety for RT-DETR eval
-  num_workers: 8                  # HF backend is CPU-aug bound
-  prefetch_factor: 6
+  # 16 → 4 to fit 960×960 in 24 GB. Self-attention over stride-8 tokens is
+  # O(N²) where N=14400 at 960 vs 6400 at 640 — 5× more attention cost per
+  # image, so memory grows worse than linearly with input_size. (HF backend
+  # does not currently wire `gradient_accumulation_steps` through
+  # `_config_to_training_args`, so effective batch is the per-device batch.)
+  batch_size: 8
+  eval_batch_size: 2              # 4 → 2 — same OOM-safety logic, scaled for 960
+  num_workers: 4                  # HF backend is CPU-aug bound
+  prefetch_factor: 2
   pin_memory: true
   subset:
     train: null
@@ -43,32 +68,42 @@ data:
 augmentation:
   library: torchvision
   normalize: false                # HF processor handles normalization
-  mosaic: false                   # DETR-family doesn't use it
-  mixup: false
+  # Aug overhaul (2026-05-05 v3) — R18 v2 + R50 v2/v3 all peaked at ep3 then
+  # overfit with weak aug. Strengthening aug to extend the "fresh data"
+  # runway. Color stays tight (fire color is class-defining); scale, position,
+  # brightness loosen up. Mosaic re-enabled — prior CLAUDE.md warning was from
+  # the unstable v0 loss recipe; v2 recipe (eos=0.1, focal_α=0.5) should
+  # tolerate it. Re-test on R18 first; if stable, propagate to R50.
+  mosaic: true                    # was false — single biggest aug lever for small datasets
+  mixup: false                    # leaving off; bipartite matching + mixup is fragile
 
   perspective_p: 0.1
   fliplr: 0.5
   flipud: 0.0
-  brightness_contrast_p: 0.3      # light only — fire color is class-defining
-  brightness: 0.1
-  contrast: 0.1
-  hsv_p: 0.1
-  hsv_h: 0.015                    # tight HSV — color is class-defining for fire/smoke
-  hsv_s: 0.3
-  hsv_v: 0.3
+  brightness_contrast_p: 0.5      # 0.3 → 0.5 — apply more often
+  brightness: 0.2                 # 0.1 → 0.2 — fire/smoke happen across lighting conditions
+  contrast: 0.2                   # 0.1 → 0.2
+  hsv_p: 0.3                      # 0.1 → 0.3 — apply more often
+  hsv_h: 0.015                    # KEEP TIGHT — fire color is class-defining
+  hsv_s: 0.3                      # KEEP TIGHT — same reason
+  hsv_v: 0.4                      # 0.3 → 0.4 — value is safe (doesn't change color identity)
 
   min_bbox_area: 4.0              # keep small fire/smoke (2×2 px minimum)
 
-  scale: [0.9, 1.1]
-  degrees: 10.0
-  translate: 0.1
+  scale: [0.7, 1.3]               # was [0.9, 1.1] — ±30% jitter, also helps small-recall
+  degrees: 15.0                   # 10 → 15 — modest bump
+  translate: 0.15                 # 0.1 → 0.15
   shear: 2.0
 
 training:
   backend: hf
   epochs: 30                      # R18/R50 peak before ep15 on this dataset
   optimizer: adamw
-  lr: 0.0001                      # paper Table 1, R18 row — single LR (no backbone split)
+  # 1e-4 → 5e-5 (2026-05-05) — first run with 1e-4 peaked at ep3 (mAP=0.445)
+  # then collapsed to 0.19 by ep13 (classic DETR overfit + miscalibration
+  # documented in feature CLAUDE.md). 5e-5 halves the gradient magnitude so
+  # the model settles instead of bouncing past the optimum.
+  lr: 0.00005                     # paper Table 1, R18 row × 0.5 for stable fine-tune
   weight_decay: 0.0001
   warmup_steps: 2000              # paper LinearWarmup
   # Cosine decay 1e-4 → 1e-5 over the run. Paper uses MultiStepLR with milestone
@@ -77,12 +112,12 @@ training:
   # noisy plateau observed at flat LR).
   scheduler: cosine_with_min_lr
   lr_scheduler_kwargs:
-    min_lr: 0.00001               # absolute floor (1e-5 = 10% of initial 1e-4)
+    min_lr: 0.000005              # absolute floor (5e-6 = 10% of new initial 5e-5)
   max_grad_norm: 0.1
   bf16: true
   amp: false                      # fp16 AMP overflows DETR decoder
   gpu_augment: false              # ignored on HF backend
-  ema: true                       # paper default
+  ema: false                       # paper default
   ema_decay: 0.9999
   ema_warmup_steps: 2000
   patience: 15

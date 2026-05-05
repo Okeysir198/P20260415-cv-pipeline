@@ -94,22 +94,47 @@ Most images contain both classes. Per-class fire/smoke ratio is balanced within 
 
 These all predate the per-source-temporal split. Phase D will produce the new authoritative numbers.
 
+## v2 Results — current authoritative (2026-05-05, per-source-temporal dataset)
+
+| Run | Recipe | best val mAP@50 | test mAP@50 | fire test AP | smoke test AP | small mAP |
+|---|---|---:|---:|---:|---:|---:|
+| RT-DETR R18 v2 | 960² + new loss recipe | 0.565 (ep14) | **0.555** | 0.249 | 0.308 | 0.112 |
+| RT-DETR R50 v2 | same + R50 backbone (1:5 LR split) | 0.622 (ep3, ES@ep18) | **0.607** | 0.252 | 0.333 | 0.148 |
+
+R50 v2 is the current best. R50 won across all metrics including small-tier (mAP +0.036, recall +0.063).
+
+### v2 loss-recipe deltas vs HF defaults (committed in `06_training_rtdetr_{r18,r50}.yaml`)
+
+| Field | HF default | v2 | Why |
+|---|---:|---:|---|
+| `lr` | 1e-4 | 5e-5 | 1e-4 collapsed mAP from 0.445→0.19 by ep14 (overshoot past optimum) |
+| `num_queries` | 300 | 30 | 100 surplus queries fired on background; 30 = 3.3× p99 |
+| `eos_coefficient` | 0.0001 | 0.1 | Penalises orphan-query background FPs (textbook DETR fix; prior docs warned against this but observed behaviour says otherwise) |
+| `focal_loss_alpha` | 0.75 | 0.5 | Removes positive-class bias driving score collapse |
+| `focal_loss_gamma` | 2.0 | 1.5 | Smoother gradients on hard examples → less oscillation |
+| `box_noise_scale` | 1.0 | 1.0 | (was experimentally bumped to 1.5; reverted) |
+| `label_noise_ratio` | 0.5 | 0.3 | Over-regularising at this dataset size |
+| `input_size` | 640 | 960 | Small-tier (15.4% of GTs) recall lifted 0.30 → 0.33 |
+
+### CPU-RAM leak fixed during this work
+
+RT-DETR @ 960² OOMs by epoch 3 on a 128 GB box without the eval-mode `ModelOutput` strip in `core/p06_models/hf_model.py::HFDetectionModel.forward`. See `core/p06_models/CLAUDE.md` for the invariant + `core/p06_training/CLAUDE.md` for the eval/CPU-RAM pair fix. Required even though `eval_accumulation_steps=4` is already set.
+
 ## Training (Phase D — clean per-source-temporal dataset)
 
 Recommended baseline: RT-DETR R50, paper-aligned, ~25 epochs.
 
 ```bash
-# R18 + R50 simultaneously on 2 GPUs
-CUDA_VISIBLE_DEVICES=0 nohup uv run core/p06_training/train.py \
-  --config features/safety-fire_detection/configs/06_training_rtdetr_r18.yaml \
-  > features/safety-fire_detection/runs/_logs/rtdetr_r18_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+# R18 + R50 simultaneously on 2 GPUs (one Bash background task per GPU so
+# stdout shows in the Claude Code UI)
+CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+  --config features/safety-fire_detection/configs/06_training_rtdetr_r18.yaml
 
-CUDA_VISIBLE_DEVICES=1 nohup uv run core/p06_training/train.py \
-  --config features/safety-fire_detection/configs/06_training_rtdetr_r50.yaml \
-  > features/safety-fire_detection/runs/_logs/rtdetr_r50_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
+  --config features/safety-fire_detection/configs/06_training_rtdetr_r50.yaml
 ```
 
-Run dirs land in `features/safety-fire_detection/runs/<arch>_<ts>/`. Logs in `runs/_logs/`.
+Run dirs land in `features/safety-fire_detection/runs/<arch>_<ts>/`.
 
 ## Config Summary (2026-05-04, paper-aligned)
 
@@ -171,4 +196,4 @@ runs/_logs/                           — training stdout logs
 - **DETR sigmoid scores cap ~0.2** — set `score_threshold: 0.0` in TRAINING configs (canonical mAP); set per-class threshold in `10_inference.yaml` from `scripts/threshold_sweep.py` output.
 - **DETR calibration drift over long fine-tunes** — late epochs become underconfident; scores collapse into [0, 0.05] even on real detections. Stop early or apply temperature scaling.
 - **Never launch two trainings on the same GPU** — system hang risk (confirmed 2026-05-01).
-- **Use `nohup ... > log 2>&1 &`** for background training — Claude task wrappers can timeout and kill long runs. Monitor via `tail -f features/safety-fire_detection/runs/_logs/rtdetr_*.log`.
+- **Launch training as a Bash background task** (`run_in_background: true`) — stdout streams into the Claude Code UI so the user can watch progress live. Avoid detached `nohup` for in-session runs.
