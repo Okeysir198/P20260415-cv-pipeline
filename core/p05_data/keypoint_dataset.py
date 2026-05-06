@@ -294,6 +294,7 @@ class KeypointDataset(BaseDataset):
                 f"No images found in {self.img_dir} "
                 f"(extensions: {_IMG_EXTENSIONS})"
             )
+        self._stem_to_img: dict[str, Path] = {p.stem: p for p in self.img_paths}
 
         self.transforms = transforms
         self.data_config = data_config
@@ -418,10 +419,9 @@ class KeypointDataset(BaseDataset):
         Returns:
             Dict with ``"boxes"`` (N, 5) and ``"keypoints"`` (N, K, 3).
         """
-        img_stem = label_path.stem
-        for img_path in self.img_paths:
-            if img_path.stem == img_stem:
-                return self._load_label(img_path)
+        img_path = self._stem_to_img.get(label_path.stem)
+        if img_path is not None:
+            return self._load_label(img_path)
 
         # Fallback: no matching image found
         return {

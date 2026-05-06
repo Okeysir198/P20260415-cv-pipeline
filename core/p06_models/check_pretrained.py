@@ -24,9 +24,12 @@ import torch
 from loguru import logger
 from torchvision.ops import batched_nms
 
+from core.p05_data.base_dataset import IMAGENET_MEAN as _IMAGENET_MEAN_LIST
+from core.p05_data.base_dataset import IMAGENET_STD as _IMAGENET_STD_LIST
+
 INPUT_SIZE = 640
-IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+IMAGENET_MEAN = np.asarray(_IMAGENET_MEAN_LIST, dtype=np.float32)
+IMAGENET_STD = np.asarray(_IMAGENET_STD_LIST, dtype=np.float32)
 
 # COCO 80-class names (index matches yolox_m.pth label order)
 COCO80 = [

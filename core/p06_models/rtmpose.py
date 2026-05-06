@@ -33,9 +33,11 @@ _DEFAULT_ONNX_PATHS: dict[str, str] = {
     "rtmpose-t": "pretrained/rtmpose_t_256x192.onnx",
 }
 
-# ImageNet normalization constants
-_IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-_IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+from core.p05_data.base_dataset import IMAGENET_MEAN as _IMAGENET_MEAN_LIST
+from core.p05_data.base_dataset import IMAGENET_STD as _IMAGENET_STD_LIST
+
+_IMAGENET_MEAN = np.asarray(_IMAGENET_MEAN_LIST, dtype=np.float32)
+_IMAGENET_STD = np.asarray(_IMAGENET_STD_LIST, dtype=np.float32)
 
 # Bbox padding factor (standard for top-down pose estimation)
 _BBOX_PADDING = 1.25

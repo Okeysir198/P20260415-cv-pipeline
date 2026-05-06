@@ -280,50 +280,17 @@ class SCRFDModel(FaceDetector):
 
         return boxes, scores, landmarks
 
-    def _nms(
-        self, boxes: np.ndarray, scores: np.ndarray, threshold: float
-    ) -> np.ndarray:
-        """Apply Non-Maximum Suppression.
+    @staticmethod
+    def _nms(boxes: np.ndarray, scores: np.ndarray, threshold: float) -> np.ndarray:
+        """Apply Non-Maximum Suppression (delegates to torchvision via utils.metrics).
 
-        Args:
-            boxes: ``(N, 4)`` float32 ``[x1, y1, x2, y2]``.
-            scores: ``(N,)`` float32 confidence scores.
-            threshold: IoU threshold for suppression.
-
-        Returns:
-            ``(K,)`` int array of indices to keep.
+        Returns ``(K,)`` int array of indices to keep.
         """
+        from utils.metrics import nms_numpy
+
         if len(boxes) == 0:
             return np.empty((0,), dtype=np.intp)
-
-        x1 = boxes[:, 0]
-        y1 = boxes[:, 1]
-        x2 = boxes[:, 2]
-        y2 = boxes[:, 3]
-
-        areas = (x2 - x1) * (y2 - y1)
-        order = scores.argsort()[::-1]
-
-        keep = []
-        while order.size > 0:
-            i = order[0]
-            keep.append(i)
-
-            if order.size == 1:
-                break
-
-            xx1 = np.maximum(x1[i], x1[order[1:]])
-            yy1 = np.maximum(y1[i], y1[order[1:]])
-            xx2 = np.minimum(x2[i], x2[order[1:]])
-            yy2 = np.minimum(y2[i], y2[order[1:]])
-
-            inter = np.maximum(0.0, xx2 - xx1) * np.maximum(0.0, yy2 - yy1)
-            iou = inter / (areas[i] + areas[order[1:]] - inter + 1e-6)
-
-            remaining = np.where(iou <= threshold)[0]
-            order = order[remaining + 1]
-
-        return np.array(keep, dtype=np.intp)
+        return nms_numpy(boxes, scores, threshold).astype(np.intp)
 
     def detect_faces(
         self, image: np.ndarray, bbox: np.ndarray

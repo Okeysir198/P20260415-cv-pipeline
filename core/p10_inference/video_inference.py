@@ -107,11 +107,12 @@ def load_alert_config(
     import yaml  # local import — avoid hard dep at module load
 
     p = Path(path)
-    if not p.exists():
+    try:
+        with p.open() as fh:
+            data = yaml.safe_load(fh) or {}
+    except FileNotFoundError:
         logger.warning("alert config not found: %s — using neutral defaults", p)
         return merged
-    with p.open() as fh:
-        data = yaml.safe_load(fh) or {}
     alerts = data.get("alerts", {}) if isinstance(data, dict) else {}
     if isinstance(alerts.get("confidence_thresholds"), dict):
         merged["confidence_thresholds"].update(alerts["confidence_thresholds"])

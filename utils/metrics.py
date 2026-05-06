@@ -44,6 +44,24 @@ def xywh_to_xyxy(boxes: np.ndarray) -> np.ndarray:
 cxcywh_to_xyxy = xywh_to_xyxy
 
 
+def yolo_targets_to_xyxy(
+    targets: np.ndarray, w: int, h: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Denormalize YOLO ``(cls, cx, cy, w, h)`` rows → pixel xyxy + class ids.
+
+    Returns ``(xyxy_float32, class_ids_int64)``. Returns empty arrays if
+    ``targets`` is None or empty.
+    """
+    if targets is None or len(targets) == 0:
+        return np.zeros((0, 4), dtype=np.float32), np.zeros(0, dtype=np.int64)
+    cx, cy, bw, bh = targets[:, 1], targets[:, 2], targets[:, 3], targets[:, 4]
+    xyxy = np.stack([
+        (cx - bw / 2) * w, (cy - bh / 2) * h,
+        (cx + bw / 2) * w, (cy + bh / 2) * h,
+    ], axis=1).astype(np.float32)
+    return xyxy, targets[:, 0].astype(np.int64)
+
+
 def xyxy_to_xywh(boxes: np.ndarray) -> np.ndarray:
     """Convert boxes from [x1, y1, x2, y2] to [cx, cy, w, h].
 

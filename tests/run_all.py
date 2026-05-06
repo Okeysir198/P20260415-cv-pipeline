@@ -67,7 +67,6 @@ CORE_TESTS = [
     # p10: Inference (depends on p06 + p09)
     "test_p10_inference.py",
     "test_p10_video_inference.py",
-    "test_p10_face_recognition.py",
     # p11: End-to-end pipeline
     "test_p11_e2e_pipeline.py",
     # p12: Raw pipeline (raw images → auto-annotate → QA → train → eval → export → infer)

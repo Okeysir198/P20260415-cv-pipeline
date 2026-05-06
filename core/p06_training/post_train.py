@@ -36,6 +36,9 @@ from loguru import logger
 from core.p06_training._common import task_from_output_format as _task_from_output_format
 from core.p06_training._common import unwrap_subset as _unwrap_subset
 from core.p06_training._common import yolo_targets_to_xyxy as _gt_xyxy_from_yolo
+from core.p08_evaluation import duplicates_leakage
+from core.p08_evaluation.distribution_mismatch import analyze_distribution_mismatch
+from core.p08_evaluation.learning_ability import analyze_learning_ability
 from core.p10_inference.supervision_bridge import (
     VizStyle,
     annotate_gt_pred,
@@ -478,11 +481,8 @@ def run_post_train_artifacts(
     if task is None:
         task = _task_from_output_format(getattr(model, "output_format", None))
 
-    # Detection now derives per-class F1-optimal thresholds from chart 15's
-    # sweep (see core.p08_evaluation.threshold_policy). The per-arch auto-pick
-    # below only applies to non-detection tasks (cls/seg/kpt) where the
-    # operating-point sweep doesn't apply — those analyzers still consume the
-    # scalar threshold.
+    # Detection uses per-class F1-optimal thresholds (see threshold_policy);
+    # the scalar below only applies to cls/seg/kpt analyzers.
     if error_analysis_conf_threshold is None:
         output_format = (getattr(model, "output_format", "") or "").lower()
         error_analysis_conf_threshold = 0.25 if output_format == "yolox" else 0.05
@@ -491,49 +491,36 @@ def run_post_train_artifacts(
     model.eval()
     artifacts: dict[str, Any] = {}
 
-    # ------------------------------------------------------------------ #
-    # Import the error analyzer lazily — avoids a hard import dependency #
-    # in callbacks that only need render_prediction_grid.                #
-    # ------------------------------------------------------------------ #
-    try:
-        from core.p08_evaluation.error_analysis_runner import run_error_analysis
-    except Exception as e:  # pragma: no cover
-        logger.warning("error_analysis_runner unavailable: %s", e)
-        run_error_analysis = None  # type: ignore[assignment]
+    from core.p08_evaluation.error_analysis_runner import run_error_analysis
 
-    # Detection drives threshold-sensitive charts off per-class F1-optimal
-    # cutoffs derived from the same predictions chart 15 plots; cls/seg/kpt
-    # analyzers ignore `threshold_policy` and continue using the scalar
-    # `error_analysis_conf_threshold` above.
     threshold_policy = "f1_optimal_per_class" if task == "detection" else "fixed"
 
     # -------- val error analysis → best grid (best.png uses derived thresholds) --------
     if val_dataset is not None and len(val_dataset) > 0:
         val_ea_thresholds: dict[int, float] | None = None
-        if run_error_analysis is not None:
-            try:
-                val_report = run_error_analysis(
-                    model=model,
-                    dataset=val_dataset,
-                    output_dir=save_dir / "val_predictions" / "error_analysis",
-                    task=task,
-                    class_names=class_names,
-                    input_size=input_size,
-                    style=style,
-                    conf_threshold=error_analysis_conf_threshold,
-                    iou_threshold=error_analysis_iou_threshold,
-                    max_samples=error_analysis_max_samples,
-                    hard_images_per_class=error_analysis_hard_images_per_class,
-                    training_config=training_config,
-                    threshold_policy=threshold_policy,
-                    split="val",
-                )
-                artifacts["val_error_analysis"] = val_report
-                val_ea_thresholds = _read_operating_thresholds(
-                    save_dir / "val_predictions" / "error_analysis" / "summary.json"
-                )
-            except Exception as e:
-                logger.warning("val error analysis skipped: %s", e, exc_info=True)
+        try:
+            val_report = run_error_analysis(
+                model=model,
+                dataset=val_dataset,
+                output_dir=save_dir / "val_predictions" / "error_analysis",
+                task=task,
+                class_names=class_names,
+                input_size=input_size,
+                style=style,
+                conf_threshold=error_analysis_conf_threshold,
+                iou_threshold=error_analysis_iou_threshold,
+                max_samples=error_analysis_max_samples,
+                hard_images_per_class=error_analysis_hard_images_per_class,
+                training_config=training_config,
+                threshold_policy=threshold_policy,
+                split="val",
+            )
+            artifacts["val_error_analysis"] = val_report
+            val_ea_thresholds = _read_operating_thresholds(
+                save_dir / "val_predictions" / "error_analysis" / "summary.json"
+            )
+        except Exception as e:
+            logger.warning("val error analysis skipped: %s", e, exc_info=True)
 
         n = len(val_dataset)
         k = min(best_num_samples, n)
@@ -557,30 +544,29 @@ def run_post_train_artifacts(
     # -------- test error analysis → best grid --------
     if test_dataset is not None and len(test_dataset) > 0:
         test_ea_thresholds: dict[int, float] | None = None
-        if run_error_analysis is not None:
-            try:
-                test_report = run_error_analysis(
-                    model=model,
-                    dataset=test_dataset,
-                    output_dir=save_dir / "test_predictions" / "error_analysis",
-                    task=task,
-                    class_names=class_names,
-                    input_size=input_size,
-                    style=style,
-                    conf_threshold=error_analysis_conf_threshold,
-                    iou_threshold=error_analysis_iou_threshold,
-                    max_samples=error_analysis_max_samples,
-                    hard_images_per_class=error_analysis_hard_images_per_class,
-                    training_config=training_config,
-                    threshold_policy=threshold_policy,
-                    split="test",
-                )
-                artifacts["test_error_analysis"] = test_report
-                test_ea_thresholds = _read_operating_thresholds(
-                    save_dir / "test_predictions" / "error_analysis" / "summary.json"
-                )
-            except Exception as e:
-                logger.warning("test error analysis skipped: %s", e, exc_info=True)
+        try:
+            test_report = run_error_analysis(
+                model=model,
+                dataset=test_dataset,
+                output_dir=save_dir / "test_predictions" / "error_analysis",
+                task=task,
+                class_names=class_names,
+                input_size=input_size,
+                style=style,
+                conf_threshold=error_analysis_conf_threshold,
+                iou_threshold=error_analysis_iou_threshold,
+                max_samples=error_analysis_max_samples,
+                hard_images_per_class=error_analysis_hard_images_per_class,
+                training_config=training_config,
+                threshold_policy=threshold_policy,
+                split="test",
+            )
+            artifacts["test_error_analysis"] = test_report
+            test_ea_thresholds = _read_operating_thresholds(
+                save_dir / "test_predictions" / "error_analysis" / "summary.json"
+            )
+        except Exception as e:
+            logger.warning("test error analysis skipped: %s", e, exc_info=True)
 
         n = len(test_dataset)
         k = min(best_num_samples, n)
@@ -606,9 +592,6 @@ def run_post_train_artifacts(
     # -------- Distribution Mismatch (train vs val drift) ----
     if train_dataset is not None and val_dataset is not None:
         try:
-            from core.p08_evaluation.distribution_mismatch import (
-                analyze_distribution_mismatch,
-            )
             dm_result = analyze_distribution_mismatch(
                 train_dataset=train_dataset, val_dataset=val_dataset,
                 test_dataset=test_dataset, output_dir=val_ea_dir,
@@ -629,7 +612,6 @@ def run_post_train_artifacts(
     # -------- Learning Ability (bias / variance) -------- #
     if train_dataset is not None and len(train_dataset) > 0:
         try:
-            from core.p08_evaluation.learning_ability import analyze_learning_ability
             primary_name, val_metric = _resolve_val_metric_for_la(
                 task, log_history_best_map, val_dataset, model, input_size,
             )
@@ -690,7 +672,6 @@ def run_post_train_artifacts(
         base_dir_for_dl = training_config.get("_config_dir") or None
     if data_cfg and val_ea_dir.exists():
         try:
-            from core.p08_evaluation import duplicates_leakage
             dl_result = duplicates_leakage.run(
                 data_cfg, output_dir=val_ea_dir,
                 task=task, base_dir=base_dir_for_dl,

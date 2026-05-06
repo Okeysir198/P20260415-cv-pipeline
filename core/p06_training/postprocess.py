@@ -37,7 +37,6 @@ from typing import Any
 
 import numpy as np
 import torch
-from loguru import logger
 from torchvision.ops import nms
 
 from utils.registry import Registry
@@ -162,11 +161,7 @@ def _postprocess_yolox(
     for b in range(batch_size):
         pred = predictions[b]  # (N, 5+C)
 
-        # Both custom YOLOXModel (_DecoupledHead at yolox.py:555-559) and the
-        # official adapter (decode_in_inference=True) sigmoid obj+cls inside
-        # the model's eval-mode forward. Applying sigmoid here would be a
-        # double-sigmoid — squashes all scores to [0.25, 0.55] and makes
-        # conf_threshold meaningless. Trust the model output.
+        # obj/cls already sigmoided inside _DecoupledHead.forward — don't re-apply.
         obj_conf = pred[:, 4]
         cls_probs = pred[:, 5:]
         cls_conf, cls_id = cls_probs.max(dim=1)
@@ -235,32 +230,7 @@ def _postprocess_segmentation(
     Returns:
         List of B dicts with ``"class_map"`` — ``(H, W)`` int64 array.
     """
-    class_maps = predictions.argmax(dim=1)  # (B, H, W)
-    results: list[dict[str, np.ndarray]] = []
-    for i in range(class_maps.shape[0]):
-        results.append({"class_map": class_maps[i].cpu().numpy().astype(np.int64)})
-    return results
+    class_maps_np = predictions.argmax(dim=1).cpu().numpy().astype(np.int64)
+    return [{"class_map": class_maps_np[i]} for i in range(class_maps_np.shape[0])]
 
 
-@register_postprocessor("detr")
-def _postprocess_detr(
-    predictions: Any,
-    _conf_threshold: float = 0.5,
-    _nms_threshold: float = 0.45,
-    _target_sizes: Any | None = None,
-) -> list[dict[str, np.ndarray]]:
-    """Fallback for DETR-style models that don't expose `model.postprocess()`.
-
-    HFDetectionModel implements postprocess() so the registry isn't reached
-    for those. Registered here so `output_format="detr"` doesn't raise on
-    future custom models — emits a warning and returns empty detections.
-    """
-    batch_size = (
-        predictions.shape[0] if hasattr(predictions, "shape") else len(predictions)
-    )
-    logger.warning(
-        "DETR postprocessor fallback: model has no postprocess() method. "
-        "Returning empty detections for %d images.",
-        batch_size,
-    )
-    return [_empty_result() for _ in range(batch_size)]

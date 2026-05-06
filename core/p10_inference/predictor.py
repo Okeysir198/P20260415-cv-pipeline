@@ -8,6 +8,7 @@ Works with any model registered in the model registry (YOLOX, D-FINE,
 RT-DETRv2, etc.).
 """
 
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,12 @@ import onnxruntime as ort
 import torch
 import torch.nn as nn
 from loguru import logger
+
+# PAFPN layer names — checkpoint uses backbone.X, our model uses neck.X.
+_PAFPN_LAYERS = frozenset({
+    "lateral_conv0", "reduce_conv1", "bu_conv1", "bu_conv2",
+    "C3_p3", "C3_p4", "C3_n3", "C3_n4",
+})
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # project root
 
@@ -39,14 +46,6 @@ def _remap_megvii_state_dict(
     - ``.m.`` → ``.blocks.`` (CSPLayer bottleneck list)
     - ``.preds.`` → ``.pred.`` (singular prediction layers)
     """
-    import re
-
-    # PAFPN layer names (checkpoint uses backbone.X, our model uses neck.X)
-    _PAFPN_LAYERS = {
-        "lateral_conv0", "reduce_conv1", "bu_conv1", "bu_conv2",
-        "C3_p3", "C3_p4", "C3_n3", "C3_n4",
-    }
-
     mapped: dict = {}
     for key, value in src.items():
         new_key = key
@@ -162,7 +161,7 @@ class DetectionPredictor:
             data_config.get("std", IMAGENET_STD), dtype=np.float32
         )
 
-        # --- Output format (overridden when loading registry-built models) ---
+        # --- Output format: set by checkpoint loader (defaults applied per path). ---
         self._output_format = "yolox"
 
         # --- Determine backend and load model ---
@@ -526,10 +525,12 @@ class DetectionPredictor:
             FileNotFoundError: If the checkpoint file does not exist.
             RuntimeError: If the checkpoint cannot be loaded.
         """
-        if not Path(path).exists():
-            raise FileNotFoundError(f"Model checkpoint not found: {path}")
-
-        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        try:
+            checkpoint = torch.load(
+                path, map_location=self.device, weights_only=False
+            )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Model checkpoint not found: {path}") from e
 
         # --- Build model from checkpoint config via registry ---
         if isinstance(checkpoint, dict) and "config" in checkpoint:
@@ -567,6 +568,10 @@ class DetectionPredictor:
         if state_dict is not None:
             from utils.checkpoint import strip_hf_prefix  # noqa: PLC0415
             state_dict = strip_hf_prefix(state_dict)
+            logger.warning(
+                "Checkpoint has no 'config' key — assuming arch='yolox'. "
+                "Save checkpoints with a 'config' key for non-YOLOX archs."
+            )
             minimal_config = {
                 "model": {
                     "arch": "yolox",

@@ -119,6 +119,13 @@ _LARGE_CLASS_THRESHOLD = 20  # confusion-matrix → top-K swap
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
+_IMAGENET_MEAN_255 = np.array(
+    [0.485 * 255, 0.456 * 255, 0.406 * 255], dtype=np.float32
+).reshape(1, 1, 3)
+_IMAGENET_STD_255 = np.array(
+    [0.229 * 255, 0.224 * 255, 0.225 * 255], dtype=np.float32
+).reshape(1, 1, 3)
+
 
 def _safe_name(name: str) -> str:
     return _SAFE_NAME.sub("_", str(name))[:80]
@@ -148,9 +155,7 @@ def _preprocess_for_model(
     if output_format in {"yolox"}:
         tensor_np = arr.transpose(2, 0, 1)
     else:
-        mean = np.array([0.485 * 255, 0.456 * 255, 0.406 * 255], dtype=np.float32).reshape(1, 1, 3)
-        std = np.array([0.229 * 255, 0.224 * 255, 0.225 * 255], dtype=np.float32).reshape(1, 1, 3)
-        tensor_np = ((arr - mean) / std).transpose(2, 0, 1)
+        tensor_np = ((arr - _IMAGENET_MEAN_255) / _IMAGENET_STD_255).transpose(2, 0, 1)
     return torch.from_numpy(np.ascontiguousarray(tensor_np))
 
 
@@ -936,42 +941,29 @@ def run_error_analysis(
 
     fbs = _resolve_forward_batch_size(forward_batch_size)
 
+    common_kw = dict(
+        model=model, dataset=dataset, output_dir=output_dir,
+        class_names=class_names, input_size=input_size, style=style,
+        max_samples=max_samples,
+        hard_images_per_class=hard_images_per_class,
+        forward_batch_size=fbs,
+    )
     if task == "detection":
         result = _analyze_detection(
-            model=model, dataset=dataset, output_dir=output_dir,
-            class_names=class_names, input_size=input_size, style=style,
+            **common_kw,
             conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-            max_samples=max_samples,
-            hard_images_per_class=hard_images_per_class,
             training_config=training_config,
             threshold_policy=threshold_policy,
-            forward_batch_size=fbs,
         )
     elif task == "classification":
-        result = _analyze_classification(
-            model=model, dataset=dataset, output_dir=output_dir,
-            class_names=class_names, input_size=input_size, style=style,
-            max_samples=max_samples,
-            hard_images_per_class=hard_images_per_class,
-            forward_batch_size=fbs,
-        )
+        result = _analyze_classification(**common_kw)
     elif task == "segmentation":
-        result = _analyze_segmentation(
-            model=model, dataset=dataset, output_dir=output_dir,
-            class_names=class_names, input_size=input_size, style=style,
-            max_samples=max_samples,
-            hard_images_per_class=hard_images_per_class,
-            forward_batch_size=fbs,
-        )
+        result = _analyze_segmentation(**common_kw)
     elif task == "keypoint":
         result = _analyze_keypoint(
-            model=model, dataset=dataset, output_dir=output_dir,
-            class_names=class_names, input_size=input_size, style=style,
+            **common_kw,
             conf_threshold=conf_threshold,
-            max_samples=max_samples,
-            hard_images_per_class=hard_images_per_class,
             training_config=training_config,
-            forward_batch_size=fbs,
         )
     else:
         raise ValueError(f"Unknown task for error analysis: {task!r}")

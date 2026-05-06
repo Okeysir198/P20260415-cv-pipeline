@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import cv2
 import numpy as np
@@ -31,10 +30,10 @@ _CODE_DIR = Path(__file__).parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(_CODE_DIR))
 
+from core.p10_inference.video_inference import _H264Writer  # noqa: E402
 from utils.config import load_config  # noqa: E402
 from utils.viz import (  # noqa: E402
     VizStyle,
-    annotate_detections,
     annotate_keypoints,
     classification_banner,
 )
@@ -120,7 +119,6 @@ class PointAndCallOrchestrator:
         # than this threshold removes that false-positive class.
         self._max_body_speed_px_per_sec = float(pac_cfg.get("max_body_speed_px_per_sec", 0.0))
         # Per-track sliding window of (timestamp, hip_xy) for smoothed speed.
-        from collections import deque
         self._hip_history: dict[int, deque] = {}
         self._hip_window_seconds = 1.5
 
@@ -206,7 +204,6 @@ class PointAndCallOrchestrator:
         if not self._tracker:
             return list(range(len(pose_samples)))
 
-        import supervision as sv
         boxes = np.array([s[2] for s in pose_samples], dtype=np.float32)
         if boxes.size == 0:
             return []
@@ -329,8 +326,7 @@ class PointAndCallOrchestrator:
             # the curb performing the gesture). Speed is smoothed over a
             # 0.5 s sliding window so single-frame pose jitter doesn't fake
             # a "stopped" instant inside a walking sequence.
-            from collections import deque
-            hip_mid = 0.5 * (np.asarray(kpts[11]) + np.asarray(kpts[12]))
+            hip_mid = 0.5 * (kpts[11] + kpts[12])
             hist = self._hip_history.setdefault(track_id, deque())
             hist.append((float(timestamp), hip_mid))
             cutoff = float(timestamp) - self._hip_window_seconds
@@ -382,63 +378,67 @@ class PointAndCallOrchestrator:
     # Visualisation
     # ------------------------------------------------------------------
 
+    # State → sv.Color for the per-person bbox/label HUD.
+    # done=green, progress=amber, disarmed=grey, pointing=cyan, idle=orange.
+    _STATE_COLOR = {
+        "done":     sv.Color(r=0,   g=220, b=0),
+        "progress": sv.Color(r=255, g=180, b=40),
+        "disarmed": sv.Color(r=130, g=130, b=130),
+        "pointing": sv.Color(r=0,   g=200, b=255),
+        "idle":     sv.Color(r=0,   g=140, b=255),
+    }
+
+    @staticmethod
+    def _person_state(person: PersonBehavior) -> str:
+        seq = person.sequence_state or {}
+        if seq.get("sequence_done"):
+            return "done"
+        lbl = person.direction_label
+        if lbl == "zone_disarmed":
+            return "disarmed"
+        if seq.get("progress"):
+            return "progress"
+        if lbl.startswith("point_"):
+            return "pointing"
+        return "idle"
+
     def draw(self, image_bgr: np.ndarray, result: OrchestratorResult) -> np.ndarray:
-        # supervision annotators draw on BGR cv2 arrays; classification_banner
-        # is channel-opaque (writes the tuple raw), so non-symmetric color args
-        # are passed in BGR order to match the scene.
         scene = image_bgr.copy()
 
-        # ---- Per-person bbox + state-coloured label (supervision Box+Label) ----
-        # State → sv.Color (BGR via supervision's as_bgr()):
-        #   sequence_done   → bright green
-        #   accumulating    → amber (≥1 direction in progress, no completion yet)
-        #   zone_disarmed   → grey  (rule muted by the zone-FSM gate)
-        #   pointing        → cyan  (current frame label is point_*)
-        #   neutral/invalid → light blue (default tracker colour)
-        _STATE_COLOR = {
-            "done":        sv.Color(r=0,   g=220, b=0),
-            "progress":    sv.Color(r=255, g=180, b=40),
-            "disarmed":    sv.Color(r=130, g=130, b=130),
-            "pointing":    sv.Color(r=0,   g=200, b=255),
-            "idle":        sv.Color(r=0,   g=140, b=255),
-        }
         boxed = [p for p in result.persons if p.box_xyxy is not None]
         if boxed:
-            xyxy = np.stack([p.box_xyxy for p in boxed]).astype(np.float32)
-            class_id = np.zeros(len(boxed), dtype=int)
-            labels: list[str] = []
+            box_arrs: list[np.ndarray] = [p.box_xyxy for p in boxed]  # type: ignore[misc]
+            xyxy = np.stack(box_arrs).astype(np.float32, copy=False)
             colors: list[sv.Color] = []
+            labels: list[str] = []
             for person in boxed:
-                seq = person.sequence_state or {}
-                lbl = person.direction_label
-                progress = seq.get("progress") or []
+                colors.append(self._STATE_COLOR[self._person_state(person)])
+                progress = (person.sequence_state or {}).get("progress") or []
                 progress_str = (
                     "/".join(p.replace("point_", "")[0].upper() for p in progress)
                     if progress else "-"
                 )
-                if seq.get("sequence_done"):
-                    state = "done"
-                elif lbl == "zone_disarmed":
-                    state = "disarmed"
-                elif progress:
-                    state = "progress"
-                elif lbl.startswith("point_"):
-                    state = "pointing"
-                else:
-                    state = "idle"
-                colors.append(_STATE_COLOR[state])
-                short = lbl.replace("point_", "").replace("zone_disarmed", "off")
+                short = person.direction_label.replace("point_", "").replace(
+                    "zone_disarmed", "off"
+                )
                 labels.append(f"#{person.track_id} {short} [{progress_str}]")
 
-            # supervision's BoxAnnotator / LabelAnnotator can take a single
-            # sv.Color or a ColorPalette indexed by class_id. To get one color
-            # per detection, draw each person individually — cheap (≤ a few
-            # boxes per frame) and avoids hand-rolling a per-instance palette.
-            for i, (person, lbl, clr) in enumerate(zip(boxed, labels, colors, strict=True)):
-                single = sv.Detections(
-                    xyxy=xyxy[i:i+1], class_id=class_id[i:i+1]
-                )
-                scene = annotate_detections(scene, single, labels=[lbl], color=clr)
+            # Per-detection colors via a palette indexed by class_id=arange(N).
+            # One BoxAnnotator + LabelAnnotator pair draws every person in a
+            # single call — avoids the per-person scene.copy() inside
+            # utils.viz.annotate_detections.
+            palette = sv.ColorPalette(colors=colors)
+            dets = sv.Detections(
+                xyxy=xyxy, class_id=np.arange(len(boxed), dtype=int)
+            )
+            h, w = scene.shape[:2]
+            thickness = max(2, round(min(h, w) / 400))
+            scene = sv.BoxAnnotator(color=palette, thickness=thickness).annotate(
+                scene=scene, detections=dets
+            )
+            scene = sv.LabelAnnotator(
+                color=palette, text_scale=0.5, text_padding=4,
+            ).annotate(scene=scene, detections=dets, labels=labels)
 
         # ---- Pose skeleton on top of boxes ----
         body_style = VizStyle(kpt_visibility_threshold=0.3)
@@ -449,7 +449,7 @@ class PointAndCallOrchestrator:
                 skeleton_edges=_SKELETON_17,
                 confidence=person.kp_scores,
                 style=body_style,
-                color=sv.Color(r=0, g=0, b=255),  # supervision handles RGB→BGR
+                color=sv.Color(r=0, g=0, b=255),
             )
 
         progress_str = (
@@ -469,7 +469,7 @@ class PointAndCallOrchestrator:
             style=VizStyle(banner_height=24, banner_text_scale=0.5),
             position="overlay_top",
             bg_color_rgb=(30, 30, 30),
-            # BGR red for alert text (helper writes the tuple raw onto BGR scene)
+            # BGR red — classification_banner writes the tuple raw onto a BGR scene.
             text_color_rgb=(255, 255, 255) if not result.alerts else (80, 80, 255),
         )
 
@@ -587,10 +587,10 @@ def _video_test(video_path: Path, pose_backend_override: str | None) -> None:
         sys.exit(1)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    print(f"Video       : {video_path}  ({width}x{height} @ {fps:.2f} fps, {n_frames} frames)")
+    print(f"Video       : {video_path}  ({src_w}x{src_h} @ {fps:.2f} fps, {n_frames} frames)")
     print(f"Config      : {config_path}")
     if pose_backend_override:
         print(f"Pose backend override: {pose_backend_override}")
@@ -615,8 +615,9 @@ def _video_test(video_path: Path, pose_backend_override: str | None) -> None:
     first_done_frame: int | None = None
     last_result: OrchestratorResult | None = None
 
-    ff: subprocess.Popen | None = None
-    out_w = out_h = -1
+    writer: _H264Writer | None = None
+    out_w: int = 0
+    out_h: int = 0
 
     frame_idx = 0
     while True:
@@ -625,7 +626,7 @@ def _video_test(video_path: Path, pose_backend_override: str | None) -> None:
             break
         timestamp = frame_idx / fps
 
-        if frame_idx % proc_stride == 0 or last_result is None:
+        if frame_idx % proc_stride == 0:
             out = orchestrator.process_frame(frame, timestamp=timestamp)
             last_result = out
             label = out.current_label or "no_person"
@@ -649,39 +650,28 @@ def _video_test(video_path: Path, pose_backend_override: str | None) -> None:
                     + (f"  ALERT={out.alerts}" if out.alerts else "")
                 )
 
+        assert last_result is not None  # frame_idx==0 always processes
         drawn = orchestrator.draw(frame, last_result)
 
-        # Size the ffmpeg pipe from the first drawn frame -- draw() may add
-        # banners that change the frame height (e.g. position="bottom" vstacks
-        # an 18-row latency strip below the image). Using the capture's H here
-        # would shift each subsequent frame's bytes -> visible scrolling.
-        if ff is None:
+        # Lazy-init the writer from the first drawn frame: draw() may add
+        # banners that change the output height (e.g. position="bottom"
+        # vstacks an 18-row latency strip below the image). Sizing from the
+        # capture's H would shift each subsequent frame -> visible scrolling.
+        if writer is None:
             out_h, out_w = drawn.shape[:2]
-            ff = subprocess.Popen(
-                [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-f", "rawvideo", "-pix_fmt", "bgr24",
-                    "-s", f"{out_w}x{out_h}", "-r", f"{fps}",
-                    "-i", "-",
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                    "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-                    str(out_mp4),
-                ],
-                stdin=subprocess.PIPE,
-            )
+            writer = _H264Writer(out_mp4, out_w, out_h, fps)
 
         if drawn.shape[:2] != (out_h, out_w):
             raise RuntimeError(
                 f"draw() returned unexpected shape {drawn.shape[:2]} "
                 f"vs expected {(out_h, out_w)} -- would scroll output."
             )
-        ff.stdin.write(drawn.tobytes())
+        writer.write_frame(drawn)
         frame_idx += 1
 
     cap.release()
-    if ff is not None:
-        ff.stdin.close()
-        ff.wait()
+    if writer is not None:
+        writer.close()
     out_json.write_text(json.dumps(timeline, indent=2))
 
     print(f"\nFrames processed         : {frame_idx}")

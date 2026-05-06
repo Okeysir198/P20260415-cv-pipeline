@@ -46,6 +46,7 @@ code/face_recognition.py        — FaceRecognitionPipeline(config_path) → enr
 code/benchmark.py               — benchmark script
 eval/benchmark_results.json     — raw benchmark output
 eval/gallery.npz                — enrolled face embeddings (created by enroll())
+tests/test_face_recognition.py  — registry / gallery / predictor tests (was tests/test_p10_face_recognition.py)
 ```
 
 ## Enrollment

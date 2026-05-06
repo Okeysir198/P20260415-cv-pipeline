@@ -700,20 +700,10 @@ class YOLOXLoss(DetectionLoss):
 
     @staticmethod
     def _cxcywh_to_xyxy(boxes: torch.Tensor) -> torch.Tensor:
-        """Convert boxes from [cx, cy, w, h] to [x1, y1, x2, y2].
+        """Convert boxes from [cx, cy, w, h] to [x1, y1, x2, y2]."""
+        from torchvision.ops import box_convert
 
-        Args:
-            boxes: (N, 4) tensor in center format.
-
-        Returns:
-            (N, 4) tensor in corner format.
-        """
-        cx, cy, w, h = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-        x1 = cx - w / 2
-        y1 = cy - h / 2
-        x2 = cx + w / 2
-        y2 = cy + h / 2
-        return torch.stack([x1, y1, x2, y2], dim=1)
+        return box_convert(boxes, in_fmt="cxcywh", out_fmt="xyxy")
 
 
 # ---------------------------------------------------------------------------

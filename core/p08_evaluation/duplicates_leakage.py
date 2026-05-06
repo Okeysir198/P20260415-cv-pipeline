@@ -421,7 +421,7 @@ def _plot(
 if __name__ == "__main__":  # pragma: no cover
     import argparse
 
-    import yaml
+    from utils.config import load_config
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-config", required=True, type=Path)
@@ -429,8 +429,7 @@ if __name__ == "__main__":  # pragma: no cover
     parser.add_argument("--max-per-split", type=int, default=None)
     args = parser.parse_args()
 
-    data_cfg = yaml.safe_load(args.data_config.read_text())
-    # Resolve relative path against the config's directory.
+    data_cfg = load_config(args.data_config)
     if "path" in data_cfg and not Path(data_cfg["path"]).is_absolute():
         data_cfg["path"] = str((args.data_config.parent / data_cfg["path"]).resolve())
     res = run(data_cfg, args.output_dir, max_samples_per_split=args.max_per_split)

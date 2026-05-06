@@ -12,16 +12,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 
 def load_our_yaml(config_path: Path) -> dict[str, Any]:
     """Load our 06_training_paddle_*.yaml + resolve the sibling 05_data.yaml."""
-    config = yaml.safe_load(config_path.read_text())
+    from utils.config import load_config
+
+    config = load_config(config_path)
     data_ref = config.get("data", {}).get("dataset_config")
     if data_ref:
         data_path = (config_path.parent / data_ref).resolve()
-        config["_data_resolved"] = yaml.safe_load(data_path.read_text())
+        config["_data_resolved"] = load_config(data_path)
         config["_data_path"] = data_path
     config["_config_path"] = config_path
     return config

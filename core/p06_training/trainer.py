@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from loguru import logger
 from torch.utils.data import DataLoader
@@ -71,21 +72,29 @@ class ModelEMA:
         self.decay = decay
         self.warmup_steps = warmup_steps
         self.updates = 0
+        # Cache name→tensor pairs once; references are stable across steps.
+        ema_params = dict(self.ema_model.named_parameters())
+        ema_buffers = dict(self.ema_model.named_buffers())
+        model_params = dict(model.named_parameters())
+        model_buffers = dict(model.named_buffers())
+        self._param_pairs = [
+            (ema_params[n], model_params[n]) for n in ema_params if n in model_params
+        ]
+        self._buffer_pairs = [
+            (ema_buffers[n], model_buffers[n])
+            for n in ema_buffers
+            if n in model_buffers
+        ]
 
-    def update(self, model: nn.Module) -> None:
+    def update(self, model: nn.Module) -> None:  # noqa: ARG002
         """Update EMA parameters and copy BN buffers from the training model."""
         self.updates += 1
         d = self.decay * (1 - math.exp(-self.updates / self.warmup_steps))
         with torch.no_grad():
-            model_params = dict(model.named_parameters())
-            for name, ema_param in self.ema_model.named_parameters():
-                if name in model_params:
-                    ema_param.mul_(d).add_(model_params[name].data, alpha=1 - d)
-            # Copy BN running stats (buffers) directly — they must not be EMA-averaged
-            model_buffers = dict(model.named_buffers())
-            for name, ema_buf in self.ema_model.named_buffers():
-                if name in model_buffers:
-                    ema_buf.copy_(model_buffers[name])
+            for ema_param, model_param in self._param_pairs:
+                ema_param.mul_(d).add_(model_param.data, alpha=1 - d)
+            for ema_buf, model_buf in self._buffer_pairs:
+                ema_buf.copy_(model_buf)
 
     def state_dict(self) -> dict:
         return {
@@ -276,24 +285,14 @@ class DetectionTrainer:
                     pg["lr"] = lr * neck_lr_scale
                 # head keeps base lr
         else:
-            # Fallback: flat 2-group split (BN/bias no decay, rest decay)
-            no_decay_ids: set = set()
+            # Fallback: flat 2-group split — BN/LN/GN params and biases (ndim<=1)
+            # get no weight-decay; everything else does.
             pg_no_decay = []
             pg_decay = []
-            for module in self.model.modules():
-                if isinstance(module, (nn.BatchNorm2d, nn.GroupNorm, nn.LayerNorm)):
-                    for p in module.parameters():
-                        if id(p) not in no_decay_ids:
-                            pg_no_decay.append(p)
-                            no_decay_ids.add(id(p))
-                else:
-                    if hasattr(module, "bias") and isinstance(module.bias, nn.Parameter):
-                        if id(module.bias) not in no_decay_ids:
-                            pg_no_decay.append(module.bias)
-                            no_decay_ids.add(id(module.bias))
-                    if hasattr(module, "weight") and isinstance(module.weight, nn.Parameter):
-                        if id(module.weight) not in no_decay_ids:
-                            pg_decay.append(module.weight)
+            for p in self.model.parameters():
+                if not p.requires_grad:
+                    continue
+                (pg_no_decay if p.ndim <= 1 else pg_decay).append(p)
             param_groups = [
                 {"params": pg_decay, "weight_decay": weight_decay},
                 {"params": pg_no_decay, "weight_decay": 0.0},
@@ -351,6 +350,16 @@ class DetectionTrainer:
 
         return data_config, base_dir, build_fn
 
+    def _build_val_loader(self, *, subset_fraction: float | None) -> Any | None:
+        """Build a val loader with the given subset fraction (None = full val)."""
+        data_config, base_dir, build_fn = self._get_data_components()
+        cfg = copy.deepcopy(self.config)
+        cfg.setdefault("data", {}).setdefault("subset", {})["val"] = subset_fraction
+        eval_bs = self.config.get("data", {}).get("eval_batch_size")
+        if eval_bs is not None:
+            cfg["data"]["batch_size"] = eval_bs
+        return build_fn(data_config, split="val", training_config=cfg, base_dir=base_dir)
+
     def _build_dataloaders(self) -> tuple[DataLoader, DataLoader | None]:
         """Build training and validation data loaders from config.
 
@@ -358,53 +367,29 @@ class DetectionTrainer:
         ``training.val_subset_fraction`` (default 0.2) so per-epoch validation
         is fast. A separate full val loader (no subset) is built in ``train()``
         for periodic full evaluation.
-
-        Returns:
-            Tuple of (train_loader, val_loader). val_loader may be None.
         """
-        import copy
         data_config, base_dir, build_fn = self._get_data_components()
 
         train_loader = build_fn(
             data_config, split="train", training_config=self.config, base_dir=base_dir
         )
 
-        # Quick val: apply val_subset_fraction when val_full_interval is active
         val_full_interval = self._train_cfg.get("val_full_interval", 0)
         val_subset_fraction = self._train_cfg.get("val_subset_fraction", 0.2)
-        eval_bs = self.config.get("data", {}).get("eval_batch_size")
         if val_full_interval > 0 and val_subset_fraction is not None:
-            quick_config = copy.deepcopy(self.config)
-            quick_config.setdefault("data", {}).setdefault("subset", {})["val"] = (
-                val_subset_fraction
-            )
-            if eval_bs is not None:
-                quick_config["data"]["batch_size"] = eval_bs
-            val_loader = build_fn(
-                data_config, split="val", training_config=quick_config, base_dir=base_dir
-            )
+            val_loader = self._build_val_loader(subset_fraction=val_subset_fraction)
         else:
-            val_config = self.config
-            if eval_bs is not None:
-                val_config = copy.deepcopy(self.config)
-                val_config.setdefault("data", {})["batch_size"] = eval_bs
-            val_loader = build_fn(
-                data_config, split="val", training_config=val_config, base_dir=base_dir
+            existing_subset = (
+                self.config.get("data", {}).get("subset", {}).get("val")
             )
+            val_loader = self._build_val_loader(subset_fraction=existing_subset)
 
         self._loaded_data_cfg = data_config
         return train_loader, val_loader
 
     def _build_full_val_loader(self) -> Any | None:
         """Build val loader on the full val set (no subset) for periodic full evaluation."""
-        import copy
-        data_config, base_dir, build_fn = self._get_data_components()
-        full_config = copy.deepcopy(self.config)
-        full_config.setdefault("data", {}).setdefault("subset", {})["val"] = None
-        eval_bs = self.config.get("data", {}).get("eval_batch_size")
-        if eval_bs is not None:
-            full_config["data"]["batch_size"] = eval_bs
-        return build_fn(data_config, split="val", training_config=full_config, base_dir=base_dir)
+        return self._build_val_loader(subset_fraction=None)
 
     def _build_callbacks(self) -> CallbackRunner:
         """Build training callbacks from config.
@@ -1092,8 +1077,6 @@ class DetectionTrainer:
             Dictionary of training metrics for this epoch:
                 {"train/loss", "train/cls_loss", "train/obj_loss", "train/reg_loss"}.
         """
-        import math as _math
-
         self.model.train()
         if hasattr(self.loss_fn, 'set_epoch'):
             self.loss_fn.set_epoch(epoch)
@@ -1142,7 +1125,7 @@ class DetectionTrainer:
             is_accum_step = (batch_idx + 1) % grad_accum_steps == 0
 
             loss_val = loss.item()
-            if not _math.isfinite(loss_val):
+            if not math.isfinite(loss_val):
                 # Skip backward entirely — NaN gradients would corrupt weights even if
                 # the optimizer step is later skipped by GradScaler
                 logger.debug("Skipping batch %d: loss=%s", batch_idx, loss_val)
@@ -1165,19 +1148,23 @@ class DetectionTrainer:
                     self.optimizer.zero_grad()
 
             # EMA update (only on finite optimizer step)
-            if is_accum_step and _math.isfinite(loss_val) and self.ema is not None:
+            if is_accum_step and math.isfinite(loss_val) and self.ema is not None:
                 self.ema.update(base_model)
 
-            # Accumulate metrics — skip NaN/inf batches so epoch average remains meaningful
-            cls_val = loss_dict.get("cls_loss", _LOSS_ZERO).item()
-            obj_val = loss_dict.get("obj_loss", _LOSS_ZERO).item()
-            reg_val = loss_dict.get("reg_loss", _LOSS_ZERO).item()
+            # Accumulate metrics — single GPU→CPU sync for the 3 components.
+            zero = loss.detach() * 0
+            cls_t = loss_dict.get("cls_loss", zero).detach()
+            obj_t = loss_dict.get("obj_loss", zero).detach()
+            reg_t = loss_dict.get("reg_loss", zero).detach()
+            cls_val, obj_val, reg_val = (
+                torch.stack([cls_t, obj_t, reg_t]).cpu().tolist()
+            )
 
-            if _math.isfinite(loss_val):
+            if math.isfinite(loss_val):
                 running_loss += loss_val
-                running_cls += cls_val if _math.isfinite(cls_val) else 0.0
-                running_obj += obj_val if _math.isfinite(obj_val) else 0.0
-                running_reg += reg_val if _math.isfinite(reg_val) else 0.0
+                running_cls += cls_val if math.isfinite(cls_val) else 0.0
+                running_obj += obj_val if math.isfinite(obj_val) else 0.0
+                running_reg += reg_val if math.isfinite(reg_val) else 0.0
                 num_batches += 1
 
             # Progress + callback — flexible batch metrics
@@ -1284,7 +1271,6 @@ class DetectionTrainer:
                 # Some models (e.g. SegFormer) output at 1/4 resolution — upsample to input size.
                 class_maps = predictions.argmax(dim=1)  # (B, H', W')
                 if class_maps.shape[-2:] != (input_h, input_w):
-                    import torch.nn.functional as F
                     class_maps = (
                         F.interpolate(
                             class_maps.unsqueeze(1).float(),
@@ -1302,24 +1288,42 @@ class DetectionTrainer:
                 batch_preds = self._decode_predictions(predictions, conf_threshold=0.01)
                 all_predictions.extend(batch_preds)
 
-                # Convert ground truths into compute_map format
-                for gt in targets:
-                    gt_np = gt.cpu().numpy()
-                    if gt_np.shape[0] == 0:
-                        all_ground_truths.append({
-                            "boxes": np.zeros((0, 4)),
-                            "labels": np.zeros(0, dtype=np.int64),
-                        })
+                # Vectorize across the batch: stack all GTs, do one cxcywh→xyxy
+                # pass, then split back per-image.
+                if not targets:
+                    pass
+                else:
+                    sizes = [int(t.shape[0]) for t in targets]
+                    if sum(sizes) == 0:
+                        for _ in targets:
+                            all_ground_truths.append({
+                                "boxes": np.zeros((0, 4)),
+                                "labels": np.zeros(0, dtype=np.int64),
+                            })
                     else:
-                        # Convert cxcywh to xyxy
-                        cx, cy, w, h = gt_np[:, 1], gt_np[:, 2], gt_np[:, 3], gt_np[:, 4]
-                        x1 = cx - w / 2
-                        y1 = cy - h / 2
-                        x2 = cx + w / 2
-                        y2 = cy + h / 2
-                        boxes = np.stack([x1, y1, x2, y2], axis=1)
-                        labels = gt_np[:, 0].astype(np.int64)
-                        all_ground_truths.append({"boxes": boxes, "labels": labels})
+                        gt_cat = torch.cat(
+                            [t for t in targets if t.numel()], dim=0
+                        ).cpu().numpy()
+                        cx, cy, w, h = (
+                            gt_cat[:, 1], gt_cat[:, 2], gt_cat[:, 3], gt_cat[:, 4]
+                        )
+                        all_boxes = np.stack(
+                            [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], axis=1
+                        )
+                        all_labels = gt_cat[:, 0].astype(np.int64)
+                        offset = 0
+                        for n in sizes:
+                            if n == 0:
+                                all_ground_truths.append({
+                                    "boxes": np.zeros((0, 4)),
+                                    "labels": np.zeros(0, dtype=np.int64),
+                                })
+                            else:
+                                all_ground_truths.append({
+                                    "boxes": all_boxes[offset:offset + n],
+                                    "labels": all_labels[offset:offset + n],
+                                })
+                                offset += n
 
         if num_batches == 0:
             return {}
@@ -1386,12 +1390,10 @@ class DetectionTrainer:
             return results
 
         if output_format == "segmentation":
-            import torch.nn.functional as F_seg
-
             class_maps = predictions.argmax(dim=1)  # (B, H', W')
             input_h, input_w = self._model_cfg["input_size"]
             if class_maps.shape[-2:] != (input_h, input_w):
-                class_maps = F_seg.interpolate(
+                class_maps = F.interpolate(
                     class_maps.unsqueeze(1).float(),
                     size=(input_h, input_w),
                     mode="nearest",

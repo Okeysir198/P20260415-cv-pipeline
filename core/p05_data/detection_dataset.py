@@ -4,6 +4,7 @@ Reads image files and corresponding YOLO-format label ``.txt`` files
 (one row per object: ``class_id cx cy w h``, normalised 0-1).
 """
 
+import os
 import random
 import sys
 from pathlib import Path
@@ -90,16 +91,19 @@ class YOLOXDataset(BaseDataset):
         # Derive label directory: sibling "labels" directory
         self.label_dir = self.img_dir.parent / "labels"
 
-        # Collect image paths
-        self.img_paths: list[Path] = sorted(
-            p for p in self.img_dir.iterdir()
-            if p.suffix.lower() in IMG_EXTENSIONS
-        )
+        # Collect image paths (os.scandir avoids per-entry stat for `.suffix`)
+        with os.scandir(self.img_dir) as it:
+            entries = [
+                Path(e.path) for e in it
+                if e.is_file() and os.path.splitext(e.name)[1].lower() in IMG_EXTENSIONS
+            ]
+        self.img_paths: list[Path] = sorted(entries)
         if len(self.img_paths) == 0:
             raise FileNotFoundError(
                 f"No images found in {self.img_dir} "
                 f"(extensions: {IMG_EXTENSIONS})"
             )
+        self._stem_to_img: dict[str, Path] = {p.stem: p for p in self.img_paths}
 
         self.transforms = transforms
         self.data_config = data_config
@@ -123,12 +127,9 @@ class YOLOXDataset(BaseDataset):
             file is missing or empty.
         """
         label_path = self.label_dir / (img_path.stem + ".txt")
-        if not label_path.exists():
-            return np.zeros((0, 5), dtype=np.float32)
-
         try:
             data = np.loadtxt(label_path, dtype=np.float32, ndmin=2)
-        except ValueError:
+        except (OSError, ValueError):
             return np.zeros((0, 5), dtype=np.float32)
 
         if data.size == 0:
@@ -182,19 +183,12 @@ class YOLOXDataset(BaseDataset):
         Returns:
             numpy array (N, 5) float32 — [class_id, cx, cy, w, h].
         """
-        # _load_label expects an image path and derives the label path itself,
-        # so we reconstruct a compatible image path from the label path.
-        img_stem = label_path.stem
-        # Find the matching image path (fallback: create a synthetic path)
-        for img_path in self.img_paths:
-            if img_path.stem == img_stem:
-                return self._load_label(img_path)
-        # If no matching image found, load the label file directly
-        if not label_path.exists():
-            return np.zeros((0, 5), dtype=np.float32)
+        img_path = self._stem_to_img.get(label_path.stem)
+        if img_path is not None:
+            return self._load_label(img_path)
         try:
             data = np.loadtxt(label_path, dtype=np.float32, ndmin=2)
-        except ValueError:
+        except (OSError, ValueError):
             return np.zeros((0, 5), dtype=np.float32)
         if data.size == 0:
             return np.zeros((0, 5), dtype=np.float32)
@@ -446,18 +440,22 @@ def _build_weighted_sampler(
     class_counts = np.zeros(raw_ds.num_classes, dtype=np.float64)
     image_classes: list[int] = []
 
-    for idx in active_indices:
-        img_path = raw_ds.img_paths[idx]
-        labels = raw_ds._load_label(img_path)
+    # Disk-bound: parallelize label reads with a thread pool.
+    from concurrent.futures import ThreadPoolExecutor
+
+    img_paths = [raw_ds.img_paths[idx] for idx in active_indices]
+    workers = min(16, max(1, (os.cpu_count() or 4)))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        all_labels = list(ex.map(raw_ds._load_label, img_paths))
+
+    for labels in all_labels:
         if len(labels) > 0:
             cls_ids = labels[:, 0].astype(int)
-            # Assign image to most frequent class
             dominant = int(np.bincount(cls_ids, minlength=raw_ds.num_classes).argmax())
             image_classes.append(dominant)
             for c in cls_ids:
                 class_counts[c] += 1
         else:
-            # Background image — assign to a pseudo-class
             image_classes.append(-1)
 
     # Compute per-class weight

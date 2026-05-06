@@ -48,6 +48,7 @@ configs/10_inference.yaml   — model path + zone polygon definitions
 code/zone_intrusion.py      — ZoneIntrusionDetector(config_path) → detect(image_bgr) / draw()
 code/benchmark.py           — pretrained model benchmark script
 eval/benchmark_results.json — raw benchmark output
+tests/test_zone_intrusion.py — geometry, dataclass, full detect+draw tests (was tests/test_p10_zone_intrusion.py)
 ```
 
 ## Notes

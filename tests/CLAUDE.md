@@ -15,7 +15,7 @@ uv run -m pytest tests/test_p06_training.py -v
 
 ## Test Layout
 
-52 files in two groups: independent **utils + viz** (fast) and **sequential pipeline** (p00→p12). **No mocks** — real data only. Full `run_all.py` takes ~17 min on one RTX-class GPU (verified 2026-04-14, 1021s).
+51 files in two groups: independent **utils + viz** (fast) and **sequential pipeline** (p00→p12). Feature-specific tests (face recognition, zone intrusion, poketenashi rules) live under `features/<name>/tests/`, not here. **No mocks** — real data only. Full `run_all.py` takes ~17 min on one RTX-class GPU (verified 2026-04-14, 1021s).
 
 ### Utils (independent, always fast)
 
@@ -73,9 +73,6 @@ uv run -m pytest tests/test_p06_training.py -v
 | `test_p09_export_validation.py` | PyTorch vs ONNX numerical match | — | — |
 | `test_p10_inference.py` | `DetectionPredictor` (.pt / .pth + .onnx), batch predict | — | `outputs/14_inference/` |
 | `test_p10_video_inference.py` | `VideoProcessor`, frame counter, alert config | — | — |
-| `test_p10_face_recognition.py` | Face registry, gallery, predictor (optional ONNX weights) | — | — |
-| `test_p10_zone_intrusion.py` | Zone Intrusion detector — geometry helpers, dataclasses, full detect+draw | — | — |
-| `test_p10_poketenashi.py` | Poketenashi pose rules (hands-in-pockets, stair safety, handrail) on real COCO-17 keypoints | — | — |
 | `test_p11_e2e_pipeline.py` | Full chain: train → eval → export → infer | — | `outputs/15_e2e_pipeline/` |
 | `test_p12_raw_pipeline.py` | **Raw dataset → annotate → QA → LS roundtrip → p00 merge+split → train → HPO → eval → export → infer** | :18104, :18105, :18100, :18103 | `outputs/16_raw_pipeline/` |
 

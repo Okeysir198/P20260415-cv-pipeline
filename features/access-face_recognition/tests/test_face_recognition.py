@@ -8,17 +8,16 @@ Tests cover:
 """
 
 import sys
-import traceback
 from pathlib import Path
-from typing import Dict
 
 import numpy as np
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 
-from _runner import passed, failed, errors, run_test, run_all
+from _runner import passed, failed, errors, run_test
 from core.p06_models.face_base import FaceDetector, FaceEmbedder
 from core.p06_models.face_registry import (
     FACE_DETECTOR_REGISTRY,

@@ -716,12 +716,11 @@ def _chart_14_robustness_sweep(
     import torch
     import torch.nn.functional as F
 
-    _IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-    _IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    from core.p05_data.base_dataset import IMAGENET_MEAN, IMAGENET_STD
 
     device = next(model.parameters()).device
-    mean_d = _IMAGENET_MEAN.to(device)
-    std_d = _IMAGENET_STD.to(device)
+    mean_d = torch.tensor(IMAGENET_MEAN, device=device).view(1, 3, 1, 1)
+    std_d = torch.tensor(IMAGENET_STD, device=device).view(1, 3, 1, 1)
 
     def _denorm_renorm(px: torch.Tensor, transform_rgb01) -> torch.Tensor:
         rgb = px * std_d + mean_d                # → [0, 1]
