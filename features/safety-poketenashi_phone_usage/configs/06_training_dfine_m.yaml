@@ -1,0 +1,135 @@
+# Training config — Phone Usage Detection (D-FINE-M, HF Trainer backend)
+# License: Apache 2.0 (USTC / DEIM)
+#
+# Recipe: official Peterande/D-FINE per-arch dfine_hgnetv2_m_coco.yml — layered
+# AdamW with 1:2 LR ratio, constant_with_warmup, EMA 0.9999. obj2coco pretrain.
+# This is the Phase-B production candidate per features/CLAUDE.md.
+#
+# Phone-usage notes:
+# - 2 classes, 94.6/5.4 imbalance → highest class-collapse risk (per CLAUDE.md).
+#   Watch `eval_map_per_class_person` during training. If `person` AP=0 while
+#   `phone_usage` AP > 0, mark FAIL regardless of overall mAP.
+
+model:
+  arch: dfine-m
+  pretrained: ustc-community/dfine-medium-obj2coco
+  num_classes: 2
+  input_size: [640, 640]
+  num_queries: 300               # paper exact
+  num_denoising: 100             # HF default
+  box_noise_scale: 1.0
+  label_noise_ratio: 0.5
+  eos_coefficient: 0.0001
+  focal_loss_alpha: 0.75
+  focal_loss_gamma: 2.0
+
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false               # see dfine_s comment — A/B normalize=true on smoke run
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  # D-FINE-M is ~1.6× the params of S; bs=8 at 640² fp32 fits on 24 GB GPU.
+  # Override to 4 if VRAM tight or running alongside another tenant.
+  batch_size: 8
+  eval_batch_size: 4
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: false
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false
+  mosaic: false
+  mixup: false
+
+  perspective_p: 0.1
+  fliplr: 0.5
+  flipud: 0.0
+  brightness_contrast_p: 0.5
+  brightness: 0.2
+  contrast: 0.2
+  hsv_p: 0.3
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  min_bbox_area: 4.0
+
+  scale: [0.9, 1.1]
+  degrees: 5.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: hf
+  epochs: 100                    # M is bigger so converges a bit earlier than N/S
+  optimizer: adamw
+  # Per-arch dfine_hgnetv2_m_coco.yml: 1:2 LR ratio, paper bs=128.
+  # Linear-scaled to bs=8: 5e-5 head, 2.5e-5 backbone.
+  lr: 0.00005
+  lr_backbone: 0.000025
+  weight_decay: 0.0001
+  warmup_steps: 500
+  scheduler: constant_with_warmup
+  max_grad_norm: 0.1
+  bf16: false                    # MANDATORY for D-FINE
+  amp: false
+  gpu_augment: false
+  ema: true
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+  patience: 25
+
+  val_viz:
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01
+  train_viz:
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  report_to: none
+  save_dir: ../runs/dfine_m
+  wandb_project: smart-camera
+
+checkpoint:
+  save_best: true
+  metric: eval_map_50
+  mode: max
+  save_interval: 1
+
+evaluation:
+  score_threshold: 0.0
+
+seed: 42

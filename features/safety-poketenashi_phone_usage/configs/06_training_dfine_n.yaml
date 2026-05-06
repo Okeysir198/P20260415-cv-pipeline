@@ -1,0 +1,151 @@
+# Training config — Phone Usage Detection (D-FINE-N, HF Trainer backend)
+# License: Apache 2.0 (USTC / DEIM)
+#
+# Recipe: official Peterande/D-FINE per-arch dfine_hgnetv2_n_coco.yml — layered
+# AdamW with 1:2 LR ratio (NOT 1:20), constant_with_warmup, clip 0.1, EMA 0.9999.
+# This is the smallest D-FINE variant (~3.8 M params). Smoke-config for the
+# 22,975-image phone_usage dataset; dfine_s/m are the production candidates.
+#
+# Phone-usage notes:
+# - 2 classes, 94.6/5.4 imbalance → highest class-collapse risk (per CLAUDE.md).
+#   Watch `eval_map_per_class_person` during training. If `person` AP=0 while
+#   `phone_usage` AP > 0, mark FAIL regardless of overall mAP.
+# - Phone bbox is tiny (phone area only). Keep input_size 640, scale jitter
+#   tight to avoid pushing phones below the detection grid.
+
+model:
+  arch: dfine-n
+  # NOTE: D-FINE nano has only COCO pretrain on HF — no obj2coco variant
+  # exists for nano (3.8M). Only S/M/L/XL have obj2coco.
+  pretrained: ustc-community/dfine_n_coco
+  num_classes: 2
+  # 640×640 — D-FINE-N's HGNetv2-B0 backbone outputs only stride-16/32 feature
+  # maps (NOT stride-8 like S/M/L). Phone bboxes are tiny but boosting input
+  # past 640 gives no small-object benefit on stride-16 features for nano.
+  input_size: [640, 640]
+  num_queries: 300               # paper exact (custom-fine-tune yml)
+  num_denoising: 100             # HF default
+  box_noise_scale: 1.0           # paper default
+  label_noise_ratio: 0.5         # paper default
+  eos_coefficient: 0.0001        # paper default
+  focal_loss_alpha: 0.75         # paper default
+  focal_loss_gamma: 2.0          # paper default
+
+# DFineImageProcessor rescales /255; ImageNet normalize OFF by default.
+# Phone-usage data is general indoor/outdoor (closer to ImageNet than fire),
+# so flipping `normalize: true` is a reasonable A/B if BatchNorm-recenter
+# stalls — verify on a 10% smoke run before committing.
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false
+  mean: [0.485, 0.456, 0.406]    # ignored when normalize=false
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 8
+  eval_batch_size: 4             # capped to avoid OOM during HF eval
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: false
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false
+  # Mosaic OFF for DETR-family — empirically confirmed bad on fire RT-DETR R18
+  # v3 (mosaic ran 27+ epochs, scored 0.04-0.06 mAP below the no-mosaic
+  # baseline). Bipartite matching disturbed by 4× box density.
+  mosaic: false
+  mixup: false
+
+  perspective_p: 0.1
+  fliplr: 0.5
+  flipud: 0.0
+  brightness_contrast_p: 0.5
+  brightness: 0.2
+  contrast: 0.2
+  hsv_p: 0.3
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  min_bbox_area: 4.0
+
+  # Tight scale — phone bbox is already small.
+  scale: [0.9, 1.1]
+  degrees: 5.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: hf
+  epochs: 120                    # paper-fine-tune-N is 220 ep × bs=128. Linear-scale to bs=8 → ~120 ep gradient budget.
+  optimizer: adamw
+  # D-FINE-N specifically uses 1:2 LR ratio (NOT 1:20 like S/M/L/X).
+  # Source: configs/dfine/dfine_hgnetv2_n_coco.yml + custom_n.yml.
+  # Paper bs=128 → lr=8e-4 head, 4e-4 backbone. Linear-scaled to our bs=8:
+  # 8e-4 × 8/128 = 5e-5 head, 2.5e-5 backbone.
+  lr: 0.00005
+  lr_backbone: 0.000025
+  weight_decay: 0.000125
+  warmup_steps: 500
+  scheduler: constant_with_warmup
+  max_grad_norm: 0.1
+  bf16: false                    # MANDATORY for D-FINE — DFL stalls under bf16
+  amp: false                     # fp16 AMP overflows DETR decoder
+  gpu_augment: false             # HF Trainer uses its own DataLoader
+  ema: true                      # paper default
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+  patience: 30                   # D-FINE-N DFL breakthrough may be late + sudden
+
+  val_viz:
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.01         # DETR sigmoid scores cap ~0.2
+    grid_cols: 2
+    balanced: true
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01
+  train_viz:
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  report_to: none                # avoid wandb/tensorboard hard-fails on missing creds
+  save_dir: ../runs/dfine_n
+  wandb_project: smart-camera
+
+checkpoint:
+  save_best: true
+  metric: eval_map_50
+  mode: max
+  save_interval: 1               # mandatory for D-FINE — DFL best ckpt arrives suddenly
+
+evaluation:
+  score_threshold: 0.0           # canonical mAP
+
+seed: 42

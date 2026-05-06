@@ -1,0 +1,145 @@
+# Training config — Phone Usage Detection (RT-DETRv2-R50, HF Trainer backend)
+#
+# Recipe: paper-aligned (RT-DETRv2 arXiv 2407.17140) + v3 loss overhaul lifted
+# from fire_detection R50 v3 (eos=0.1, focal_α=0.5, focal_γ=1.5; lr=5e-5;
+# EMA on with decay=0.999 + 500-step warmup so it engages early). This is the
+# Phase-B production candidate per features/CLAUDE.md.
+#
+# Phone-usage notes:
+# - 2 classes, 94.6/5.4 imbalance → highest class-collapse risk (per CLAUDE.md).
+#   Watch `eval_map_per_class_person` during training. If `person` AP=0 while
+#   `phone_usage` AP > 0, mark FAIL regardless of overall mAP.
+
+model:
+  arch: rtdetr-r50
+  pretrained: PekingU/rtdetr_v2_r50vd
+  num_classes: 2
+  input_size: [640, 640]
+  # 50 queries — phone scenes have ~1 GT/image (p99 < 5). 50 = ~10× p99
+  # headroom while keeping background-FP risk in check.
+  num_queries: 50
+  num_denoising: 100
+  # Loss-recipe overhaul (mirrors fire R50 v3, 2026-05-05):
+  box_noise_scale: 1.0
+  label_noise_ratio: 0.3
+  eos_coefficient: 0.1
+  focal_loss_alpha: 0.5
+  focal_loss_gamma: 1.5
+
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false               # A/B with normalize=true on smoke run
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  # R50 ~2.1× R18 backbone params. bs=8 at 640² bf16 fits ~14 GB; safe on
+  # most 24 GB GPUs. Override --override data.batch_size=16 if GPU is free.
+  batch_size: 8
+  eval_batch_size: 4
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: false
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false
+  mosaic: false
+  mixup: false
+
+  perspective_p: 0.1
+  fliplr: 0.5
+  flipud: 0.0
+  brightness_contrast_p: 0.5
+  brightness: 0.2
+  contrast: 0.2
+  hsv_p: 0.3
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  min_bbox_area: 4.0
+
+  scale: [0.9, 1.1]
+  degrees: 5.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: hf
+  epochs: 30
+  optimizer: adamw
+  # Layered AdamW per RT-DETRv2 R50 paper: head 1e-4, backbone 1e-5 → halved
+  # to 5e-5 / 1e-5 to match fire R50 v3's stable recipe.
+  lr: 0.00005
+  lr_backbone: 0.00001
+  weight_decay: 0.0001
+  warmup_steps: 2000
+  scheduler: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr: 0.000005
+  # 0.1 → 0.5 (mirrors fire R50 v3) — pre-clip grad_norm in 30-150 range, 0.1
+  # was nuking gradient direction. 0.5 lets real signal through; offset by EMA.
+  max_grad_norm: 0.5
+  bf16: true
+  amp: false
+  gpu_augment: false
+  ema: true                      # was false in fire R18; R50 needs it for late-epoch smoothing
+  # decay 0.999 not 0.9999 — at 0.9999 the EMA needs ~10000 steps to warm up,
+  # so it never engages on a 30-epoch run. 0.999 → ~1000-step warmup → EMA
+  # averages from ep1 onward.
+  ema_decay: 0.999
+  ema_warmup_steps: 500
+  patience: 15
+
+  val_viz:
+    enabled: true
+    num_samples: 40
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01
+  train_viz:
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  report_to: none
+  save_dir: ../runs/rtdetr_r50
+  wandb_project: smart-camera
+
+checkpoint:
+  save_best: true
+  metric: eval_map_50
+  mode: max
+  save_interval: 1
+
+evaluation:
+  score_threshold: 0.0
+
+seed: 42

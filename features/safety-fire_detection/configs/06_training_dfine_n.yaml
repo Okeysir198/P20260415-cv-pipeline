@@ -6,18 +6,21 @@
 
 model:
   arch: dfine-n
+  # NOTE: D-FINE nano has only COCO pretrain on HF — no obj365/obj2coco
+  # variant exists for nano (3.8M). Only S/M/L/XL have obj2coco.
   pretrained: ustc-community/dfine_n_coco
   num_classes: 2
-  # 960×960 — small recall lever, mirrors RT-DETR R18/R50 v2 recipe.
-  # Fire data: 15.4% boxes <32² px; stride-8 cells go 80²→120².
-  input_size: [960, 960]
+  # 640×640 (paper) — D-FINE-N's HGNetv2-B0 backbone outputs only stride-16 + 32
+  # feature maps (NOT stride-8 like S/M/L). 960² gives no small-object benefit
+  # for nano + 2.25× extra compute. Reverted to paper eval_spatial_size.
+  input_size: [640, 640]
   # Loss recipe REVERTED to HF defaults (2026-05-05) — the v2 RT-DETR overhaul
   # (eos=0.1, focal_α=0.5, focal_γ=1.5) destabilized D-FINE-S (val mAP collapsed
   # from 0.16 ep1 to 0.06 by ep10). D-FINE's distribution-focal-loss head
   # interacts differently with these knobs than RT-DETR's vanilla regression
   # head. Reverting to paper-aligned defaults — these were specifically
   # validated for D-FINE in Peterande/D-FINE/configs/dfine/include/optimizer.yml.
-  num_queries: 30                # 3.3× p99 headroom; safe small-data deviation
+  num_queries: 300               # 20 → 300 — paper exact (custom-fine-tune yml). DFL training depends on full query density; reducing starves the matcher. Background-FP suppression now relies on eos_coefficient + paper-aligned focal_alpha=0.75.
   num_denoising: 100             # HF default
   box_noise_scale: 1.0           # paper default
   label_noise_ratio: 0.5         # paper default (was 0.3 v2)
@@ -28,7 +31,7 @@ model:
 # DFineImageProcessor rescales /255 (rescale=true) but does NOT apply ImageNet
 # mean/std — fire dataset stats are off-distribution from ImageNet.
 tensor_prep:
-  input_size: [960, 960]
+  input_size: [640, 640]
   rescale: true
   normalize: false
   mean: [0.485, 0.456, 0.406]  # ignored when normalize=false
@@ -61,28 +64,30 @@ augmentation:
   perspective_p: 0.1
   fliplr: 0.5
   flipud: 0.0
-  brightness_contrast_p: 0.5    # 0.3 → 0.5 — apply more often
-  brightness: 0.2               # 0.1 → 0.2 — fire/smoke happen across lighting conditions
-  contrast: 0.2                 # 0.1 → 0.2
-  hsv_p: 0.3                    # 0.1 → 0.3 — apply more often
-  hsv_h: 0.015                  # KEEP TIGHT — fire color is class-defining
-  hsv_s: 0.3                    # KEEP TIGHT — same reason
-  hsv_v: 0.4                    # 0.3 → 0.4 — value is safe (doesn't change color identity)
+  brightness_contrast_p: 0.3    # paper-light
+  brightness: 0.1
+  contrast: 0.1
+  hsv_p: 0.1
+  hsv_h: 0.015
+  hsv_s: 0.3
+  hsv_v: 0.3
   min_bbox_area: 4.0
 
-  scale: [0.7, 1.3]             # was [0.9, 1.1] — ±30% jitter, also helps small-recall
-  degrees: 15.0                 # 10 → 15
-  translate: 0.15               # 0.1 → 0.15
+  scale: [0.9, 1.1]             # paper-light at 640×640 since boxes are smaller
+  degrees: 10.0
+  translate: 0.1
   shear: 2.0
 
 training:
   backend: hf
-  epochs: 60                     # 40 → 60 (2026-05-05) — paper does 132 ep; 60 covers DFL breakthrough zone + margin without wasting GPU
+  epochs: 120                    # paper-fine-tune-N is 220 ep × bs=128. We use bs=32, so cut to 120 to keep similar gradient budget per param.
   optimizer: adamw
-  # Layered AdamW per official D-FINE optimizer.yml. _DetectionTrainer.
-  # create_optimizer reads lr_backbone and splits params by "backbone" name.
-  lr: 0.00025
-  lr_backbone: 0.0000125         # 1:20 split (paper)
+  # D-FINE-N specifically uses 1:2 LR ratio (NOT 1:20 like S/M/L/X).
+  # Source: configs/dfine/dfine_hgnetv2_n_coco.yml + custom_n.yml — both
+  # set default lr=8e-4 with backbone lr=4e-4. Linear-scaled to our bs=32:
+  # 8e-4 × 32/128 = 2e-4 head, 1e-4 backbone.
+  lr: 0.0002                     # 8e-4 × 32/128 (linear scale from paper bs=128)
+  lr_backbone: 0.0001            # 1:2 ratio per paper for D-FINE-N (NOT 1:20)
   weight_decay: 0.000125
   warmup_steps: 500
   scheduler: constant_with_warmup
@@ -93,7 +98,7 @@ training:
   ema: true                      # paper default
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 20                   # 15 → 20 (2026-05-05) — D-FINE breakthrough is sudden; needs more headroom than RT-DETR
+  patience: 30                   # D-FINE-N DFL breakthrough may be late + sudden; bump from 20 to 30
 
   val_viz:
     enabled: true

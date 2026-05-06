@@ -6,7 +6,11 @@
 
 model:
   arch: dfine-m
-  pretrained: ustc-community/dfine_m_coco
+  # obj2coco (2026-05-05) — Objects365 → COCO 2-stage pretrain. 5× more
+  # pretrain data, 365 classes (vs COCO's 80) including fire-adjacent
+  # categories (Candle, Fire Extinguisher, Stove). Official D-FINE paper
+  # §4.2 + repo README recommend this as the better fine-tune base.
+  pretrained: ustc-community/dfine-medium-obj2coco  # canonical hyphenated name; underscored alias does not exist for obj2coco
   num_classes: 2
   # 960×960 — small recall lever, mirrors RT-DETR R18/R50 v2 recipe.
   # Fire data: 15.4% boxes <32² px; stride-8 cells go 80²→120².
@@ -17,7 +21,7 @@ model:
   # interacts differently with these knobs than RT-DETR's vanilla regression
   # head. Reverting to paper-aligned defaults — these were specifically
   # validated for D-FINE in Peterande/D-FINE/configs/dfine/include/optimizer.yml.
-  num_queries: 30                # 3.3× p99 headroom; safe small-data deviation
+  num_queries: 20                # 30 → 20 (2026-05-05) — D-FINE-N v2 EA showed 18× FP/TP ratio (precision 4-7%); fewer query slots reduces background-FP flooding. p99 GT=9, 20 = 2.2× headroom.
   num_denoising: 100             # HF default
   box_noise_scale: 1.0           # paper default
   label_noise_ratio: 0.5         # paper default (was 0.3 v2)
@@ -81,9 +85,12 @@ training:
   optimizer: adamw
   # Layered AdamW per official D-FINE optimizer.yml. _DetectionTrainer.
   # create_optimizer reads lr_backbone and splits params by "backbone" name.
-  lr: 0.00025
-  lr_backbone: 0.0000125         # 1:20 split (paper)
-  weight_decay: 0.000125
+  # CORRECTED 2026-05-06 — per-arch dfine_hgnetv2_m_coco.yml uses 1:2 LR ratio
+  # (NOT 1:20 from include/optimizer.yml). Same convention applies to all
+  # D-FINE variants. Backbone was 50× too low previously.
+  lr: 0.0002                     # paper per-arch (assumed same as S based on official convention)
+  lr_backbone: 0.0001            # 1:2 ratio
+  weight_decay: 0.0001           # paper
   warmup_steps: 500
   scheduler: constant_with_warmup
   max_grad_norm: 0.1

@@ -116,10 +116,42 @@ sources:
       "phone_usage": "phone_usage"
 
 splits:
-  train: 0.8
-  val: 0.1
-  test: 0.1
+  # NOTE: dedup.split_ratios overrides these when dedup is enabled.
+  # Kept here for legacy resplit-only flow.
+  train: 0.7
+  val: 0.15
+  test: 0.15
   seed: 42
+
+# ---------------------------------------------------------------------------
+# Deduplication + smart split.
+# Phone-usage uses 6 Roboflow-derived sources whose filenames follow the
+# `<id>_jpg.rf.<hash>` augmentation-copy pattern documented in the project
+# CLAUDE.md (Roboflow split-after-augmentation leakage). Without dedup,
+# sibling augmentations of the same source image leak across splits, inflating
+# val/test mAP by 5-50% depending on the dataset. dedup is REQUIRED for this
+# feature.
+#
+# v1 (2026-04-15) shipped without dedup → 80/10/10 author-defined splits;
+# DATASET_REPORT showed every Roboflow source falling back to "Author-defined"
+# because their splits/ subfolders existed, so cross-split augmentation copies
+# were definitely shipped to val/test. Re-running p00 with this block (or
+# `scripts/dedup_split.py` on the existing training_ready/) will fix it.
+# ---------------------------------------------------------------------------
+dedup:
+  enabled: true
+  hamming_thresh: 6              # video-heavy + Roboflow-augmented sources
+  split_strategy: per_source_with_temporal
+  split_ratios: [0.70, 0.15, 0.15]
+  max_per_group_eval: null
+  stratify_by: [class, source]
+  source_from: adapter
+  verify_no_leakage: true
+  temporal:
+    enabled: true
+    min_group_size_for_video: 20
+    gap_fraction: 0.05
+    min_gap_frames: 5
 
 options:
   copy_images: true
