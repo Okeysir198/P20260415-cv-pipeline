@@ -57,3 +57,7 @@ build/
 .claude/plugins/*/.claude-plugin/marketplace.json
 
 .claude/worktrees/
+
+# Demo videos (large binary assets)
+app_demo/demo_videos/
+

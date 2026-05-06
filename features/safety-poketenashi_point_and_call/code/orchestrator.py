@@ -32,7 +32,12 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(_CODE_DIR))
 
 from utils.config import load_config  # noqa: E402
-from utils.viz import VizStyle, annotate_keypoints, classification_banner  # noqa: E402
+from utils.viz import (  # noqa: E402
+    VizStyle,
+    annotate_detections,
+    annotate_keypoints,
+    classification_banner,
+)
 
 from _base import RuleResult  # noqa: E402
 from _zone import ZoneFSM, make_gate  # noqa: E402
@@ -69,6 +74,7 @@ class PersonBehavior:
     direction_label: str
     direction_result: RuleResult
     sequence_state: dict
+    box_xyxy: np.ndarray | None = None  # (4,) source-pixel xyxy from pose backend
 
 
 @dataclass
@@ -311,6 +317,7 @@ class PointAndCallOrchestrator:
                         direction_result=res,
                         sequence_state={"zone_state": zone_state, "armed": False,
                                           "sequence_done": False, "progress": []},
+                        box_xyxy=np.asarray(box, dtype=np.float32),
                     )
                 )
                 if current_label is None:
@@ -357,6 +364,7 @@ class PointAndCallOrchestrator:
                     direction_label=label,
                     direction_result=res,
                     sequence_state=seq_state,
+                    box_xyxy=np.asarray(box, dtype=np.float32),
                 )
             )
 
@@ -375,25 +383,75 @@ class PointAndCallOrchestrator:
     # ------------------------------------------------------------------
 
     def draw(self, image_bgr: np.ndarray, result: OrchestratorResult) -> np.ndarray:
-        conf_th = 0.3
-        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        # supervision annotators draw on BGR cv2 arrays; classification_banner
+        # is channel-opaque (writes the tuple raw), so non-symmetric color args
+        # are passed in BGR order to match the scene.
+        scene = image_bgr.copy()
 
-        body_style = VizStyle(
-            kpt_visibility_threshold=conf_th,
-            skeleton_color_rgb=(255, 200, 0),
-        )
+        # ---- Per-person bbox + state-coloured label (supervision Box+Label) ----
+        # State → sv.Color (BGR via supervision's as_bgr()):
+        #   sequence_done   → bright green
+        #   accumulating    → amber (≥1 direction in progress, no completion yet)
+        #   zone_disarmed   → grey  (rule muted by the zone-FSM gate)
+        #   pointing        → cyan  (current frame label is point_*)
+        #   neutral/invalid → light blue (default tracker colour)
+        _STATE_COLOR = {
+            "done":        sv.Color(r=0,   g=220, b=0),
+            "progress":    sv.Color(r=255, g=180, b=40),
+            "disarmed":    sv.Color(r=130, g=130, b=130),
+            "pointing":    sv.Color(r=0,   g=200, b=255),
+            "idle":        sv.Color(r=0,   g=140, b=255),
+        }
+        boxed = [p for p in result.persons if p.box_xyxy is not None]
+        if boxed:
+            xyxy = np.stack([p.box_xyxy for p in boxed]).astype(np.float32)
+            class_id = np.zeros(len(boxed), dtype=int)
+            labels: list[str] = []
+            colors: list[sv.Color] = []
+            for person in boxed:
+                seq = person.sequence_state or {}
+                lbl = person.direction_label
+                progress = seq.get("progress") or []
+                progress_str = (
+                    "/".join(p.replace("point_", "")[0].upper() for p in progress)
+                    if progress else "-"
+                )
+                if seq.get("sequence_done"):
+                    state = "done"
+                elif lbl == "zone_disarmed":
+                    state = "disarmed"
+                elif progress:
+                    state = "progress"
+                elif lbl.startswith("point_"):
+                    state = "pointing"
+                else:
+                    state = "idle"
+                colors.append(_STATE_COLOR[state])
+                short = lbl.replace("point_", "").replace("zone_disarmed", "off")
+                labels.append(f"#{person.track_id} {short} [{progress_str}]")
 
+            # supervision's BoxAnnotator / LabelAnnotator can take a single
+            # sv.Color or a ColorPalette indexed by class_id. To get one color
+            # per detection, draw each person individually — cheap (≤ a few
+            # boxes per frame) and avoids hand-rolling a per-instance palette.
+            for i, (person, lbl, clr) in enumerate(zip(boxed, labels, colors, strict=True)):
+                single = sv.Detections(
+                    xyxy=xyxy[i:i+1], class_id=class_id[i:i+1]
+                )
+                scene = annotate_detections(scene, single, labels=[lbl], color=clr)
+
+        # ---- Pose skeleton on top of boxes ----
+        body_style = VizStyle(kpt_visibility_threshold=0.3)
         for person in result.persons:
-            rgb = annotate_keypoints(
-                rgb,
+            scene = annotate_keypoints(
+                scene,
                 person.keypoints,
                 skeleton_edges=_SKELETON_17,
                 confidence=person.kp_scores,
                 style=body_style,
-                color=sv.Color(r=0, g=0, b=255),
+                color=sv.Color(r=0, g=0, b=255),  # supervision handles RGB→BGR
             )
 
-        # Top banner: current label + sequence progress.
         progress_str = (
             " -> ".join(p.replace("point_", "") for p in result.sequence_progress)
             if result.sequence_progress
@@ -405,18 +463,18 @@ class PointAndCallOrchestrator:
         )
         if result.alerts:
             banner_text += "  | ALERT: " + ",".join(result.alerts)
-        rgb = classification_banner(
-            rgb,
+        scene = classification_banner(
+            scene,
             banner_text,
             style=VizStyle(banner_height=24, banner_text_scale=0.5),
             position="overlay_top",
             bg_color_rgb=(30, 30, 30),
-            text_color_rgb=(255, 255, 255) if not result.alerts else (255, 80, 80),
+            # BGR red for alert text (helper writes the tuple raw onto BGR scene)
+            text_color_rgb=(255, 255, 255) if not result.alerts else (80, 80, 255),
         )
 
-        # Bottom: latency.
-        rgb = classification_banner(
-            rgb,
+        scene = classification_banner(
+            scene,
             f"{result.latency_ms:.1f}ms ({self._pose_backend_name})",
             style=VizStyle(banner_height=18, banner_text_scale=0.4),
             position="bottom",
@@ -424,7 +482,7 @@ class PointAndCallOrchestrator:
             text_color_rgb=(160, 160, 160),
         )
 
-        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        return scene
 
 
 # ---------------------------------------------------------------------------
@@ -544,24 +602,21 @@ def _video_test(video_path: Path, pose_backend_override: str | None) -> None:
     out_mp4 = eval_dir / f"smoke_{video_path.stem}.mp4"
     out_json = eval_dir / f"smoke_{video_path.stem}.json"
 
-    # OpenCV's libx264 is unavailable on this host; pipe BGR frames straight to
-    # the ffmpeg binary instead.
-    ff = subprocess.Popen(
-        [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "rawvideo", "-pix_fmt", "bgr24",
-            "-s", f"{width}x{height}", "-r", f"{fps}",
-            "-i", "-",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-            str(out_mp4),
-        ],
-        stdin=subprocess.PIPE,
-    )
+    # Process at ~5 fps (skip frames between), but emit at source fps so
+    # playback duration is preserved. Skipped frames re-use the cached
+    # OrchestratorResult so the supervision-backed HUD stays continuous.
+    target_proc_fps = 5.0
+    proc_stride = max(1, int(round(fps / target_proc_fps)))
+    print(f"Processing   : every {proc_stride} frame(s) "
+          f"(~{fps / proc_stride:.2f} fps in, {fps:.2f} fps out)")
 
     timeline: list[dict] = []
     label_hist: dict[str, int] = {}
     first_done_frame: int | None = None
+    last_result: OrchestratorResult | None = None
+
+    ff: subprocess.Popen | None = None
+    out_w = out_h = -1
 
     frame_idx = 0
     while True:
@@ -569,37 +624,64 @@ def _video_test(video_path: Path, pose_backend_override: str | None) -> None:
         if not ok:
             break
         timestamp = frame_idx / fps
-        out = orchestrator.process_frame(frame, timestamp=timestamp)
 
-        label = out.current_label or "no_person"
-        label_hist[label] = label_hist.get(label, 0) + 1
-        if first_done_frame is None and "point_and_call_done" in out.alerts:
-            first_done_frame = frame_idx
-
-        timeline.append(
-            {
-                "frame": frame_idx,
-                "t": round(timestamp, 3),
-                "label": label,
-                "progress": out.sequence_progress,
-                "alerts": out.alerts,
-                "latency_ms": round(out.latency_ms, 2),
-            }
-        )
-
-        ff.stdin.write(orchestrator.draw(frame, out).tobytes())
-
-        if frame_idx % 60 == 0:
-            print(
-                f"  f={frame_idx:4d}  t={timestamp:5.2f}s  label={label:<13}  "
-                f"progress={[p.replace('point_', '') for p in out.sequence_progress]}"
-                + (f"  ALERT={out.alerts}" if out.alerts else "")
+        if frame_idx % proc_stride == 0 or last_result is None:
+            out = orchestrator.process_frame(frame, timestamp=timestamp)
+            last_result = out
+            label = out.current_label or "no_person"
+            label_hist[label] = label_hist.get(label, 0) + 1
+            if first_done_frame is None and "point_and_call_done" in out.alerts:
+                first_done_frame = frame_idx
+            timeline.append(
+                {
+                    "frame": frame_idx,
+                    "t": round(timestamp, 3),
+                    "label": label,
+                    "progress": out.sequence_progress,
+                    "alerts": out.alerts,
+                    "latency_ms": round(out.latency_ms, 2),
+                }
             )
+            if frame_idx % (proc_stride * 10) == 0:
+                print(
+                    f"  f={frame_idx:4d}  t={timestamp:5.2f}s  label={label:<13}  "
+                    f"progress={[p.replace('point_', '') for p in out.sequence_progress]}"
+                    + (f"  ALERT={out.alerts}" if out.alerts else "")
+                )
+
+        drawn = orchestrator.draw(frame, last_result)
+
+        # Size the ffmpeg pipe from the first drawn frame -- draw() may add
+        # banners that change the frame height (e.g. position="bottom" vstacks
+        # an 18-row latency strip below the image). Using the capture's H here
+        # would shift each subsequent frame's bytes -> visible scrolling.
+        if ff is None:
+            out_h, out_w = drawn.shape[:2]
+            ff = subprocess.Popen(
+                [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-f", "rawvideo", "-pix_fmt", "bgr24",
+                    "-s", f"{out_w}x{out_h}", "-r", f"{fps}",
+                    "-i", "-",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                    str(out_mp4),
+                ],
+                stdin=subprocess.PIPE,
+            )
+
+        if drawn.shape[:2] != (out_h, out_w):
+            raise RuntimeError(
+                f"draw() returned unexpected shape {drawn.shape[:2]} "
+                f"vs expected {(out_h, out_w)} -- would scroll output."
+            )
+        ff.stdin.write(drawn.tobytes())
         frame_idx += 1
 
     cap.release()
-    ff.stdin.close()
-    ff.wait()
+    if ff is not None:
+        ff.stdin.close()
+        ff.wait()
     out_json.write_text(json.dumps(timeline, indent=2))
 
     print(f"\nFrames processed         : {frame_idx}")
@@ -631,7 +713,9 @@ def main() -> None:
     elif args.smoke_test:
         _smoke_test(pose_backend_override=args.pose_backend)
     else:
-        parser.print_help()
+        default_video = REPO / "app_demo/demo_videos/20260505/UC8_001.mp4"
+        print(f"No --video given; defaulting to {default_video}")
+        _video_test(default_video, pose_backend_override=args.pose_backend)
 
 
 if __name__ == "__main__":

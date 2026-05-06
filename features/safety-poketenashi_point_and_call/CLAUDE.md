@@ -128,9 +128,18 @@ auto-downloads to cwd) — always pass an explicit absolute path from `pretraine
 uv run features/safety-poketenashi_point_and_call/code/orchestrator.py --smoke-test
 # Writes eval/orchestrator_smoke_test.json + eval/smoke_*.jpg
 
-# Run on a video file (writes annotated mp4 + per-frame timeline JSON)
+# Run on a video file (writes annotated mp4 + per-frame timeline JSON).
+# - With no --video arg: defaults to app_demo/demo_videos/20260505/UC8_001.mp4.
+# - Inference runs at ~5 fps (every round(src_fps / 5) frames); the output
+#   mp4 keeps the source fps -- skipped frames re-use the cached result so
+#   the bbox/label/skeleton HUD stays continuous on every frame.
+# - HUD per person: state-coloured bbox via sv.BoxAnnotator + label
+#   "#<track_id> <action> [progress]" via sv.LabelAnnotator on top of the
+#   box; COCO-17 skeleton (sv.EdgeAnnotator + sv.VertexAnnotator) on top.
+#   Box colour: green=sequence_done, amber=accumulating progress,
+#   cyan=pointing this frame, orange=idle/neutral, grey=zone-disarmed.
 uv run features/safety-poketenashi_point_and_call/code/orchestrator.py \
-  --video features/safety-poketenashi_point_and_call/samples/05_SHI_point_and_call.mp4
+  --video app_demo/demo_videos/20260505/UC8_001.mp4
 # Writes eval/smoke_<basename>.mp4 + eval/smoke_<basename>.json
 
 # Override pose backend (verifies the swap)

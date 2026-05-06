@@ -159,11 +159,17 @@ def annotate_keypoints(
 ) -> np.ndarray:
     """Draw keypoint vertices + skeleton edges using supervision annotators.
 
-    Low-confidence points (below ``style.kpt_visibility_threshold``) are
-    truly hidden by moving them off-canvas before construction of
-    :class:`sv.KeyPoints` — supervision's annotators draw at the given
-    xy regardless of the per-point confidence value, so simply zeroing
-    coords would cluster every hidden kpt at the top-left corner.
+    Two supervision quirks handled here:
+      1. ``sv.EdgeAnnotator`` indexes its ``edges`` arg as 1-based
+         (``xy[class - 1]``); the project's skeleton constants
+         (``COCO_SKELETON_EDGES`` etc.) are the canonical 0-based COCO
+         indices. We add 1 to every endpoint before handing them off.
+      2. ``sv.EdgeAnnotator`` skips an edge only when an endpoint is
+         ``np.allclose(xy, 0)``; ``sv.VertexAnnotator`` draws every point
+         unconditionally. So we (a) zero-out hidden xy on the array fed
+         to ``EdgeAnnotator`` (skips those edges) and (b) build a
+         separate ``sv.KeyPoints`` containing only the visible points
+         for ``VertexAnnotator`` (skips drawing circles at (0,0)).
     """
     style = _default_style(style)
     h, w = image.shape[:2]
@@ -175,16 +181,18 @@ def annotate_keypoints(
         return image.copy()
 
     conf = None
+    visible_mask: np.ndarray | None = None
     if confidence is not None:
         conf = np.asarray(confidence, dtype=np.float32)
         if conf.ndim == 1:
             conf = conf[None, ...]
-        # Move hidden points far off-canvas so cv2.circle / line clip them out.
-        mask = conf < style.kpt_visibility_threshold
-        xy = xy.copy()
-        xy[mask] = -1.0e6
+        visible_mask = conf >= style.kpt_visibility_threshold
 
-    keypoints = sv.KeyPoints(xy=xy, confidence=conf)
+    # Build edge-input array: hidden points → (0, 0) so EdgeAnnotator skips.
+    edge_xy = xy.copy()
+    if visible_mask is not None:
+        edge_xy[~visible_mask] = 0.0
+    edge_keypoints = sv.KeyPoints(xy=edge_xy, confidence=conf)
 
     draw_color = color if color is not None else sv.Color(
         r=style.skeleton_color_rgb[0],
@@ -192,20 +200,30 @@ def annotate_keypoints(
         b=style.skeleton_color_rgb[2],
     )
 
+    scene = image.copy()
+    if skeleton_edges:
+        # Convert 0-based COCO edges to supervision's 1-based convention.
+        edges_1based = [(a + 1, b + 1) for a, b in skeleton_edges]
+        edge_ann = sv.EdgeAnnotator(
+            color=draw_color,
+            thickness=style.auto_skeleton_thickness(h, w),
+            edges=edges_1based,
+        )
+        scene = edge_ann.annotate(scene=scene, key_points=edge_keypoints)
+
+    # Vertices: VertexAnnotator draws every point unconditionally. Move
+    # hidden points off-canvas so cv2.circle clips them out.
+    if visible_mask is not None:
+        vertex_xy = xy.copy()
+        vertex_xy[~visible_mask] = -1.0e6
+    else:
+        vertex_xy = xy
+    vertex_keypoints = sv.KeyPoints(xy=vertex_xy, confidence=conf)
     vertex_ann = sv.VertexAnnotator(
         color=draw_color,
         radius=style.auto_keypoint_radius(h, w),
     )
-    edge_ann = sv.EdgeAnnotator(
-        color=draw_color,
-        thickness=style.auto_skeleton_thickness(h, w),
-        edges=skeleton_edges,
-    )
-
-    scene = image.copy()
-    if skeleton_edges:
-        scene = edge_ann.annotate(scene=scene, key_points=keypoints)
-    scene = vertex_ann.annotate(scene=scene, key_points=keypoints)
+    scene = vertex_ann.annotate(scene=scene, key_points=vertex_keypoints)
     return scene
 
 
