@@ -94,14 +94,16 @@ Most images contain both classes. Per-class fire/smoke ratio is balanced within 
 
 These all predate the per-source-temporal split. Phase D will produce the new authoritative numbers.
 
-## v2 Results — current authoritative (2026-05-05, per-source-temporal dataset)
+## v2 Results — current authoritative (2026-05-10, per-source-temporal dataset)
 
 | Run | Recipe | best val mAP@50 | test mAP@50 | fire test AP | smoke test AP | small mAP |
 |---|---|---:|---:|---:|---:|---:|
 | RT-DETR R18 v2 | 960² + new loss recipe | 0.565 (ep14) | **0.555** | 0.249 | 0.308 | 0.112 |
 | RT-DETR R50 v2 | same + R50 backbone (1:5 LR split) | 0.622 (ep3, ES@ep18) | **0.607** | 0.252 | 0.333 | 0.148 |
+| D-FINE-N v2 | 640² + reference baseline (EMA on) | 0.414 (ep28) | **0.412** | 0.158 | 0.242 | 0.060 |
+| D-FINE-S v2 | 640² + reference baseline (EMA off) | 0.403 (ep15, ES@ep23) | **0.402** | 0.162 | 0.249 | 0.084 |
 
-R50 v2 is the current best. R50 won across all metrics including small-tier (mAP +0.036, recall +0.063).
+R50 v2 is the current best across all metrics. D-FINE variants underperform RT-DETRv2 by ~0.15–0.20 mAP@50 on this dataset; D-FINE-N (4M params, EMA) edges D-FINE-S (16M params, no EMA) by +0.01 mAP@50 but D-FINE-S has better small-object recall (+0.024 small mAP).
 
 ### v2 loss-recipe deltas vs HF defaults (committed in `06_training_rtdetr_{r18,r50}.yaml`)
 
@@ -141,7 +143,6 @@ Run dirs land in `features/safety-fire_detection/runs/<arch>_<ts>/`.
 | Config | Arch | Params | Backend | epochs | lr | lr (backbone) | scheduler | EMA | input | metric |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `06_training_dfine_n.yaml` | dfine-n | 4M | hf | 30 | 5e-5 | — | linear | true | 640 | eval_map |
-| `06_training_dfine_s.yaml` | dfine-s | 16M | hf | 30 | 5e-5 | — | linear | false | 640 | eval_map |
 | `06_training_dfine_m.yaml` | dfine-m | 31M | hf | 30 | 5e-5 | — | linear | true | 640 | eval_map |
 | `06_training_rtdetr_r18.yaml` | rtdetr-r18 | 20M | hf | 30 | 5e-5 | — | cosine_with_min_lr | true | 960 | eval_map_50 |
 | `06_training_rtdetr_r50.yaml` | rtdetr-r50 | 42M | hf | 30 | 5e-5 | 1e-5 | cosine_with_min_lr | true | 1024 | eval_map_50 |
