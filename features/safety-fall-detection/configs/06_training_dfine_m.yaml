@@ -1,21 +1,21 @@
-# Training config — Phone Usage Detection (D-FINE-M, HF Trainer backend)
+# Training config — Fall Detection (D-FINE-M, HF Trainer backend)
 # License: Apache 2.0 (USTC / DEIM)
 #
 # Recipe: official Peterande/D-FINE per-arch dfine_hgnetv2_m_coco.yml — layered
 # AdamW with 1:2 LR ratio, constant_with_warmup, EMA 0.9999. obj2coco pretrain.
-# This is the Phase-B production candidate per features/CLAUDE.md.
 #
-# Phone-usage notes:
-# - Single-class (phone_usage only). Person detection handled by separate model.
+# Fall-detection notes:
+# - 2 classes: person (62.4%), fallen_person (37.6%).
+# - flipud MUST stay 0.0 — vertical flip destroys upright-vs-fallen signal.
+# - bf16=false is MANDATORY for D-FINE — DFL stalls under bf16.
 
 model:
   arch: dfine-m
   pretrained: ustc-community/dfine-medium-obj2coco
-  num_classes: 1
-  # 960×960 — mirrors fire D-FINE-M recipe. Small recall lever.
+  num_classes: 2
   input_size: [960, 960]
-  num_queries: 20                # 300 → 20 — fewer query slots reduces background-FP flooding
-  num_denoising: 100             # HF default
+  num_queries: 20
+  num_denoising: 100
   box_noise_scale: 1.0
   label_noise_ratio: 0.5
   eos_coefficient: 0.0001
@@ -25,14 +25,13 @@ model:
 tensor_prep:
   input_size: [960, 960]
   rescale: true
-  normalize: false               # see dfine_s comment — A/B normalize=true on smoke run
+  normalize: false
   mean: [0.485, 0.456, 0.406]
   std:  [0.229, 0.224, 0.225]
   applied_by: hf_processor
 
 data:
   dataset_config: 05_data.yaml
-  # bs 8 → 4 — D-FINE-M at 960² fp32 estimate ~28 GB. Override to 8 if GPU has >25 GB free.
   batch_size: 4
   eval_batch_size: 2
   num_workers: 4
@@ -51,7 +50,7 @@ augmentation:
 
   perspective_p: 0.1
   fliplr: 0.5
-  flipud: 0.0
+  flipud: 0.0                   # MANDATORY — vertical flip destroys upright-vs-fallen signal
   brightness_contrast_p: 0.5
   brightness: 0.2
   contrast: 0.2
@@ -61,17 +60,15 @@ augmentation:
   hsv_v: 0.4
   min_bbox_area: 4.0
 
-  scale: [0.7, 1.3]              # wider jitter — helps small-object recall
+  scale: [0.7, 1.3]
   degrees: 15.0
   translate: 0.15
   shear: 2.0
 
 training:
   backend: hf
-  epochs: 60                     # mirrors fire D-FINE-M
+  epochs: 60
   optimizer: adamw
-  # Per-arch dfine_hgnetv2_m_coco.yml: 1:2 LR ratio, paper bs=128.
-  # Linear-scaled to bs=4: 2e-4 head, 1e-4 backbone.
   lr: 0.0002
   lr_backbone: 0.0001
   weight_decay: 0.0001
@@ -84,7 +81,7 @@ training:
   ema: true
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 20                   # mirrors fire D-FINE-M
+  patience: 20
 
   val_viz:
     enabled: true

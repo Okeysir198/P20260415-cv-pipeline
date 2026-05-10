@@ -1,0 +1,133 @@
+# Training config — Fall Detection (RT-DETRv2-R18, HF Trainer backend)
+#
+# Recipe: paper-aligned (RT-DETRv2 arXiv 2407.17140 Table 1) PLUS the
+# v3 loss-recipe overhaul lifted from fire_detection (eos_coefficient=0.1,
+# focal_alpha=0.5, focal_gamma=1.5).
+#
+# Fall-detection notes:
+# - 2 classes: person (62.4%), fallen_person (37.6%).
+# - flipud MUST stay 0.0 — vertical flip destroys upright-vs-fallen signal.
+# - Fallen person bbox is often horizontal/wide-aspect.
+
+model:
+  arch: rtdetr-r18
+  pretrained: PekingU/rtdetr_v2_r18vd
+  num_classes: 2
+  input_size: [960, 960]
+  # 30 queries — fall scenes typically have 1-3 persons/image. 30 = comfortable headroom.
+  num_queries: 30
+  num_denoising: 100
+  # Loss-recipe overhaul (mirrors fire R18 v3):
+  box_noise_scale: 1.0
+  label_noise_ratio: 0.3
+  eos_coefficient: 0.1
+  focal_loss_alpha: 0.5
+  focal_loss_gamma: 1.5
+
+tensor_prep:
+  input_size: [960, 960]
+  rescale: true
+  normalize: false
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 8
+  eval_batch_size: 2
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false
+  mosaic: true
+  mixup: false
+
+  perspective_p: 0.1
+  fliplr: 0.5
+  flipud: 0.0                   # MANDATORY — vertical flip destroys upright-vs-fallen signal
+  brightness_contrast_p: 0.5
+  brightness: 0.2
+  contrast: 0.2
+  hsv_p: 0.3
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  min_bbox_area: 4.0
+
+  scale: [0.7, 1.3]
+  degrees: 15.0
+  translate: 0.15
+  shear: 2.0
+
+training:
+  backend: hf
+  epochs: 30
+  optimizer: adamw
+  lr: 0.00005
+  weight_decay: 0.0001
+  warmup_steps: 2000
+  scheduler: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr: 0.000005
+  max_grad_norm: 0.1
+  bf16: true
+  amp: false
+  gpu_augment: false
+  ema: false
+  ema_decay: 0.9999
+  ema_warmup_steps: 2000
+  patience: 15
+
+  val_viz:
+    enabled: true
+    num_samples: 40
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.01
+  train_viz:
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  report_to: none
+  save_dir: ../runs/rtdetr_r18
+  wandb_project: smart-camera
+
+checkpoint:
+  save_best: true
+  metric: eval_map_50
+  mode: max
+  save_interval: 1
+
+evaluation:
+  score_threshold: 0.0
+
+seed: 42

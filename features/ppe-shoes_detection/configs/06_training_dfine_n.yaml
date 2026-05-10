@@ -1,25 +1,25 @@
-# Training config — Phone Usage Detection (D-FINE-N, HF Trainer backend)
+# Training config — Shoes Detection (D-FINE-N, HF Trainer backend)
 # License: Apache 2.0 (USTC / DEIM)
 #
 # Recipe: official Peterande/D-FINE per-arch dfine_hgnetv2_n_coco.yml — layered
-# AdamW with 1:2 LR ratio (NOT 1:20), constant_with_warmup, clip 0.1, EMA 0.9999.
+# AdamW with 1:2 LR ratio, constant_with_warmup, clip 0.1, EMA 0.9999.
 # This is the smallest D-FINE variant (~3.8 M params). Smoke-config for the
-# 22,975-image phone_usage dataset; dfine_s/m are the production candidates.
+# 37k-image shoes dataset; dfine_s/m are the production candidates.
 #
-# Phone-usage notes:
-# - Single-class (phone_usage only). Person detection handled by separate model.
-# - Phone bbox is tiny (phone area only). Keep input_size 640, scale jitter
-#   tight to avoid pushing phones below the detection grid.
+# Shoes notes:
+# - 3 classes (person 2.4%, foot_with_safety_shoes 68%, foot_without_safety_shoes 29%).
+# - Foot bboxes skew small — D-FINE-N outputs stride-16/32 only (NOT stride-8).
+# - 37k imgs — largest Phase-B dataset.
+#
+# Run:
+#   CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+#     --config features/ppe-shoes_detection/configs/06_training_dfine_n.yaml
 
 model:
   arch: dfine-n
-  # NOTE: D-FINE nano has only COCO pretrain on HF — no obj2coco variant
-  # exists for nano (3.8M). Only S/M/L/XL have obj2coco.
+  # NOTE: D-FINE nano has only COCO pretrain on HF — no obj2coco variant exists for nano
   pretrained: ustc-community/dfine_n_coco
-  num_classes: 1
-  # 640×640 — D-FINE-N's HGNetv2-B0 backbone outputs only stride-16/32 feature
-  # maps (NOT stride-8 like S/M/L). Phone bboxes are tiny but boosting input
-  # past 640 gives no small-object benefit on stride-16 features for nano.
+  num_classes: 3
   input_size: [640, 640]
   num_queries: 300               # paper exact (custom-fine-tune yml)
   num_denoising: 100             # HF default
@@ -29,10 +29,6 @@ model:
   focal_loss_alpha: 0.75         # paper default
   focal_loss_gamma: 2.0          # paper default
 
-# DFineImageProcessor rescales /255; ImageNet normalize OFF by default.
-# Phone-usage data is general indoor/outdoor (closer to ImageNet than fire),
-# so flipping `normalize: true` is a reasonable A/B if BatchNorm-recenter
-# stalls — verify on a 10% smoke run before committing.
 tensor_prep:
   input_size: [640, 640]
   rescale: true
@@ -43,7 +39,6 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  # bs 8 → 4 — D-FINE runs fp32; batch halved for safety
   batch_size: 4
   eval_batch_size: 2
   num_workers: 4
@@ -57,10 +52,7 @@ data:
 augmentation:
   library: torchvision
   normalize: false
-  # Mosaic OFF for DETR-family — empirically confirmed bad on fire RT-DETR R18
-  # v3 (mosaic ran 27+ epochs, scored 0.04-0.06 mAP below the no-mosaic
-  # baseline). Bipartite matching disturbed by 4× box density.
-  mosaic: false
+  mosaic: false                  # DETR-family bad with mosaic
   mixup: false
 
   perspective_p: 0.1
@@ -75,7 +67,7 @@ augmentation:
   hsv_v: 0.4
   min_bbox_area: 4.0
 
-  # Tight scale — phone bbox is already small.
+  # Tight scale — foot bbox is already small.
   scale: [0.9, 1.1]
   degrees: 5.0
   translate: 0.1
@@ -83,20 +75,19 @@ augmentation:
 
 training:
   backend: hf
-  epochs: 120                    # paper-fine-tune-N is 220 ep × bs=128. Linear-scale to bs=8 → ~120 ep gradient budget.
+  epochs: 120                    # paper-fine-tune-N is 220 ep * bs=128. Linear-scale to bs=4 -> ~120 ep
   optimizer: adamw
   # D-FINE-N specifically uses 1:2 LR ratio (NOT 1:20 like S/M/L/X).
-  # Source: configs/dfine/dfine_hgnetv2_n_coco.yml + custom_n.yml.
-  # Paper bs=128 → lr=8e-4 head, 4e-4 backbone. Linear-scaled to our bs=4:
-  # 8e-4 × 4/128 = 2.5e-5 → 2e-4 head, 1e-4 backbone.
+  # Paper bs=128 -> lr=8e-4 head, 4e-4 backbone. Linear-scaled to our bs=4:
+  # 8e-4 * 4/128 = 2.5e-5 -> 2e-4 head, 1e-4 backbone.
   lr: 0.0002
   lr_backbone: 0.0001
   weight_decay: 0.000125
   warmup_steps: 500
   scheduler: constant_with_warmup
   max_grad_norm: 0.1
-  bf16: false                    # MANDATORY for D-FINE — DFL stalls under bf16
-  amp: false                     # fp16 AMP overflows DETR decoder
+  bf16: false                    # MANDATORY for D-FINE
+  amp: false
   gpu_augment: false             # HF Trainer uses its own DataLoader
   ema: true                      # paper default
   ema_decay: 0.9999
@@ -134,7 +125,7 @@ loss:
   type: detr
 
 logging:
-  report_to: none                # avoid wandb/tensorboard hard-fails on missing creds
+  report_to: none
   save_dir: ../runs/dfine_n
   wandb_project: smart-camera
 
@@ -142,9 +133,9 @@ checkpoint:
   save_best: true
   metric: eval_map_50
   mode: max
-  save_interval: 1               # mandatory for D-FINE — DFL best ckpt arrives suddenly
+  save_interval: 1               # mandatory for D-FINE
 
 evaluation:
-  score_threshold: 0.0           # canonical mAP
+  score_threshold: 0.0
 
 seed: 42

@@ -1,44 +1,44 @@
-# Training config — Phone Usage Detection (RT-DETRv2-R18, HF Trainer backend)
+# Training config — Shoes Detection (RT-DETRv2-R18, HF Trainer backend)
 #
 # Recipe: paper-aligned (RT-DETRv2 arXiv 2407.17140 Table 1) PLUS the
 # v3 loss-recipe overhaul lifted from fire_detection (eos_coefficient=0.1,
-# focal_alpha=0.5, focal_gamma=1.5). HF defaults caused fire RT-DETR to peak
-# at ep3 then collapse to ~0.19 by ep14 — same shape expected here unless
-# this recipe is in place from epoch 1.
+# focal_alpha=0.5, focal_gamma=1.5).
 #
-# Phone-usage notes:
-# - Single-class (phone_usage only). Person detection handled by separate model.
-# - Phone bbox is tiny — 960² stride-8 features give 120×120 cells;
-#   a 32-px phone spans ~6 cells (comfortably above 2-cell floor).
-#   Capped at 960 because upscaling beyond just interpolates fake detail.
+# Shoes notes:
+# - 3 classes (person 2.4%, foot_with_safety_shoes 68%, foot_without_safety_shoes 29%).
+# - Foot bboxes skew small — 960 stride-8 features give 120x120 cells.
+# - 37k imgs — largest Phase-B dataset.
+#
+# Run:
+#   CUDA_VISIBLE_DEVICES=0 uv run core/p06_training/train.py \
+#     --config features/ppe-shoes_detection/configs/06_training_rtdetr_r18.yaml
 
 model:
   arch: rtdetr-r18
   pretrained: PekingU/rtdetr_v2_r18vd
-  num_classes: 1
+  num_classes: 3
   input_size: [960, 960]
-  # Phone-usage is sparse (~1 phone per image, p99 likely <5). 30 queries =
-  # comfortable headroom. Mirrors fire R18 v3 (100 queries caused background-FP flooding).
+  # Shoes scenes have ~2-3 GTs/image (p99 likely <10). 30 queries =
+  # comfortable headroom. Mirrors fire R18 v3 recipe.
   num_queries: 30
   num_denoising: 100
-  # Loss-recipe overhaul (mirrors fire R18 v3, 2026-05-05):
-  box_noise_scale: 1.0           # 1.5 → 1.0
-  label_noise_ratio: 0.3         # 0.5 → 0.3
-  eos_coefficient: 0.1           # 0.0001 → 0.1 — penalize orphan-query background FPs
-  focal_loss_alpha: 0.5          # 0.75 → 0.5 — balanced; removes positive-class bias driving collapse
-  focal_loss_gamma: 1.5          # 2.0 → 1.5 — smoother gradients
+  # Loss-recipe overhaul (mirrors fire R18 v3):
+  box_noise_scale: 1.0           # 1.5 -> 1.0
+  label_noise_ratio: 0.3         # 0.5 -> 0.3
+  eos_coefficient: 0.1           # 0.0001 -> 0.1 — penalize orphan-query background FPs
+  focal_loss_alpha: 0.5          # 0.75 -> 0.5 — balanced; removes positive-class bias
+  focal_loss_gamma: 1.5          # 2.0 -> 1.5 — smoother gradients
 
 tensor_prep:
   input_size: [960, 960]
   rescale: true
-  normalize: false               # A/B with normalize=true on smoke run; phone-usage data is closer to ImageNet than fire
+  normalize: false               # A/B with normalize=true; shoes data is general
   mean: [0.485, 0.456, 0.406]
   std:  [0.229, 0.224, 0.225]
   applied_by: hf_processor
 
 data:
   dataset_config: 05_data.yaml
-  # 16 → 8 to fit 960² in 24 GB (self-attention is O(N²), N=14400 at 960 vs 6400 at 640)
   batch_size: 8
   eval_batch_size: 2
   num_workers: 4
@@ -76,18 +76,16 @@ training:
   backend: hf
   epochs: 30                     # R18/R50 peak before ep15 on fire; same expected here
   optimizer: adamw
-  # 5e-5 (paper Table 1 value × 0.5). Halved from paper 1e-4 because fire R18
+  # 5e-5 (paper Table 1 value * 0.5). Halved from paper 1e-4 because fire R18
   # at 1e-4 peaked at ep3 then collapsed. 5e-5 settles instead of bouncing.
   lr: 0.00005
   weight_decay: 0.0001
   warmup_steps: 2000             # paper LinearWarmup
-  # Cosine 5e-5 → 5e-6 over the run — fine-tune cooldown helps the model
-  # settle near the end instead of overshooting.
   scheduler: cosine_with_min_lr
   lr_scheduler_kwargs:
     min_lr: 0.000005
   max_grad_norm: 0.1
-  bf16: true                     # RT-DETRv2 is bf16-safe (verified ±0.01 on CPPE-5)
+  bf16: true                     # RT-DETRv2 is bf16-safe (verified +/-0.01 on CPPE-5)
   amp: false                     # fp16 AMP overflows DETR decoder
   gpu_augment: false
   ema: false                     # paper default

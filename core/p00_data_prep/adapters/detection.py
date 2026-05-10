@@ -118,6 +118,10 @@ class DetectionAdapter(TaskAdapter):
         all_samples = []
 
         for source_config in self.config.get("sources", []):
+            resolved = source_config.get("resolved_path", source_config.get("path", ""))
+            if not Path(resolved).exists() and source_config.get("optional"):
+                print(f"   ⏭️  Skipping optional source '{source_config.get('name')}' (not found)")
+                continue
             samples = self.parse_source(source_config, base_dir)
 
             filters = source_config.get("filters", [])

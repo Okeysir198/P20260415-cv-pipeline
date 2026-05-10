@@ -1,52 +1,36 @@
 # Training config — Fire Detection (D-FINE-N, HF Trainer backend)
-# License: Apache 2.0 (USTC / DEIM)
-#
-# Recipe: official Peterande/D-FINE optimizer.yml — layered AdamW (head 2.5e-4,
-# backbone 1.25e-5 = 1:20), constant_with_warmup, clip 0.1, EMA 0.9999.
+# Based on reference baseline from notebooks/detr_finetune_reference/our_dfine_torchvision/
+# Reference best on CPPE-5: dfine-n norm=false ema=true → test mAP50=0.710
+# Adapted for fire: 2 classes, obj2coco pretrained, 640 input
 
 model:
   arch: dfine-n
-  # NOTE: D-FINE nano has only COCO pretrain on HF — no obj365/obj2coco
-  # variant exists for nano (3.8M). Only S/M/L/XL have obj2coco.
   pretrained: ustc-community/dfine_n_coco
   num_classes: 2
-  # 640×640 (paper) — D-FINE-N's HGNetv2-B0 backbone outputs only stride-16 + 32
-  # feature maps (NOT stride-8 like S/M/L). 960² gives no small-object benefit
-  # for nano + 2.25× extra compute. Reverted to paper eval_spatial_size.
   input_size: [640, 640]
-  # Loss recipe REVERTED to HF defaults (2026-05-05) — the v2 RT-DETR overhaul
-  # (eos=0.1, focal_α=0.5, focal_γ=1.5) destabilized D-FINE-S (val mAP collapsed
-  # from 0.16 ep1 to 0.06 by ep10). D-FINE's distribution-focal-loss head
-  # interacts differently with these knobs than RT-DETR's vanilla regression
-  # head. Reverting to paper-aligned defaults — these were specifically
-  # validated for D-FINE in Peterande/D-FINE/configs/dfine/include/optimizer.yml.
-  num_queries: 300               # 20 → 300 — paper exact (custom-fine-tune yml). DFL training depends on full query density; reducing starves the matcher. Background-FP suppression now relies on eos_coefficient + paper-aligned focal_alpha=0.75.
-  num_denoising: 100             # HF default
-  box_noise_scale: 1.0           # paper default
-  label_noise_ratio: 0.5         # paper default (was 0.3 v2)
-  eos_coefficient: 0.0001        # paper default (was 0.1 v2)
-  focal_loss_alpha: 0.75         # paper default (was 0.5 v2)
-  focal_loss_gamma: 2.0          # paper default (was 1.5 v2)
+  num_queries: 300
+  num_denoising: 100
+  box_noise_scale: 1.0
+  label_noise_ratio: 0.5
+  eos_coefficient: 0.0001
+  focal_loss_alpha: 0.75
+  focal_loss_gamma: 2.0
 
-# DFineImageProcessor rescales /255 (rescale=true) but does NOT apply ImageNet
-# mean/std — fire dataset stats are off-distribution from ImageNet.
 tensor_prep:
   input_size: [640, 640]
   rescale: true
   normalize: false
-  mean: [0.485, 0.456, 0.406]  # ignored when normalize=false
+  mean: [0.485, 0.456, 0.406]
   std:  [0.229, 0.224, 0.225]
   applied_by: hf_processor
 
 data:
   dataset_config: 05_data.yaml
-  # bs 8 → 4 — D-FINE-S runs fp32 (no bf16); 960² + bs=8 fp32 estimate ~28 GB
-  # which is too tight on 32 GB GPU. Override to 8 if GPU has >25 GB free.
-  batch_size: 4
-  eval_batch_size: 2
-  num_workers: 4
-  prefetch_factor: 2             # 4 → 2 — bound RAM pressure (lessons from RT-DETR runs)
-  pin_memory: false              # was true — pinned memory adds RAM pressure
+  batch_size: 8
+  eval_batch_size: 8
+  num_workers: 2
+  prefetch_factor: 2
+  pin_memory: true
   subset:
     train: null
     val: null
@@ -54,56 +38,39 @@ data:
 
 augmentation:
   library: torchvision
-  normalize: false              # HF processor handles it; feed [0,1]
-  # Mosaic STAYS OFF — empirically confirmed bad on DETR-family in R18 v3 run
-  # (2026-05-05): mosaic ran for 27+ epochs and consistently scored 0.04-0.06
-  # mAP below v2 (no mosaic). Bipartite matching disturbed by 4× box density.
+  normalize: false
   mosaic: false
   mixup: false
-
   perspective_p: 0.1
   fliplr: 0.5
-  flipud: 0.0
-  brightness_contrast_p: 0.3    # paper-light
-  brightness: 0.1
-  contrast: 0.1
+  brightness_contrast_p: 0.5
   hsv_p: 0.1
-  hsv_h: 0.015
-  hsv_s: 0.3
-  hsv_v: 0.3
-  min_bbox_area: 4.0
-
-  scale: [0.9, 1.1]             # paper-light at 640×640 since boxes are smaller
-  degrees: 10.0
-  translate: 0.1
-  shear: 2.0
+  scale: [1.0, 1.0]
+  degrees: 0.0
+  translate: 0.0
+  shear: 0.0
 
 training:
   backend: hf
-  epochs: 120                    # paper-fine-tune-N is 220 ep × bs=128. We use bs=32, so cut to 120 to keep similar gradient budget per param.
+  epochs: 30
   optimizer: adamw
-  # D-FINE-N specifically uses 1:2 LR ratio (NOT 1:20 like S/M/L/X).
-  # Source: configs/dfine/dfine_hgnetv2_n_coco.yml + custom_n.yml — both
-  # set default lr=8e-4 with backbone lr=4e-4. Linear-scaled to our bs=32:
-  # 8e-4 × 32/128 = 2e-4 head, 1e-4 backbone.
-  lr: 0.0002                     # 8e-4 × 32/128 (linear scale from paper bs=128)
-  lr_backbone: 0.0001            # 1:2 ratio per paper for D-FINE-N (NOT 1:20)
-  weight_decay: 0.000125
-  warmup_steps: 500
-  scheduler: constant_with_warmup
+  lr: 0.00005
+  weight_decay: 0.0
+  warmup_steps: 300
+  scheduler: linear
   max_grad_norm: 0.1
-  bf16: false                    # MANDATORY for D-FINE — DFL stalls under bf16
-  amp: false                     # fp16 AMP overflows DETR decoder
-  gpu_augment: false             # HF Trainer uses its own DataLoader
-  ema: true                      # paper default
+  bf16: false
+  amp: false
+  gpu_augment: false
+  ema: true
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 30                   # D-FINE-N DFL breakthrough may be late + sudden; bump from 20 to 30
+  patience: 8
 
   val_viz:
     enabled: true
     num_samples: 10
-    conf_threshold: 0.01         # DETR sigmoid scores cap ~0.2
+    conf_threshold: 0.01
     grid_cols: 2
     balanced: true
   best_viz:
@@ -111,11 +78,7 @@ training:
     num_samples: 16
     conf_threshold: 0.01
   train_viz:
-    enabled: true
-    num_samples: 10
-    conf_threshold: 0.01
-    grid_cols: 2
-    balanced: true
+    enabled: false
   data_viz:
     enabled: true
     splits: [train, val, test]
@@ -131,17 +94,17 @@ loss:
   type: detr
 
 logging:
-  report_to: none                # avoid wandb/tensorboard hard-fails on missing creds
-  save_dir: ../runs/dfine_n
+  report_to: none
+  save_dir: ../runs/dfine_n_ref
   wandb_project: smart-camera
 
 checkpoint:
   save_best: true
-  metric: eval_map_50
+  metric: eval_map
   mode: max
-  save_interval: 1               # mandatory for D-FINE — DFL best ckpt arrives suddenly
+  save_interval: 1
 
 evaluation:
-  score_threshold: 0.0           # canonical mAP
+  score_threshold: 0.0
 
 seed: 42

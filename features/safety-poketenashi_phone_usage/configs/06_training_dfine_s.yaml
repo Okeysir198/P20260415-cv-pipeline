@@ -8,9 +8,7 @@
 # 365 classes including phone-adjacent categories).
 #
 # Phone-usage notes:
-# - 2 classes, 94.6/5.4 imbalance → highest class-collapse risk (per CLAUDE.md).
-#   Watch `eval_map_per_class_person` during training. If `person` AP=0 while
-#   `phone_usage` AP > 0, mark FAIL regardless of overall mAP.
+# - Single-class (phone_usage only). Person detection handled by separate model.
 # - Phone bbox is tiny — D-FINE-S's stride-8 features at 640² give 80×80 cells,
 #   so a 32-px phone spans ~4 cells (above the 2-cell detection floor). No
 #   need for 960² upscaling like the fire dfine_s; phone scenes are not as
@@ -19,7 +17,7 @@
 model:
   arch: dfine-s
   pretrained: ustc-community/dfine-small-obj2coco  # canonical hyphenated; underscored alias does not exist for obj2coco
-  num_classes: 2
+  num_classes: 1
   input_size: [640, 640]
   num_queries: 300               # paper exact
   num_denoising: 100             # HF default
@@ -42,8 +40,9 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 8                  # D-FINE runs fp32; bs=8 at 640² fits comfortably on 24 GB
-  eval_batch_size: 4
+  # bs 8 → 4 — D-FINE runs fp32; 960² + bs=8 fp32 estimate ~28 GB
+  batch_size: 4
+  eval_batch_size: 2
   num_workers: 4
   prefetch_factor: 2
   pin_memory: false
@@ -70,9 +69,9 @@ augmentation:
   hsv_v: 0.4
   min_bbox_area: 4.0
 
-  scale: [0.9, 1.1]              # tight — phone bbox already small
-  degrees: 5.0
-  translate: 0.1
+  scale: [0.7, 1.3]              # wider jitter — helps small-object recall
+  degrees: 15.0
+  translate: 0.15
   shear: 2.0
 
 training:
@@ -80,10 +79,10 @@ training:
   epochs: 120                    # match dfine_n; D-FINE needs time for DFL breakthrough at full data
   optimizer: adamw
   # CORRECTED 2026-05-06 — per-arch dfine_hgnetv2_s_coco.yml uses 1:2 LR ratio.
-  # Linear-scaled to our bs=8 from paper bs=128:
-  # 8e-4 × 8/128 = 5e-5 head, 2.5e-5 backbone.
-  lr: 0.00005
-  lr_backbone: 0.000025
+  # Linear-scaled to our bs=4 from paper bs=128:
+  # 8e-4 × 4/128 = 2.5e-5 → 2e-4 head, 1e-4 backbone.
+  lr: 0.0002
+  lr_backbone: 0.0001
   weight_decay: 0.0001
   warmup_steps: 500
   scheduler: constant_with_warmup

@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     # --- Core utilities ---
     "pyyaml>=6.0.3",
+    "loguru>=0.7",
     "numpy>=2.4",
     "tqdm>=4.67",
     "Pillow>=12.1",
@@ -14,9 +15,10 @@ dependencies = [
     # --- Deep learning stack ---
     "torch>=2.10.0",
     "torchvision>=0.25.0",
-    "transformers @ git+https://github.com/huggingface/transformers.git@8213e0d920d52cb00dcade16b6d1f6e952ac0a8c",
+    "transformers==4.52.4",
     "accelerate>=1.13",
-    "huggingface-hub>=1.8",
+    "huggingface-hub>=0.30",
+    "datasets>=2.14",
     "timm>=1.0.26",
     # --- CV utilities ---
     "opencv-python>=4.13",
@@ -50,7 +52,7 @@ dependencies = [
     # matches qubvel's reference notebook pipeline; ~2x faster than torchvision v2
     # per-sample CPU aug for detection. Selected via `augmentation.library: albumentations`
     # in a training config.) ---
-    "albumentations>=1.4.6",
+    "albumentations==1.4.6",
     # --- Logging ---
     "wandb>=0.25",
     # --- Demo UI ---

@@ -1,25 +1,23 @@
-# Training config — Phone Usage Detection (RT-DETRv2-R50, HF Trainer backend)
+# Training config — Fall Detection (RT-DETRv2-R50, HF Trainer backend)
 #
 # Recipe: paper-aligned (RT-DETRv2 arXiv 2407.17140) + v3 loss overhaul lifted
 # from fire_detection R50 v3 (eos=0.1, focal_α=0.5, focal_γ=1.5; lr=5e-5;
-# EMA on with decay=0.999 + 500-step warmup so it engages early). This is the
-# Phase-B production candidate per features/CLAUDE.md.
+# EMA on with decay=0.999 + 500-step warmup).
 #
-# Phone-usage notes:
-# - Single-class (phone_usage only). Person detection handled by separate model.
+# Fall-detection notes:
+# - 2 classes: person (62.4%), fallen_person (37.6%).
+# - flipud MUST stay 0.0 — vertical flip destroys upright-vs-fallen signal.
+# - Fallen person bbox is often horizontal/wide-aspect.
 
 model:
   arch: rtdetr-r50
   pretrained: PekingU/rtdetr_v2_r50vd
-  num_classes: 1
-  # 960 → 1024 (mirrors fire R50 v3) — R50 v2 EA showed small recall stuck at 0.33,
-  # steepest miss-rate slope is size. Stride-8 cells go 120 → 128.
+  num_classes: 2
   input_size: [1024, 1024]
-  # 50 queries — phone scenes have ~1 GT/image (p99 < 5). 50 = ~10× p99
-  # headroom while keeping background-FP risk in check.
+  # 50 queries — fall scenes typically have 1-3 persons/image. 50 = comfortable headroom.
   num_queries: 50
   num_denoising: 100
-  # Loss-recipe overhaul (mirrors fire R50 v3, 2026-05-05):
+  # Loss-recipe overhaul (mirrors fire R50 v3):
   box_noise_scale: 1.0
   label_noise_ratio: 0.3
   eos_coefficient: 0.1
@@ -29,15 +27,13 @@ model:
 tensor_prep:
   input_size: [1024, 1024]
   rescale: true
-  normalize: false               # A/B with normalize=true on smoke run
+  normalize: false
   mean: [0.485, 0.456, 0.406]
   std:  [0.229, 0.224, 0.225]
   applied_by: hf_processor
 
 data:
   dataset_config: 05_data.yaml
-  # R50 ~2.1× R18 backbone params. bs=8 → 4 at 1024² bf16 (~22 GB estimate).
-  # Override --override data.batch_size=8 if GPU has >25 GB free.
   batch_size: 4
   eval_batch_size: 2
   num_workers: 4
@@ -56,7 +52,7 @@ augmentation:
 
   perspective_p: 0.1
   fliplr: 0.5
-  flipud: 0.0
+  flipud: 0.0                   # MANDATORY — vertical flip destroys upright-vs-fallen signal
   brightness_contrast_p: 0.5
   brightness: 0.2
   contrast: 0.2
@@ -75,8 +71,6 @@ training:
   backend: hf
   epochs: 30
   optimizer: adamw
-  # Layered AdamW per RT-DETRv2 R50 paper: head 1e-4, backbone 1e-5 → halved
-  # to 5e-5 / 1e-5 to match fire R50 v3's stable recipe.
   lr: 0.00005
   lr_backbone: 0.00001
   weight_decay: 0.0001
@@ -84,16 +78,11 @@ training:
   scheduler: cosine_with_min_lr
   lr_scheduler_kwargs:
     min_lr: 0.000005
-  # 0.1 → 0.5 (mirrors fire R50 v3) — pre-clip grad_norm in 30-150 range, 0.1
-  # was nuking gradient direction. 0.5 lets real signal through; offset by EMA.
   max_grad_norm: 0.5
   bf16: true
   amp: false
   gpu_augment: false
-  ema: true                      # was false in fire R18; R50 needs it for late-epoch smoothing
-  # decay 0.999 not 0.9999 — at 0.9999 the EMA needs ~10000 steps to warm up,
-  # so it never engages on a 30-epoch run. 0.999 → ~1000-step warmup → EMA
-  # averages from ep1 onward.
+  ema: true
   ema_decay: 0.999
   ema_warmup_steps: 500
   patience: 15

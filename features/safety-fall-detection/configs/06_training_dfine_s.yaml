@@ -1,7 +1,14 @@
-# Training config — Fire Detection (D-FINE-S, HF Trainer backend)
-# Based on reference baseline from notebooks/detr_finetune_reference/our_dfine_torchvision/
-# Reference best on CPPE-5: dfine-s norm=false ema=false → test mAP50=0.603
-# Adapted for fire: 2 classes, obj2coco pretrained, 640 input
+# Training config — Fall Detection (D-FINE-S, HF Trainer backend)
+# License: Apache 2.0 (USTC / DEIM)
+#
+# Recipe: official Peterande/D-FINE per-arch dfine_hgnetv2_s_coco.yml — layered
+# AdamW with 1:2 LR ratio, constant_with_warmup, EMA 0.9999.
+#
+# Fall-detection notes:
+# - 2 classes: person (62.4%), fallen_person (37.6%).
+# - flipud MUST stay 0.0 — vertical flip destroys upright-vs-fallen signal.
+# - Fallen person bbox is often horizontal/wide-aspect.
+# - bf16=false is MANDATORY for D-FINE — DFL stalls under bf16.
 
 model:
   arch: dfine-s
@@ -26,11 +33,11 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 8
-  eval_batch_size: 8
-  num_workers: 2
+  batch_size: 4
+  eval_batch_size: 2
+  num_workers: 4
   prefetch_factor: 2
-  pin_memory: true
+  pin_memory: false
   subset:
     train: null
     val: null
@@ -41,29 +48,41 @@ augmentation:
   normalize: false
   mosaic: false
   mixup: false
+
   perspective_p: 0.1
   fliplr: 0.5
+  flipud: 0.0                   # MANDATORY — vertical flip destroys upright-vs-fallen signal
   brightness_contrast_p: 0.5
-  hsv_p: 0.1
-  scale: [1.0, 1.0]
-  degrees: 0.0
-  translate: 0.0
-  shear: 0.0
+  brightness: 0.2
+  contrast: 0.2
+  hsv_p: 0.3
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.4
+  min_bbox_area: 4.0
+
+  scale: [0.7, 1.3]
+  degrees: 15.0
+  translate: 0.15
+  shear: 2.0
 
 training:
   backend: hf
-  epochs: 30
+  epochs: 120
   optimizer: adamw
-  lr: 0.00005
-  weight_decay: 0.0
-  warmup_steps: 300
-  scheduler: linear
+  lr: 0.0002
+  lr_backbone: 0.0001
+  weight_decay: 0.0001
+  warmup_steps: 500
+  scheduler: constant_with_warmup
   max_grad_norm: 0.1
-  bf16: false
+  bf16: false                    # MANDATORY for D-FINE
   amp: false
   gpu_augment: false
-  ema: false
-  patience: 8
+  ema: true
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+  patience: 30
 
   val_viz:
     enabled: true
@@ -76,7 +95,11 @@ training:
     num_samples: 16
     conf_threshold: 0.01
   train_viz:
-    enabled: false
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.01
+    grid_cols: 2
+    balanced: true
   data_viz:
     enabled: true
     splits: [train, val, test]
@@ -93,12 +116,12 @@ loss:
 
 logging:
   report_to: none
-  save_dir: ../runs/dfine_s_ref
+  save_dir: ../runs/dfine_s
   wandb_project: smart-camera
 
 checkpoint:
   save_best: true
-  metric: eval_map
+  metric: eval_map_50
   mode: max
   save_interval: 1
 
