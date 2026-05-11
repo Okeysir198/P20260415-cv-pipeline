@@ -55,14 +55,14 @@ augmentation:
 
 training:
   backend: pytorch
-  epochs: 80
+  epochs: 60                     # Standardized with DETR configs
   optimizer: sgd
   lr: 0.001                    # Megvii rule: basic_lr × bs/64 ≈ 0.001 at bs=16
   momentum: 0.9
   weight_decay: 0.0005
   warmup_epochs: 3
   scheduler: cosine
-  patience: 30
+  patience: 20                    # Standardized with DETR configs
   val_full_interval: 0         # full val every epoch — quick-val overstates mAP
   val_subset_fraction: 1.0     # ignored when val_full_interval=0
   amp: true                    # YOLOX is AMP-safe (unlike DETR-family)
@@ -124,6 +124,6 @@ checkpoint:
   save_interval: 10
 
 evaluation:
-  score_threshold: 0.0         # canonical mAP
+  score_threshold: 0.015          # Near-canonical mAP (filters noise). Inference uses 0.075 per-class (see 10_inference.yaml — validate via threshold_sweep.py across full range)
 
 seed: 42

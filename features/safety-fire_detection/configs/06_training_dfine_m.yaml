@@ -8,13 +8,13 @@ model:
   pretrained: ustc-community/dfine-medium-obj2coco
   num_classes: 2
   input_size: [640, 640]
-  num_queries: 300
-  num_denoising: 100
-  box_noise_scale: 1.0
-  label_noise_ratio: 0.5
-  eos_coefficient: 0.0001
-  focal_loss_alpha: 0.75
-  focal_loss_gamma: 2.0
+  num_queries: 30                # HF default: 300
+  num_denoising: 100             # HF default: 100
+  box_noise_scale: 1.0           # HF default: 1.0 (no change)
+  label_noise_ratio: 0.1         # HF default: 0.5 → reduced over-regularization
+  eos_coefficient: 0.1           # HF default: 0.0001 → penalize orphan-query background FPs
+  focal_loss_alpha: 0.5          # HF default: 0.75 → balanced, remove positive-class bias
+  focal_loss_gamma: 1.5          # HF default: 2.0 → smoother gradients
 
 tensor_prep:
   input_size: [640, 640]
@@ -38,34 +38,47 @@ data:
 
 augmentation:
   library: torchvision
-  normalize: false
-  mosaic: false
-  mixup: false
+  normalize: false                # HF processor handles normalization
+  # Standardized augmentation across all model types (RT-DETR + D-FINE)
+  # R18 v2 + R50 v2 showed overfitting with weak aug; stronger aug extends stability.
+  # Color stays tight (fire color is class-defining); scale, position, brightness loosen up.
+  mosaic: true                    # Single biggest aug lever for small datasets
+  mixup: false                    # Bipartite matching + mixup is fragile
+
   perspective_p: 0.1
   fliplr: 0.5
+  flipud: 0.0
   brightness_contrast_p: 0.5
-  hsv_p: 0.1
-  scale: [1.0, 1.0]
-  degrees: 0.0
-  translate: 0.0
-  shear: 0.0
+  brightness: 0.2                 # Fire/smoke happen across lighting conditions
+  contrast: 0.2
+  hsv_p: 0.3
+  hsv_h: 0.015                    # KEEP TIGHT — fire color is class-defining
+  hsv_s: 0.3                      # KEEP TIGHT — same reason
+  hsv_v: 0.4                      # Value is safe (doesn't change color identity)
+
+  min_bbox_area: 4.0              # Keep small fire/smoke (2×2 px minimum)
+
+  scale: [0.7, 1.3]               # ±30% jitter, helps small-recall
+  degrees: 15.0
+  translate: 0.15
+  shear: 2.0
 
 training:
   backend: hf
-  epochs: 30
+  epochs: 60                      # Extended from 30 for full convergence
   optimizer: adamw
-  lr: 0.00005
-  weight_decay: 0.0
-  warmup_steps: 300
-  scheduler: linear
-  max_grad_norm: 0.1
-  bf16: false
+  lr: 0.00005                     # Reference baseline: 5e-5 (flat LR, no backbone split)
+  weight_decay: 0.0               # Reference baseline: 0 (D-FINE uses wd=0)
+  warmup_steps: 300               # Reference baseline: 300
+  scheduler: linear               # Reference baseline: linear
+  max_grad_norm: 0.1              # HF default: 0.1 (no change)
+  bf16: false                     # MANDATORY for D-FINE (DFL stalls under bf16)
   amp: false
   gpu_augment: false
-  ema: true
-  ema_decay: 0.9999
-  ema_warmup_steps: 1000
-  patience: 8
+  ema: true                       # Reference baseline: true for dfine-m
+  ema_decay: 0.9999               # Reference baseline: 0.9999
+  ema_warmup_steps: 1000          # Reference baseline: 1000
+  patience: 20
 
   val_viz:
     enabled: true
@@ -95,7 +108,7 @@ loss:
 
 logging:
   report_to: none
-  save_dir: ../runs/dfine_m_ref
+  save_dir: ../runs/dfine_m
   wandb_project: smart-camera
 
 checkpoint:
@@ -105,6 +118,6 @@ checkpoint:
   save_interval: 1
 
 evaluation:
-  score_threshold: 0.0
+  score_threshold: 0.015          # Near-canonical mAP (filters noise). Inference uses 0.075 per-class (see 10_inference.yaml — validate via threshold_sweep.py across full range)
 
 seed: 42

@@ -16,17 +16,17 @@ model:
   # 51% are TRUE misses (model emitted no candidate). With eos=0.1 firmly
   # penalising orphan-query background fires, the small extra capacity helps
   # capture diffuse smoke + crowded fire scenes. 50 = 5.5× p99 headroom.
-  num_queries: 50
-  num_denoising: 100              # HF default
+  num_queries: 50                  # HF default: 300
+  num_denoising: 100              # HF default: 100
   # Loss-recipe overhaul (2026-05-05) — mirrors R18 v2 changes that fixed
   # collapse: HF defaults caused calibration drift (peak at ep3 then collapse).
   # See R18 yaml + R18 run logs for evidence. Same recipe expected to behave
   # similarly on R50 (same arch family, just bigger backbone).
-  box_noise_scale: 1.0            # 1.5 → 1.0
-  label_noise_ratio: 0.3          # 0.5 → 0.3
-  eos_coefficient: 0.1            # 0.0001 → 0.1 — penalize orphan-query background FPs
-  focal_loss_alpha: 0.5           # 0.75 → 0.5 — balanced
-  focal_loss_gamma: 1.5           # 2.0 → 1.5 — smoother gradients
+  box_noise_scale: 1.0            # HF default: 1.0 (no change)
+  label_noise_ratio: 0.1          # HF default: 0.5 → reduced over-regularization
+  eos_coefficient: 0.1            # HF default: 0.0001 → penalize orphan-query background FPs
+  focal_loss_alpha: 0.5           # HF default: 0.75 → balanced, remove positive-class bias
+  focal_loss_gamma: 1.5           # HF default: 2.0 → smoother gradients
 
 # normalize: false — fire dataset stats (mean ~0.39, std ~0.28) diverge from
 # ImageNet (mean ~0.45, std ~0.23). Skipping normalize lets BatchNorm recenter
@@ -81,14 +81,14 @@ augmentation:
 
 training:
   backend: hf
-  epochs: 30                      # R18/R50 peak before ep15 on this dataset
+  epochs: 60                      # Extended from 30 for full convergence
   optimizer: adamw
   # 1e-4 → 5e-5 (mirrors R18 v2). Halved gradient magnitude prevents the
   # post-peak overshoot that caused R18 v1 collapse (peak ep3 → 0.19 by ep14).
-  lr: 0.00005                     # head + encoder + decoder
-  lr_backbone: 0.00001             # 1:5 split (1e-5 backbone vs 5e-5 head) — paper LR retained for backbone, head halved for stability
-  weight_decay: 0.0001
-  warmup_steps: 2000              # paper LinearWarmup
+  lr: 0.00005                     # HF default: 1e-4 → head + encoder + decoder
+  lr_backbone: 0.00001             # 1:5 split (HF default: 1e-5, kept) → paper LR retained for backbone, head halved for stability
+  weight_decay: 0.0001            # HF default: 1e-4 (no change)
+  warmup_steps: 2000              # HF default: varies → paper LinearWarmup
   # Cosine decay 1e-4 → 1e-5 over the run. Paper uses MultiStepLR with milestone
   # past run end (effectively flat); for our 30-epoch fine-tune a cooldown phase
   # helps the model settle near the end instead of overshooting (early peak then
@@ -111,7 +111,7 @@ training:
   # that prevented post-ep3 epochs from beating the early peak.
   ema_decay: 0.999
   ema_warmup_steps: 500           # was 2000 — start averaging early
-  patience: 15                    # was 50 — match R18 (peak hits early on this dataset)
+  patience: 20                    # Extended patience for longer training
 
   val_viz:
     enabled: true
@@ -155,6 +155,6 @@ checkpoint:
   save_interval: 1
 
 evaluation:
-  score_threshold: 0.0            # canonical mAP
+  score_threshold: 0.015          # Near-canonical mAP (filters noise). Inference uses 0.075 per-class (see 10_inference.yaml — validate via threshold_sweep.py across full range)
 
 seed: 42

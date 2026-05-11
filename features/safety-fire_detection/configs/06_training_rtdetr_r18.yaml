@@ -22,8 +22,8 @@ model:
   # signals → val PNGs showed dense low-confidence FPs across non-fire areas.
   # 30 = 3.3× p99 headroom, enough for crowded smoke-fire scenes without
   # surplus. Also reduces VRAM/RAM accumulation per eval batch.
-  num_queries: 30
-  num_denoising: 100              # HF default
+  num_queries: 30                  # HF default: 300
+  num_denoising: 100              # HF default: 100
   # Loss-recipe overhaul (2026-05-05) — first run with HF defaults peaked at
   # ep3 (mAP=0.445) then collapsed to 0.19 by ep14 with heavy background FPs
   # AND many FNs simultaneously (calibration squash). Switching to the
@@ -31,11 +31,11 @@ model:
   # remove positive-class bias, smooth gradients on hard examples, reduce
   # denoising-noise injection. Departing from HF defaults intentionally
   # based on observed behavior, not docs.
-  box_noise_scale: 1.0            # 1.5 → 1.0 — denoising noise was adding variance the model couldn't average over at this dataset size
-  label_noise_ratio: 0.3          # 0.5 → 0.3 — same reason; over-regularizing class targets
-  eos_coefficient: 0.1            # 0.0001 → 0.1 — directly penalize surplus queries firing on background (textbook DETR fix for background FP, even in focal world)
-  focal_loss_alpha: 0.5           # 0.75 → 0.5 — balanced; removes positive-class bias driving score inflation → collapse
-  focal_loss_gamma: 1.5           # 2.0 → 1.5 — less focus on hard examples → smoother gradients → less oscillation
+  box_noise_scale: 1.0            # HF default: 1.0 (no change)
+  label_noise_ratio: 0.1          # HF default: 0.5 → reduced over-regularization
+  eos_coefficient: 0.1            # HF default: 0.0001 → penalize orphan-query background FPs
+  focal_loss_alpha: 0.5           # HF default: 0.75 → balanced, remove positive-class bias
+  focal_loss_gamma: 1.5           # HF default: 2.0 → smoother gradients
 
 # normalize: false — fire dataset stats (mean ~0.39, std ~0.28) diverge from
 # ImageNet (mean ~0.45, std ~0.23). Skipping normalize lets BatchNorm recenter
@@ -97,15 +97,15 @@ augmentation:
 
 training:
   backend: hf
-  epochs: 30                      # R18/R50 peak before ep15 on this dataset
+  epochs: 60                      # Extended from 30 for full convergence
   optimizer: adamw
   # 1e-4 → 5e-5 (2026-05-05) — first run with 1e-4 peaked at ep3 (mAP=0.445)
   # then collapsed to 0.19 by ep13 (classic DETR overfit + miscalibration
   # documented in feature CLAUDE.md). 5e-5 halves the gradient magnitude so
   # the model settles instead of bouncing past the optimum.
-  lr: 0.00005                     # paper Table 1, R18 row × 0.5 for stable fine-tune
-  weight_decay: 0.0001
-  warmup_steps: 2000              # paper LinearWarmup
+  lr: 0.00005                     # HF default: 1e-4 → paper Table 1, R18 row × 0.5 for stable fine-tune
+  weight_decay: 0.0001            # HF default: 1e-4 (no change)
+  warmup_steps: 2000              # HF default: varies → paper LinearWarmup
   # Cosine decay 1e-4 → 1e-5 over the run. Paper uses MultiStepLR with milestone
   # past run end (effectively flat); for our 30-epoch fine-tune a cooldown phase
   # helps the model settle near the end instead of overshooting (early peak then
@@ -120,7 +120,7 @@ training:
   ema: false                       # paper default
   ema_decay: 0.9999
   ema_warmup_steps: 2000
-  patience: 15
+  patience: 20
 
   val_viz:
     enabled: true
@@ -164,6 +164,6 @@ checkpoint:
   save_interval: 1
 
 evaluation:
-  score_threshold: 0.0            # canonical mAP
+  score_threshold: 0.015          # Near-canonical mAP (filters noise). Inference uses 0.075 per-class (see 10_inference.yaml — validate via threshold_sweep.py across full range)
 
 seed: 42
