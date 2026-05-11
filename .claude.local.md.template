@@ -1,0 +1,102 @@
+# .claude.local.md — Personal Claude Code Preferences
+
+> **Copy this file to `.claude.local.md` and customize for your local development workflow.**
+> **This file is gitignored — your personal settings won't be shared with the team.**
+
+## Example Local Preferences
+
+```yaml
+# Always use specific GPU for training
+permissions:
+  allow:
+    - command: bash
+      contains: "CUDA_VISIBLE_DEVICES"
+
+# Auto-approve safe commands
+permissions:
+  allow:
+    - command: uv run
+    - command: git status
+    - command: git diff
+    - command: ls
+    - command: cat
+
+# Notifications for long-running tasks
+notifications:
+  - trigger: task_complete
+    condition: "duration > 5 minutes"
+
+# Default model selection
+model:
+  default: claude-sonnet-4-6
+  training: claude-opus-4-7
+
+# Project-specific shortcuts
+shortcuts:
+  train_fire: "uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml"
+  eval_fire: "uv run core/p08_evaluation/evaluate.py --model features/safety-fire_detection/runs/latest/best.pth --config features/safety-fire_detection/configs/05_data.yaml"
+
+# Personal workflow preferences
+workflow:
+  # Always show preview before file edits
+  preview_edits: true
+
+  # Prefer background tasks for training
+  background_training: true
+
+  # Test subset for faster iteration
+  default_test_subset: 0.2
+```
+
+## Common Customizations
+
+### GPU Selection
+```yaml
+permissions:
+  allow:
+    - command: bash
+      contains: "CUDA_VISIBLE_DEVICES=0"  # Auto-approve GPU 0 usage
+```
+
+### Background Training
+```yaml
+# Launch training in background, notify on completion
+workflow:
+  training:
+    background: true
+    notify_on_complete: true
+```
+
+### Quick Test Commands
+```yaml
+shortcuts:
+  test_all: "uv run tests/run_all.py"
+  test_unit: "uv run -m pytest tests/ -v -k 'not slow'"
+  lint: "uv run ruff check ."
+```
+
+---
+
+## How to Use
+
+1. **Copy this template:**
+   ```bash
+   cp .claude.local.md.template .claude.local.md
+   ```
+
+2. **Edit `.claude.local.md`** with your preferences
+
+3. **Add to `.gitignore`** (if not already there):
+   ```
+   .claude.local.md
+   ```
+
+4. **Claude Code will auto-discover** your personal settings alongside the project `CLAUDE.md`
+
+---
+
+## Why Use .claude.local.md?
+
+- **Separate concerns:** Project docs in `CLAUDE.md`, your prefs in `.claude.local.md`
+- **No conflicts:** Your local customizations won't affect team-shared documentation
+- **Portable:** Copy your `.claude.local.md` to other projects for consistent experience

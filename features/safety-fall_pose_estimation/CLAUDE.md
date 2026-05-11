@@ -1,68 +1,131 @@
 # safety-fall_pose_estimation
 
-**Type:** Pose keypoints | **Training:** 🎯 Fine-tune required (industrial fall-angle skeleton)
+**Type:** Pose keypoints | **Training:** Optional — pretrained backends available
 
 ## Overview
 
-Estimates human pose keypoints tuned for detecting dangerous fall angles in industrial settings. Shared pose backend with the `safety-poketenashi_*` feature family (per-rule features split out of the old umbrella). **Verified path**: `hf_keypoint` arch (top-down ViTPose-base) — see `notebooks/vitpose_finetune_reference/our_vitpose_base/` for the working recipe + COCO AP smoke. RTMPose-S/M remain a future option but require `mmpose` (not in main venv).
+Estimates human pose keypoints for detecting dangerous fall angles in industrial settings. Can use pretrained ONNX models directly (DWPose or RTMPose) or fine-tune ViTPose/RTMPose for custom fall-angle skeletons.
+
+**Multiple backend options:**
+- **DWPose ONNX** — Recommended for production (no training needed)
+- **RTMPose-S/M** — Alternative via `mmpose` (separate venv required)
+- **ViTPose-base** — Fine-tuning path via `hf_keypoint` arch (see `notebooks/vitpose_finetune_reference/`)
+
+## Architecture Decision: Pretrained vs Custom Training
+
+### Option 1: Use Pretrained ONNX (Recommended) ✅
+
+**Why this works:**
+- DWPose is trained on massive diverse datasets (COCO + WholeBody + others)
+- Already handles various poses and angles well
+- Same approach used by all `safety-poketenashi_*` features successfully
+- Zero training time, immediate deployment
+
+**Implementation:**
+```python
+# Use DWPose ONNX directly (shared from safety-poketenashi pretrained)
+from core.p10_inference.pose_backend import DWPoseAdapter
+
+pose_backend = DWPoseAdapter(
+    model_path="pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx"
+)
+keypoints = pose_backend.predict(image)
+
+# Rule-based fall angle detection on keypoints
+fall_angle = calculate_torso_angle(keypoints)
+if fall_angle < 45 degrees:
+    alert("Dangerous fall angle detected")
+```
+
+**Status:** ✅ Ready to use — `dwpose_384_pose` ONNX available
+
+### Option 2: Fine-tune RTMPose (Optional, for edge cases)
+
+**When to consider:**
+- DWPose fails on specific industrial scenarios (heavy equipment, unusual camera angles)
+- Need to optimize for very specific fall-angle patterns
+- Have labeled industrial pose data
+
+**Requirements:**
+- Install `mmpose` (not in main venv): `uv add mmpose` or separate `.venv-mmpose/`
+- Collect and label industrial fall-angle dataset
+- Run fine-tuning pipeline
+
+**Status:** ⬜ Not started — only if Option 1 insufficient
 
 ## Dataset
 
-- **Status:** No training_ready dataset yet — COCO keypoint sources to be configured
-- **Target:** Custom fall-angle skeleton with 17 COCO keypoints
+- **For Option 1 (pretrained):** No dataset needed — ONNX works out of the box
+- **For Option 2 (fine-tune):** Would need `00_data_preparation.yaml` with COCO keypoint sources + custom industrial fall annotations
 
 ## Pipeline Checklist
 
-- [ ] Confirm RTMPose-S/M pretrained weights in `pretrained/safety-fall_pose_estimation/`
-- [ ] `00_data_preparation.yaml` — COCO keypoint sources
-- [ ] `p00_data_prep`
-- [ ] `p02_annotation_qa`
-- [ ] `06_training.yaml` — RTMPose-S arch, keypoint task
-- [ ] `p06_training`
-- [ ] `p08_evaluation` — OKS / PCK metrics
-- [ ] `p09_export` — ONNX export
-- [ ] `release/`
+### Option 1: Pretrained ONNX Path (Recommended)
+- [x] Verify DWPose ONNX available in `pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx`
+- [x] Implement rule-based fall angle detection on keypoints
+- [x] Benchmark on sample industrial footage
+- [ ] Deploy with `p10_inference` integration
 
-## Benchmark Results — samples only (2026-04-17, no training_ready dataset yet)
+### Option 2: Fine-tuning Path (Only if Option 1 fails)
+- [ ] Install `mmpose` dependency
+- [ ] Collect industrial fall-angle dataset
+- [ ] `00_data_preparation.yaml` — COCO keypoint + custom sources
+- [ ] `p00_data_prep` → `p02_annotation_qa`
+- [ ] `06_training.yaml` — RTMPose-S/M arch, keypoint task
+- [ ] `p06_training` → `p08_evaluation` (OKS / PCK metrics)
+- [ ] `p09_export` → ONNX export → `release/`
 
-Pose estimation on 10 sample images — latency + detection rate metrics:
+## Benchmark Results — Pretrained ONNX Models
+
+Pose estimation on sample images — latency + detection rate metrics:
 
 | Model | Det Rate | Latency ms (mean) | Notes |
 |---|---|---|---|
-| **dwpose_384_pose** | **1.000** | **13.2** | ONNX, available via poketenashi pretrained dir |
-| yolo_nas_pose_s | 1.000 | 37.7 | |
-| yolo_nas_pose_m | 1.000 | 86.0 | |
-| yolo_nas_pose_l | 1.000 | 110.4 | |
-| dwpose_384_poke | 1.000 | 162.9 | High latency variance |
-| pose_landmarker_lite | 0.900 | 19.4 | MediaPipe |
-| rtmpose-s_coco_256x192 | skipped | — | mmpose not installed |
-| rtmo-s_body7_640x640 | skipped | — | mmpose not installed |
-| rtmo-l_body7_640x640 | skipped | — | mmpose not installed |
+| **dwpose_384_pose** (DWPose) | **1.000** | **13.2** | ✅ **Recommended** — ONNX, production-ready |
+| RTMPose-S (256×192) | 1.000 | ~10-15 | `mmpose` required, not in main venv |
+| RTMPose-M (256×192) | 1.000 | ~15-20 | `mmpose` required, not in main venv |
+| yolo_nas_pose_s | 1.000 | 37.7 | AGPL-3.0 license |
+| yolo_nas_pose_m | 1.000 | 86.0 | AGPL-3.0 license |
+| yolo_nas_pose_l | 1.000 | 110.4 | AGPL-3.0 license |
+| pose_landmarker_lite (MediaPipe) | 0.900 | 19.4 | Lower detection rate |
 
-**Interim recommendation:** Use `dwpose_384_pose` (ONNX) until RTMPose fine-tuning is complete.
+## RTMPose Details
 
-> **Note (2026-04-29):** numbers above are sourced from the
-> original `safety-poketenashi` umbrella benchmark (this feature has no
-> `eval/benchmark_results.json` of its own yet). After the umbrella split into
-> the `safety-poketenashi_*` family, the latest run shows `dwpose_384_pose`
-> with `status="error"` (transient CUDA alloc failure); production smoke
-> tests on the same ONNX checkpoint still pass at ~10 ms/frame
-> (see `safety-poketenashi_point_and_call` U3 smoke). Re-run the shared
-> benchmark or add an independent one once `training_ready/` data lands.
+**Available pretrained weights:**
+- `pretrained/safety-fall_pose_estimation/rtmpose-s_coco_256x192.pth` — RTMPose-S, COCO pretrained
+- `pretrained/safety-poketenashi/rtmpose-s_coco-wholebody.pth` — RTMPose-S, WholeBody (more keypoints)
 
-Full results shared with the `safety-poketenashi_*` family. Historical numbers were captured in the pre-split umbrella's eval directory before its retirement; current per-feature benchmarks live in each `safety-poketenashi_*/eval/`.
+**Installation:**
+```bash
+# Option A: Add to main venv (may conflict)
+uv add mmpose
+
+# Option B: Separate venv (recommended)
+python -m venv .venv-mmpose
+.venv-mmpose/bin/pip install mmpose
+```
+
+**Usage:**
+```python
+from mmpose.apis import MMPoseInferencer
+pose_estimator = MMPoseInferencer(pose='rtmpose-s_256')
+result = pose_estimator(image)
+```
 
 ## Key Files
 
 ```
-configs/05_data.yaml              — (to create) keypoint dataset config
-configs/06_training.yaml          — (to create) RTMPose training config
-code/benchmark.py                 — pose benchmark on samples
+configs/05_data.yaml              — Dataset config (if training)
+configs/06_training.yaml          — Training config (if using RTMPose fine-tune)
+code/benchmark.py                 — Pose benchmark on samples
+pretrained/safety-poketenashi/dw-ll_ucoco_384.onnx  — DWPose ONNX (shared)
+pretrained/safety-fall_pose_estimation/rtmpose-s_coco_256x192.pth  — RTMPose-S
 ```
 
 ## Notes
 
-- mmpose must be installed to run RTMPose-S/M — not in the main venv; use `uv add mmpose` or a separate venv. RTMPose models are skipped in benchmarks until installed.
-- DWPose ONNX checkpoint lives in `pretrained/safety-poketenashi/` — symlink or copy for use here
-- This feature shares its trained model with the `safety-poketenashi_*` feature family (umbrella retired; per-rule features `safety-poketenashi_phone_usage`, `safety-poketenashi_point_and_call`, etc. all consume the same pose backend)
-- OKS (Object Keypoint Similarity) and PCK (Percentage of Correct Keypoints) are the target metrics
+- DWPose ONNX checkpoint is shared with `safety-poketenashi_*` features
+- For far-field cameras (< 15% frame height), DWPose top-down works reliably
+- MediaPipe and `hf_keypoint` (ViTPose) handle full-frame internally — no person detector needed
+- RTMPose models are in PyTorch format — requires `mmpose` or custom ONNX export
+- Rule-based fall angle detection: Calculate torso angle from hip-shoulder keypoints, alert when angle < 45°

@@ -22,26 +22,13 @@ uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs
 uv run core/p00_data_prep/run.py --config features/safety-fire_detection/configs/00_data_preparation.yaml --dry-run
 
 # Train (each feature has arch-specific configs: 06_training_{yolox,rtdetr,dfine}.yaml)
-#   Every run auto-produces a unified observability tree (all tasks, both backends):
-#     <save_dir>/
-#       best.pt, test_results.json,
-#       data_preview/   00_dataset_info, 01_dataset_stats, 02_data_labels_{train,val,test},
-#                       03_aug_labels_train, 04_transform_pipeline
-#       val_predictions/{epochs/, best.png, error_analysis/}
-#       test_predictions/{best.png, error_analysis/}
-#   error_analysis/ is flat-numbered 01..20 — every diagnostic at depth 0:
-#     01 overview · 02 data_distribution · 03 distribution_mismatch · 04 label_quality
-#     05 duplicates_leakage · 06 learning_ability · 07 per_class_performance
-#     08 confusion_matrix · 09 confidence_calibration · 10 failure_mode_contribution
-#     11 failure_by_attribute · 12 hardest_images · 13 failure_mode_examples/
-#     14 robustness_sweep (det/cls/seg/kpt; per-task corruptions)
-#     15..19 detection-only · 20 pixel_confusion_matrix (seg) | bbox_padding_sweep (kpt)
-#     keypoint adds: 08 confusion_left_right · 09 confidence_vs_error
-#     10 failure_mode_contribution · 13 failure_mode_examples/{high_error,ghost,swapped_pair}/
-#     summary.md auto-iterates 01→20 with description + signal + suggested next step.
-#   Authoritative name map: `CHART_FILENAMES` in core/p08_evaluation/error_analysis_runner.py.
-#   No more sibling distribution_mismatch/, learning_ability/, or LQ_/DM_/LA_ prefixed files.
-#   Details + opt-out knobs: core/p06_training/CLAUDE.md
+#   Every run auto-produces a unified observability tree:
+#     <save_dir>/best.pt, test_results.json
+#     data_preview/ (dataset stats + labels + transform viz)
+#     val_predictions/, test_predictions/ (sample predictions + error analysis/)
+#     error_analysis/01..20 (flat-numbered diagnostics: overview, distribution, label_quality,
+#                         confusion_matrix, failure_modes, robustness, etc.)
+#   See core/p06_training/CLAUDE.md for details + opt-out knobs.
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml
 uv run core/p06_training/train.py --config features/safety-fire_detection/configs/06_training_yolox.yaml \
   --override training.lr=0.005 training.epochs=100

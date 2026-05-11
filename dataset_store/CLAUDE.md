@@ -36,15 +36,15 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 
 ## Top-level summary
 
-> **Disk-size snapshot last verified: 2026-04-21.** Image counts are from Phase A data-prep logs (2026-04-17) and are not re-counted here — for current per-source counts see each feature's `DATASET_REPORT.md`. To refresh disk sizes: `du -sh dataset_store/raw/*/ dataset_store/training_ready/`.
+> **Disk-size snapshot last verified: 2026-05-11.** Image counts are from Phase A data-prep logs (2026-04-17) and are not re-counted here — for current per-source counts see each feature's `DATASET_REPORT.md`. To refresh disk sizes: `du -sh dataset_store/raw/*/ dataset_store/training_ready/`.
 
 | Category | Size | Imgs | Notes |
 |---|---|---|---|
-| `raw/fire_detection` | 16 GB | 131,387 | d_fire + zenodo + industrial + fasdd_cv + fire_seg |
-| `raw/helmet_detection` | 25 GB | 114,929 | sh17, shlokraval, hardhat_vest_v3, roboflow_hardhat + 7 more (sfchd/shwd Baidu-only) |
-| `raw/fall_detection` | 10 GB | 71,501 | coco_keypoints (pose-only), roboflow_person_fall_8k, roboflow_fall, cctv_fall |
-| `raw/shoes_detection` | 8.4 GB | 34,662+ | grew post-v1: keremberke, rf_feet_segmentation, rf_safety_shoes_11k, rf_footwear_*, rf_sneakers, rf_barefoot, shoe_ppe |
-| `raw/phone_detection` | 4.6 GB | 63,419 | fpi_det + 7 roboflow sources (person-using-phone coverage) |
+| `raw/fire_detection` | 3.4 GB | 32,870 | d_fire + zenodo + industrial (v2 candidates removed 2026-05-11) |
+| `raw/helmet_detection` | 17 GB | 55,338 | sh17, shlokraval, roboflow_ppe_6class, construction_safety, rf_siabar_ppe, rf_chemical_ppe_11class (v2 candidates removed) |
+| `raw/fall_detection` | 666 MB | 12,556 | roboflow_person_fall_8k, roboflow_fall, cctv_fall (coco_keypoints removed 2026-05-11) |
+| `raw/shoes_detection` | 8.3 GB | 34,662+ | keremberke, rf_feet_segmentation, rf_safety_shoes_11k, rf_footwear_*, rf_sneakers, rf_barefoot |
+| `raw/phone_detection` | 3.2 GB | 62,522 | fpi_det + 6 roboflow sources (duplicates removed 2026-05-11) |
 | `raw/smoking_detection` | 676 MB | 10,291 | rf_cigarette_5k |
 | `raw/harness_detection` | 547 MB | 3,303 | rf_body_harness + rf_safety_harness_v2 |
 | `raw/mask_detection` | 465 MB | 12,226 | rf_n95, rf_mask_3class, rf_mask_3k, mask_type_det |
@@ -54,9 +54,9 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 | `raw/ear_protection` | 37 MB | 780 | rf_earplug |
 | `raw/_coco_val` | — | 0 | empty (COCO val2017 placeholder) |
 | `site_collected/` | — | 0 | placeholders only (populate on-site) |
-| `training_ready/` | 11 GB | 112,099 | Phase A complete (2026-04-17) — 5 features built (fire, helmet, shoes, fall, phone-usage) |
+| `training_ready/` | 13 GB | 112,099 | Phase A complete (2026-04-17) — 5 features built (fire, helmet, shoes, fall, phone-usage) |
 
-**Total raw: ~67 GB across 12 categories, ~450K images.**
+**Total raw: ~35 GB across 11 categories, ~230K images (after 2026-05-11 cleanup: removed 31 GB of v2 candidates and duplicates).**
 
 ---
 
@@ -64,22 +64,22 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 
 Legend: ✅ usable · ⚠️ caveat · ❌ stub/empty
 
-### raw/fall_detection (10 GB)
+### raw/fall_detection (666 MB)
 | Source | Size | Imgs | Status |
 |---|---|---|---|
-| `coco_keypoints` | 9.3 GB | 58,945 | ⚠️ Keypoints JSON only, no bbox — reserve for pose model |
 | `roboflow_person_fall_8k` | 338 MB | 7,947 | ✅ person-fall / person-nofall |
 | `roboflow_fall` | 165 MB | 4,497 | ✅ Fall-Detected |
 | `cctv_fall` | 165 MB | 112 | ✅ laying / standing (pose kpts present, YOLO parser ignores) |
+| ~~`coco_keypoints`~~ | ~~9.3 GB~~ | ~~58,945~~ | **Removed 2026-05-11** — pose uses pretrained DWPase/RTMPose; re-download via Kaggle if needed |
 
-### raw/fire_detection (16 GB)
+### raw/fire_detection (3.4 GB)
 | Source | Size | Imgs | Status |
 |---|---|---|---|
-| `fasdd_cv` | 12 GB | 95,314 | ⚠️ COCO JSON (95K imgs, needs conversion) — v2 |
 | `d_fire` | 3.0 GB | 21,527 | ✅ fire / smoke — paper-authored |
 | `zenodo_indoor_fire` | 258 MB | 10,000 | ✅ 0→fire, 1→smoke |
-| `roboflow_fire_seg` | 262 MB | 3,203 | ✅ seg masks — reserve for p03 gen aug |
 | `industrial_hazards` | 83 MB | 1,343 | ✅ fire/smoke (+ chem/no-helmet/water-leak dropped) |
+| ~~`fasdd_cv`~~ | ~~12 GB~~ | ~~95,314~~ | **Removed 2026-05-11** — v2 candidate, re-download if needed |
+| ~~`roboflow_fire_seg`~~ | ~~262 MB~~ | ~~3,203~~ | **Removed 2026-05-11** — reserve for p03 gen aug, re-download if needed |
 
 ### raw/helmet_detection (25 GB)
 | Source | Size | Imgs | Status |
@@ -313,7 +313,7 @@ All links open the source page — browse images, preview labels, check for nois
 | Helmet | `rf_chemical_ppe_11class`, `rf_siabar_ppe` | Small, chem/ear context | Once chemical-area deployment starts |
 | Shoes | `rf_feet_segmentation` (17K) | Seg masks for shoe_region pipeline | When two-stage detection enabled |
 | Shoes | `sh17_ppe` boots, `rf_siabar_ppe` Boots | Cross-use from helmet datasets | More Boots diversity |
-| Fall | `coco_keypoints` (58K) | Pose-only, no bbox | When pose model (Model G-pose) starts |
+| Fall | `coco_keypoints` (58K) | **Removed 2026-05-11** — pose uses pretrained DWPose/RTMPose ONNX; re-download via Kaggle if fine-tuning needed | Only if DWPose/RTMPose fail on industrial scenarios |
 | Phone | `roboflow_mobile_phone_ineuron` (1.5K) | Object-only (not usage) | If cell-phone object detection split out |
 | Zone intrusion | `rf_intrusion_3k`, `rf_intrusion_face_3k` | Model I uses pretrained — no training needed in Phase 1 | If Phase 2 retraining |
 
@@ -437,14 +437,62 @@ All entries below are CLI-downloadable from scratch. For Baidu-only entries see 
 - **`state_farm_distracted`**: Kaggle competition, requires rules acceptance before download.
 - **`ur_fall`**: old academic mirror, URL dead — new mirror unknown.
 
+---
+
+## Baidu-Only Dataset Downloads
+
+Some helmet detection datasets are only available via Baidu Netdisk (Chinese file sharing). Use these extraction scripts:
+
+### SFCHD (12K chemical-plant helmet images)
+
+```bash
+# Clone extraction code
+git clone https://github.com/lijfrank/SFCHD-SCALE.git /tmp/sfchd_scale
+cd /tmp/sfchd_scale
+
+# Follow README instructions for Baidu Netdisk download
+# Requires: Baidu account, extraction code (shared in repo issues)
+# Destination: dataset_store/raw/helmet_detection/sfchd/
+```
+
+**Source:** `lijfrank/SFCHD-SCALE` repo  
+**License:** Check repo for license terms  
+**Content:** 12K images from chemical plants with helmet annotations
+
+### SHWD (7,581 helmet images)
+
+```bash
+# Clone repo (contains extraction helper, not full dataset)
+git clone https://github.com/njvisionpower/Safety-Helmet-Wearing-Dataset.git /tmp/shwd
+cd /tmp/shwd
+
+# Full dataset requires Baidu Netdisk download
+# Check repo README for download code and instructions
+# Destination: dataset_store/raw/helmet_detection/shwd/
+```
+
+**Source:** `njvisionpower/Safety-Helmet-Wearing-Dataset` repo  
+**License:** MIT (as stated in repo)  
+**Content:** 7,581 helmet detection images with bounding box annotations
+
+### Notes
+
+- Both repos provide extraction scripts but require manual Baidu Netdisk interaction
+- Datasets are large (SFCHD ~12GB, SHWD ~few GB) — ensure disk space before downloading
+- Consider whether these datasets are needed before downloading (existing training_ready data may be sufficient)
+- Baidu Netdisk may have regional availability restrictions
+
 ## Annotation conversions pending
 
-- `coco_keypoints` (keypoint JSON → pose-specific loader)
+- `coco_keypoints` (keypoint JSON → pose-specific loader) — **Removed 2026-05-11**; pose features use pretrained DWPase/RTMPose ONNX; re-add if fine-tuning needed
 - `fasdd_cv` (COCO → YOLO)
 - `keremberke_ppe` (COCO — already supported by `core/p00_data_prep/parsers/coco.py`)
 - `hard_hat_workers` (VOC XML — supported by `parsers/voc.py`)
 - `sh17_ppe` (VOC XML — supported; YOLO class-index order unclear, prefer VOC labels)
 
-## Disk cleanup opportunities
+## Disk cleanup completed (2026-05-11)
 
-- `raw/phone_detection/fpi_det/fpi_det_images/reorganized_dataset/` — exact duplicate of top-level `reorganized_dataset/` (1.3 GB redundant).
+- ✅ Removed `raw/phone_detection/fpi_det/fpi_det_images/reorganized_dataset/` (1.3 GB duplicate)
+- ✅ Removed `coco_keypoints` (9.3 GB) — pose uses pretrained DWPase/RTMPose ONNX
+- ✅ Removed v2 candidates: `fasdd_cv` (12 GB), `roboflow_fire_seg` (262 MB), `hardhat_vest_v3` (4.4 GB), `roboflow_hardhat` (1.6 GB), `hard_hat_workers` (1.3 GB), `roboflow_vest_helmet_9k` (529 MB)
+- ✅ Total saved: ~31 GB (79 GB → 48 GB)
