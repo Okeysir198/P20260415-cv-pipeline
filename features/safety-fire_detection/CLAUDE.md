@@ -94,20 +94,20 @@ Most images contain both classes. Per-class fire/smoke ratio is balanced within 
 
 These all predate the per-source-temporal split. Phase D will produce the new authoritative numbers.
 
-## v2 Results — current authoritative (2026-05-10, per-source-temporal dataset)
+## Current Results (2026-05-10, per-source-temporal dataset)
 
 | Run | Recipe | best val mAP@50 | test mAP@50 | fire test AP | smoke test AP | small mAP |
 |---|---|---:|---:|---:|---:|---:|
-| RT-DETR R18 v2 | 960² + new loss recipe | 0.565 (ep14) | **0.555** | 0.249 | 0.308 | 0.112 |
-| RT-DETR R50 v2 | same + R50 backbone (1:5 LR split) | 0.622 (ep3, ES@ep18) | **0.607** | 0.252 | 0.333 | 0.148 |
-| D-FINE-N v2 | 640² + reference baseline (EMA on) | 0.414 (ep28) | **0.412** | 0.158 | 0.242 | 0.060 |
-| D-FINE-S v2 | 640² + reference baseline (EMA off) | 0.403 (ep15, ES@ep23) | **0.402** | 0.162 | 0.249 | 0.084 |
+| RT-DETR R18 | 960² + optimized loss recipe | 0.565 (ep14) | **0.555** | 0.249 | 0.308 | 0.112 |
+| RT-DETR R50 | same + R50 backbone (1:5 LR split) | 0.622 (ep3, ES@ep18) | **0.607** | 0.252 | 0.333 | 0.148 |
+| D-FINE-N | 640² + reference baseline (EMA on) | 0.414 (ep28) | **0.412** | 0.158 | 0.242 | 0.060 |
+| D-FINE-S | 640² + reference baseline (EMA off) | 0.403 (ep15, ES@ep23) | **0.402** | 0.162 | 0.249 | 0.084 |
 
-R50 v2 is the current best across all metrics. D-FINE variants underperform RT-DETRv2 by ~0.15–0.20 mAP@50 on this dataset; D-FINE-N (4M params, EMA) edges D-FINE-S (16M params, no EMA) by +0.01 mAP@50 but D-FINE-S has better small-object recall (+0.024 small mAP).
+R50 is the current best across all metrics. D-FINE variants underperform RT-DETRv2 by ~0.15–0.20 mAP@50 on this dataset; D-FINE-N (4M params, EMA) edges D-FINE-S (16M params, no EMA) by +0.01 mAP@50 but D-FINE-S has better small-object recall (+0.024 small mAP).
 
-### v2 loss-recipe deltas vs HF defaults (committed in `06_training_rtdetr_{r18,r50}.yaml`)
+### Optimized loss-recipe deltas vs HF defaults (committed in `06_training_rtdetr_{r18,r50}.yaml`)
 
-| Field | HF default | v2 | Why |
+| Field | HF default | optimized | Why |
 |---|---:|---:|---|
 | `lr` | 1e-4 | 5e-5 | 1e-4 collapsed mAP from 0.445→0.19 by ep14 (overshoot past optimum) |
 | `num_queries` | 300 | 30 | 100 surplus queries fired on background; 30 = 3.3× p99 |
