@@ -62,6 +62,7 @@ training:
   weight_decay: 0.0005
   warmup_epochs: 3
   scheduler: cosine
+  min_lr: 0.00001                 # absolute floor (1e-5)
   patience: 20                    # Standardized with DETR configs
   val_full_interval: 0         # full val every epoch — quick-val overstates mAP
   val_subset_fraction: 1.0     # ignored when val_full_interval=0

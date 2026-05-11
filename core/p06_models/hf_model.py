@@ -260,6 +260,62 @@ class HFDetectionModel(DetectionModel):
         return hf_labels
 
 
+def _resolve_pretrained_path(pretrained: str, config: dict) -> str:
+    """Resolve `model.pretrained` so a relative path to a saved checkpoint dir works.
+
+    Treats values containing path markers (`/`, `\\`, `.`, `~`, absolute paths)
+    as local filesystem paths and resolves them — first against the config dir
+    (when `_config_path` is stashed in config), then CWD. Returns the absolute
+    path if the directory exists locally; otherwise returns the input unchanged
+    (treated as an HF Hub repo id). Also auto-strips the `hf_model.` wrapper
+    prefix from a sibling `pytorch_model.bin` into a temp dir when needed.
+    """
+    from pathlib import Path as _Path
+
+    if not isinstance(pretrained, str) or not pretrained:
+        return pretrained
+    # HF Hub repo IDs are `org/name` or `name` — no leading slash/tilde,
+    # no `..`, no `./`. Anything else is treated as a local filesystem path.
+    looks_like_path = (
+        pretrained.startswith(("/", "./", "../", "~"))
+        or ".." in pretrained.split("/")
+        or _Path(pretrained).is_absolute()
+    )
+    if not looks_like_path:
+        return pretrained
+
+    candidates: list[_Path] = []
+    cfg_path = config.get("_config_path")
+    if cfg_path:
+        candidates.append(_Path(cfg_path).parent / pretrained)
+    candidates.append(_Path.cwd() / pretrained)
+    candidates.append(_Path(pretrained))
+    for cand in candidates:
+        resolved = cand.expanduser().resolve()
+        if resolved.is_dir():
+            sd_file = resolved / "pytorch_model.bin"
+            if sd_file.is_file():
+                import torch as _torch
+                sd = _torch.load(sd_file, map_location="cpu", weights_only=False)
+                if any(k.startswith("hf_model.") for k in sd):
+                    from utils.checkpoint import strip_hf_prefix
+                    import shutil, tempfile
+                    tmp = _Path(tempfile.mkdtemp(prefix="hf_pretrained_stripped_"))
+                    for f in resolved.iterdir():
+                        if f.name == "pytorch_model.bin":
+                            continue
+                        if f.is_file():
+                            shutil.copy(f, tmp / f.name)
+                    _torch.save(strip_hf_prefix(sd), tmp / "pytorch_model.bin")
+                    logger.info(
+                        "Stripped 'hf_model.' wrapper prefix from %s -> %s",
+                        sd_file, tmp,
+                    )
+                    return str(tmp)
+            return str(resolved)
+    return pretrained
+
+
 @register_model("hf_detection")
 def build_hf_model(config: dict) -> HFDetectionModel:
     """Build any HF ForObjectDetection model from config.
@@ -291,6 +347,7 @@ def build_hf_model(config: dict) -> HFDetectionModel:
         # Fast path: explicit registry lookup
         ModelClass, _ConfigClass, default_pretrained = HF_MODEL_REGISTRY[arch]
         pretrained = model_cfg.get("pretrained", default_pretrained)
+        pretrained = _resolve_pretrained_path(pretrained, config)
 
         logger.info(
             "Building HF model: arch=%s, pretrained=%s, hf_kwargs=%s",
@@ -306,7 +363,7 @@ def build_hf_model(config: dict) -> HFDetectionModel:
         )
     elif "hf_model_id" in model_cfg:
         # Dynamic fallback: load any HF ForObjectDetection model via Auto class
-        hf_model_id = model_cfg["hf_model_id"]
+        hf_model_id = _resolve_pretrained_path(model_cfg["hf_model_id"], config)
         logger.info(
             "Dynamic HF model loading: hf_model_id=%s, hf_kwargs=%s",
             hf_model_id,

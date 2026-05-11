@@ -494,7 +494,10 @@ def train_with_hf(
     from transformers import set_seed as _hf_set_seed
     _hf_set_seed(int(config.get("seed", 42)))
 
-    # Build model via our registry (same as native trainer)
+    # Build model via our registry (same as native trainer). Stash config path
+    # so `_resolve_pretrained_path` can resolve relative checkpoint dirs in
+    # `model.pretrained` against the YAML's own location.
+    config.setdefault("_config_path", str(config_path))
     model = build_model(config)
     output_format = getattr(model, "output_format", "yolox")
     logger.info("Training with HF Trainer: output_format=%s", output_format)

@@ -14,7 +14,7 @@ model:
   # spans ~6 cells (was ~4) — comfortably above the 2-cell detection floor.
   # Capped at 960 because ~half of source images are native 640×640
   # (some 416×416), so upscaling beyond this just interpolates fake detail.
-  input_size: [960, 960]
+  input_size: [640, 640]
   # 100 → 30 (reverted, 2026-05-05) — observed background-FP flooding at 100.
   # Fire data has ~2 GTs / image (p99=9), so 100 queries left ~98 orphan
   # queries with no real object to assign to. Under focal_loss_alpha=0.75
@@ -33,15 +33,15 @@ model:
   # based on observed behavior, not docs.
   box_noise_scale: 1.0            # HF default: 1.0 (no change)
   label_noise_ratio: 0.1          # HF default: 0.5 → reduced over-regularization
-  eos_coefficient: 0.1            # HF default: 0.0001 → penalize orphan-query background FPs
-  focal_loss_alpha: 0.5           # HF default: 0.75 → balanced, remove positive-class bias
-  focal_loss_gamma: 1.5           # HF default: 2.0 → smoother gradients
+  eos_coefficient: 0.0001         # HF default
+  focal_loss_alpha: 0.75          # HF default
+  focal_loss_gamma: 2.0           # HF default
 
 # normalize: false — fire dataset stats (mean ~0.39, std ~0.28) diverge from
 # ImageNet (mean ~0.45, std ~0.23). Skipping normalize lets BatchNorm recenter
 # per-batch and yields better convergence on this distribution.
 tensor_prep:
-  input_size: [960, 960]
+  input_size: [640, 640]
   rescale: true
   normalize: false
   mean: [0.485, 0.456, 0.406]    # ignored when normalize=false
@@ -74,26 +74,27 @@ augmentation:
   # brightness loosen up. Mosaic re-enabled — prior CLAUDE.md warning was from
   # the unstable v0 loss recipe; v2 recipe (eos=0.1, focal_α=0.5) should
   # tolerate it. Re-test on R18 first; if stable, propagate to R50.
-  mosaic: true                    # was false — single biggest aug lever for small datasets
+  mosaic: false                   # disabled — destabilizes bipartite matching + costly CPU disk I/O on subset runs
   mixup: false                    # leaving off; bipartite matching + mixup is fragile
 
-  perspective_p: 0.1
+  # Light aug recipe (reduced from v3 aggressive)
+  perspective_p: 0.0              # off — fire/smoke do not have rigid structure that benefits
   fliplr: 0.5
   flipud: 0.0
-  brightness_contrast_p: 0.5      # 0.3 → 0.5 — apply more often
-  brightness: 0.2                 # 0.1 → 0.2 — fire/smoke happen across lighting conditions
-  contrast: 0.2                   # 0.1 → 0.2
-  hsv_p: 0.3                      # 0.1 → 0.3 — apply more often
-  hsv_h: 0.015                    # KEEP TIGHT — fire color is class-defining
-  hsv_s: 0.3                      # KEEP TIGHT — same reason
-  hsv_v: 0.4                      # 0.3 → 0.4 — value is safe (doesn't change color identity)
+  brightness_contrast_p: 0.3
+  brightness: 0.1
+  contrast: 0.1
+  hsv_p: 0.2
+  hsv_h: 0.01                     # tight — fire color is class-defining
+  hsv_s: 0.2
+  hsv_v: 0.2
 
   min_bbox_area: 4.0              # keep small fire/smoke (2×2 px minimum)
 
-  scale: [0.7, 1.3]               # was [0.9, 1.1] — ±30% jitter, also helps small-recall
-  degrees: 15.0                   # 10 → 15 — modest bump
-  translate: 0.15                 # 0.1 → 0.15
-  shear: 2.0
+  scale: [0.9, 1.1]               # ±10% jitter
+  degrees: 5.0
+  translate: 0.05
+  shear: 0.0
 
 training:
   backend: hf
@@ -103,7 +104,7 @@ training:
   # then collapsed to 0.19 by ep13 (classic DETR overfit + miscalibration
   # documented in feature CLAUDE.md). 5e-5 halves the gradient magnitude so
   # the model settles instead of bouncing past the optimum.
-  lr: 0.00005                     # HF default: 1e-4 → paper Table 1, R18 row × 0.5 for stable fine-tune
+  lr: 0.0001                      # HF default 1e-4 (paper Table 1 R18 row)
   weight_decay: 0.0001            # HF default: 1e-4 (no change)
   warmup_steps: 2000              # HF default: varies → paper LinearWarmup
   # Cosine decay 1e-4 → 1e-5 over the run. Paper uses MultiStepLR with milestone
@@ -112,7 +113,7 @@ training:
   # noisy plateau observed at flat LR).
   scheduler: cosine_with_min_lr
   lr_scheduler_kwargs:
-    min_lr: 0.000005              # absolute floor (5e-6 = 10% of new initial 5e-5)
+    min_lr: 0.00001               # absolute floor (1e-5 = 10% of initial 1e-4)
   max_grad_norm: 0.1
   bf16: true
   amp: false                      # fp16 AMP overflows DETR decoder

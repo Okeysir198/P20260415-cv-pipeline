@@ -11,7 +11,7 @@ model:
   # 960 → 1024 (2026-05-05 v3) — R50 v2 EA showed small recall stuck at 0.33,
   # steepest miss-rate slope is size (+0.34 small vs large). Stride-8 cells go
   # 120 → 128, modest VRAM bump (~22 GB est at bs=4 vs prior 18.8 GB).
-  input_size: [1024, 1024]
+  input_size: [640, 640]
   # 30 → 50 (2026-05-05 v3) — R50 v2 EA showed missed = 53% of error volume,
   # 51% are TRUE misses (model emitted no candidate). With eos=0.1 firmly
   # penalising orphan-query background fires, the small extra capacity helps
@@ -24,15 +24,15 @@ model:
   # similarly on R50 (same arch family, just bigger backbone).
   box_noise_scale: 1.0            # HF default: 1.0 (no change)
   label_noise_ratio: 0.1          # HF default: 0.5 → reduced over-regularization
-  eos_coefficient: 0.1            # HF default: 0.0001 → penalize orphan-query background FPs
-  focal_loss_alpha: 0.5           # HF default: 0.75 → balanced, remove positive-class bias
-  focal_loss_gamma: 1.5           # HF default: 2.0 → smoother gradients
+  eos_coefficient: 0.0001         # HF default
+  focal_loss_alpha: 0.75          # HF default
+  focal_loss_gamma: 2.0           # HF default
 
 # normalize: false — fire dataset stats (mean ~0.39, std ~0.28) diverge from
 # ImageNet (mean ~0.45, std ~0.23). Skipping normalize lets BatchNorm recenter
 # per-batch and yields better convergence on this distribution.
 tensor_prep:
-  input_size: [1024, 1024]
+  input_size: [640, 640]
   rescale: true
   normalize: false
   mean: [0.485, 0.456, 0.406]    # ignored when normalize=false
@@ -45,8 +45,8 @@ data:
   # estimate at bs=8/960² is ~22 GB (fits 32 GB GPU but tight if other tenants
   # are present). Keep bs=4 in YAML as the safe default; override at launch
   # time (--override data.batch_size=8) if GPU is free.
-  batch_size: 4
-  eval_batch_size: 2
+  batch_size: 8
+  eval_batch_size: 8
   num_workers: 4                  # workers reduced (was 8) to bound CPU RAM during fork+COW
   prefetch_factor: 2              # was 6 — smaller in-flight buffer
   pin_memory: false               # was true — pinned memory adds RAM pressure
@@ -61,23 +61,24 @@ augmentation:
   mosaic: false                   # DETR-family doesn't use it
   mixup: false
 
-  perspective_p: 0.1
+  # Light aug recipe
+  perspective_p: 0.0
   fliplr: 0.5
   flipud: 0.0
-  brightness_contrast_p: 0.3      # light only — fire color is class-defining
+  brightness_contrast_p: 0.3
   brightness: 0.1
   contrast: 0.1
-  hsv_p: 0.1
-  hsv_h: 0.015                    # tight HSV — color is class-defining for fire/smoke
-  hsv_s: 0.3
-  hsv_v: 0.3
+  hsv_p: 0.2
+  hsv_h: 0.01                     # tight — fire color is class-defining
+  hsv_s: 0.2
+  hsv_v: 0.2
 
   min_bbox_area: 4.0              # keep small fire/smoke (2×2 px minimum)
 
   scale: [0.9, 1.1]
-  degrees: 10.0
-  translate: 0.1
-  shear: 2.0
+  degrees: 5.0
+  translate: 0.05
+  shear: 0.0
 
 training:
   backend: hf
@@ -95,7 +96,7 @@ training:
   # noisy plateau observed at flat LR).
   scheduler: cosine_with_min_lr
   lr_scheduler_kwargs:
-    min_lr: 0.000005              # absolute floor (5e-6 = 10% of new initial 5e-5)
+    min_lr: 0.00001               # absolute floor (1e-5)
   # 0.1 → 0.5 (2026-05-05 v3) — R50 v2 logs showed pre-clip grad_norm in 30-150
   # range, so 0.1 was nuking gradient direction (essentially zero-out clip).
   # 0.5 lets real signal through; offset by EMA below for stability.
@@ -103,7 +104,7 @@ training:
   bf16: true
   amp: false                      # fp16 AMP overflows DETR decoder
   gpu_augment: false              # ignored on HF backend
-  ema: true                       # paper default
+  ema: false
   # decay 0.9999 → 0.999 (2026-05-05 v3) — at 0.9999 the EMA needs ~1/(1-decay)
   # = 10000 steps to "warm up" (~3 epochs of bs=4 here), so it never engaged
   # productively in R50 v2 (best was ep3, ES at ep18). 0.999 → ~1000-step

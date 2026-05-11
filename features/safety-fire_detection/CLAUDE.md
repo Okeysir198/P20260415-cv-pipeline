@@ -138,30 +138,40 @@ CUDA_VISIBLE_DEVICES=1 uv run core/p06_training/train.py \
 
 Run dirs land in `features/safety-fire_detection/runs/<arch>_<ts>/`.
 
-## Config Summary (2026-05-10)
+## Config Summary (2026-05-11) — standardized for clean arch comparison
 
-| Config | Arch | Params | Backend | epochs | lr | lr (backbone) | scheduler | EMA | input | metric |
+All DETR-family configs share the same recipe except for arch + start LR (size-tiered). Designed so a mAP delta between two runs reflects the *architecture*, not recipe noise.
+
+| Config | Arch | Params | Backend | epochs | start lr | lr (bb) | scheduler | min_lr | EMA | input | bs |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `06_training_dfine_n.yaml` | dfine-n | 4M | hf | 30 | 5e-5 | — | linear | true | 640 | eval_map |
-| `06_training_dfine_m.yaml` | dfine-m | 31M | hf | 30 | 5e-5 | — | linear | true | 640 | eval_map |
-| `06_training_rtdetr_r18.yaml` | rtdetr-r18 | 20M | hf | 30 | 5e-5 | — | cosine_with_min_lr | true | 960 | eval_map_50 |
-| `06_training_rtdetr_r50.yaml` | rtdetr-r50 | 42M | hf | 30 | 5e-5 | 1e-5 | cosine_with_min_lr | true | 1024 | eval_map_50 |
-| `06_training_yolox_s.yaml` | yolox-s | 9M | pytorch | 80 | 1e-3 | — | cosine | false | 640 | val/mAP50 |
-| `06_training_yolox_m.yaml` | yolox-m | 25M | pytorch | 80 | 1e-3 | — | cosine | false | 640 | val/mAP50 |
+| `06_training_dfine_n.yaml`    | dfine-n  | 4M  | hf      | 60 | **1e-4** | — | cosine_with_min_lr | 1e-5 | ✗ | 640 | 8  |
+| `06_training_dfine_s.yaml`    | dfine-s  | 16M | hf      | 60 | **1e-4** | — | cosine_with_min_lr | 1e-5 | ✗ | 640 | 8  |
+| `06_training_dfine_m.yaml`    | dfine-m  | 31M | hf      | 60 | **5e-5** | — | cosine_with_min_lr | 1e-5 | ✗ | 640 | 8  |
+| `06_training_rtdetr_r18.yaml` | r18      | 20M | hf      | 60 | **1e-4** | — | cosine_with_min_lr | 1e-5 | ✗ | 640 | 8  |
+| `06_training_rtdetr_r50.yaml` | r50      | 42M | hf      | 60 | **5e-5** | 1e-5 | cosine_with_min_lr | 1e-5 | ✗ | 640 | 8  |
+| `06_training_yolox_s.yaml`    | yolox-s  | 9M  | pytorch | 60 | 1e-3 (SGD) | — | cosine             | 1e-5 | ✗ | 640 | 16 |
+| `06_training_yolox_m.yaml`    | yolox-m  | 25M | pytorch | 60 | 1e-3 (SGD) | — | cosine             | 1e-5 | ✗ | 640 | 16 |
 
-### Recipe sources
+**LR convention** (DETR-family): small (≤20M params) start at **1e-4**; big (≥30M) start at **5e-5**. All decay cosine → **1e-5** floor over 60 epochs. R50 keeps the 1:5 head/backbone split (head 5e-5, backbone 1e-5) per paper.
 
-**D-FINE** — reference baseline from `notebooks/detr_finetune_reference/our_dfine_torchvision/` (CPPE-5 ablation, best-performing norm=false configs). Proven: dfine-n=0.710, dfine-s=0.603, dfine-m=0.431 on CPPE-5. Flat LR, no backbone split, wd=0, linear schedule, 30 ep. Previous paper-aligned recipe (lr=2.5e-4 + 1:20 LR split + constant schedule) produced worse results on fire data (dfine-n peaked at 0.365 vs RT-DETR R50's 0.607).
+**Loss params** (DETR-family, HF defaults): `eos_coefficient=0.0001`, `focal_loss_alpha=0.75`, `focal_loss_gamma=2.0`. `num_queries=30` for n/s/m/r18; `50` for r50.
 
-**RT-DETR** — paper Table 1 × 0.5 safety factor. Loss params deviate from HF defaults (see v2 deltas table below).
+**Augmentation** (DETR-family, uniform "light" recipe): `fliplr=0.5`, `brightness/contrast=0.1 @ p=0.3`, `HSV=0.2 @ p=0.2` (h tight 0.01 — fire color is class-defining), `scale=[0.9, 1.1]`, `degrees=5`, `translate=0.05`, no mosaic/mixup/perspective/shear.
 
-**YOLOX** — Megvii recipe. Pytorch backend, `.venv-yolox-official/` required.
+YOLOX configs are intentionally NOT in this standardization — they keep the Megvii recipe (SGD lr=1e-3, mosaic=true, AMP=true, bs=16). Pytorch backend, `.venv-yolox-official/` required.
 
-Common: `normalize=false`, `score_threshold=0.0` (canonical mAP), `seed=42`, `save_interval=1`.
+Common across all configs: `normalize=false`, `score_threshold=0.015`, `seed=42`, `save_interval=1`, `patience=20`, `min_bbox_area=4`.
 
-D-FINE invariants: `bf16=false` (mandatory — DFL stalls under bf16), `weight_decay=0`, EMA decay 0.9999 / warmup 1000.
-RT-DETRv2 invariants: `bf16=true`. `num_queries=30` (r18) / `50` (r50) — fire-density justified (paper default 300).
-YOLOX invariants: pytorch backend, sgd, `mosaic=true`.
+### Recipe-change rationale (current standardization)
+
+- **Input 640²** everywhere — earlier r18@960 / r50@1024 ran 2-3× slower per epoch and confounded arch comparison with resolution.
+- **EMA off** everywhere — earlier mix (n/m/r50=true, s/r18=false) made best-checkpoint comparison non-symmetric. Fire dataset is large enough that EMA's smoothing benefit is small.
+- **HF default loss params** — earlier custom loss (`eos=0.1, focal_α=0.5, focal_γ=1.5`) helped on one fire-specific failure mode but is unjustified across archs at the comparison stage.
+- **Light aug** — earlier "v3 aggressive" (mosaic, brightness 0.2, scale [0.7,1.3]) destabilized small datasets; minimal aug + cosine decay gave the cleanest convergence on the dfine-n resume run (mAP@50=0.348 best).
+
+D-FINE invariants: `bf16=false` (mandatory — DFL stalls under bf16), `weight_decay=0`.
+RT-DETRv2 invariants: `bf16=true`.
+YOLOX invariants: pytorch backend, sgd, `mosaic=true`, amp=true.
 
 ## Evaluation utilities
 
