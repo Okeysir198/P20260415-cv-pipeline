@@ -35,6 +35,8 @@ Client → sam3_1_service (:18106, GPU)
 
 All image endpoints accept single request or `list[request]` for batch processing.
 
+> ⚠ **Box format: `[xmin, ymin, w, h]` normalized 0-1** — NOT YOLO/COCO-style `[x1, y1, x2, y2]`. Applies to `/segment_box` and any session prompt carrying boxes. See Gotchas → Request Formats for conversion notes.
+
 ### Video Sessions (stateful)
 | Method | Path | Purpose |
 |--------|------|---------|

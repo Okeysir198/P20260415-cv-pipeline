@@ -11,6 +11,8 @@
 - 🎯 **Fine-tune** — custom classes not in COCO; must collect data + train (always via transfer learning, never from scratch)
 - 🔧 **Pretrained only** — vendor pretrained weights used as-is; enrollment or config only
 
+Status legend: 🟢 trained/optimized • 🟡 partial / plateau • ✅ done (pretrained pipeline) • 🔄 in progress • ⬜ not started • ⏸ blocked • ❌ skipped
+
 | Folder | Type | Mode | Best Pretrained | Pretrained mAP50 | Status |
 |---|---|---|---|---|---|
 | `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | 🟢 Optimized recipe (2026-05-10): RT-DETRv2-R18 test mAP50=0.555, R50 test mAP50=0.607 (current best). See feature CLAUDE.md for the loss-recipe overhaul + the CPU-RAM leak fix that was required to train at 960². |

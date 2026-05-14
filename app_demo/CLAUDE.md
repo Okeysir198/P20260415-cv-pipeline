@@ -275,6 +275,14 @@ uv run app_demo/run.py --config app_demo/config/config.yaml
 ## Gotchas
 
 - **⚠ Module-level state leaks across sessions** — `_zones` in `tab_zone.py` are shared across ALL Gradio sessions and are NOT thread-safe. One user's zone overwrites another's. For production, move to per-session storage (`gr.State`) or use locks.
+  ```python
+  # Per-session state (replaces module-level _zones)
+  zones_state = gr.State({})
+  def on_click(evt, zones):       # zones is per-session
+      zones[evt.id] = evt.points
+      return zones
+  canvas.select(on_click, inputs=[zones_state], outputs=[zones_state])
+  ```
 - **YOLOX-M needs 0-255 input** — `ModelManager` sets `std=[1/255, 1/255, 1/255]` for raw pixel values
 - **No hardcoded classes** — All class names loaded from config files
 - **Config paths relative** — `coco_names_config: coco_names.yaml` is relative to `app_demo/config/`

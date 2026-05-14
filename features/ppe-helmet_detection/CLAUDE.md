@@ -1,5 +1,7 @@
 # ppe-helmet_detection
 
+> **Status (as of 2026-05-14): Phase-B not yet executed.** No Phase-B training run directories under `runs/` (only `02_annotation_quality` runs) and the Phase-B results table below is empty. `eval/benchmark_results.json` is present (pretrained baseline only, 2026-04-17). Tables below are forward-looking. Unblock criteria: sequential GPU 2 queue per `features/CLAUDE.md` Phase B order (helmet runs after fire + fall) and a documented nitto-class mitigation choice (see "Unique risk" below) before Phase C.
+
 **Type:** Detection | **Training:** Fine-tune required (PPE compliance classes not in COCO)
 
 ## Overview

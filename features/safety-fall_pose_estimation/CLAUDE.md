@@ -1,5 +1,7 @@
 # safety-fall_pose_estimation
 
+> **Status (as of 2026-05-14): Phase-B fine-tuning Option only; pretrained ONNX path is operational.** Option 1 (DWPose ONNX) is the documented recommended path and is ready to use. Option 2 (RTMPose / ViTPose fine-tune) has not been executed — `runs/` does not exist, `eval/` contains only `.gitkeep`. The Option-2 checklist below is forward-looking. Unblock criteria for Option 2: only pursue if DWPose ONNX proves insufficient on industrial footage (per "When to consider" below).
+
 **Type:** Pose keypoints | **Training:** Optional — pretrained backends available
 
 ## Overview

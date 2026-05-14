@@ -20,13 +20,41 @@ Separate registries (see `core/CLAUDE.md` for the full table):
 | `@register_pose_model` | `pose_registry.py` | rtmpose, mediapipe_pose |
 | `@register_face_detector` / `@register_face_embedder` | `face_registry.py` | scrfd, mobilefacenet |
 
+## Registering a new architecture
+
+`@register_model("<arch>")` from `core.p06_models.registry` accepts either a builder function (preferred for any arch needing extra setup — processor wiring, kwarg filtering) or a class. `build_model(config)` looks up `config["model"]["arch"]` in `MODEL_REGISTRY` and calls the registered callable with the full config dict. Auto-discovery happens in `core/p06_models/__init__.py` — add a soft-import there so the decorator runs at package import:
+
+```python
+# core/p06_models/my_arch.py
+from core.p06_models.registry import register_model
+from core.p06_models.base import DetectionModel
+
+@register_model("my-arch")
+def build_my_arch(config: dict) -> DetectionModel:
+    cfg = config["model"]
+    return MyDetector(num_classes=cfg["num_classes"], ...)
+```
+
+```yaml
+# features/<name>/configs/06_training_my_arch.yaml
+model:
+  arch: my-arch
+  num_classes: 3
+```
+
+See `hf_model.py::build_hf_model` (`@register_model("hf_detection")`, line 319) for a full factory example; `yolox.py` for the class form.
+
 ## Paddle is not in this registry
 
 Paddle archs (PicoDet, PP-YOLOE) live in `core/p06_paddle/` and run in `.venv-paddle/`. See `core/p06_paddle/CLAUDE.md`.
 
 ## HF wrappers
 
-`HFDetectionModel` (`hf_model.py`) wraps any HF `ForObjectDetection` model so HF Trainer can backprop. **Eval-mode invariant**: when `not self.training`, the wrapper sets the heavy `ModelOutput` fields to `None` after the forward — `encoder_last_hidden_state`, `intermediate_hidden_states`, `intermediate_reference_points`, `decoder_hidden_states`, `auxiliary_outputs`, plus their attention/encoder-output siblings. HF's prediction collector accumulates every field across the entire eval split before calling `compute_metrics`; without the strip the encoder hidden state alone (`B × num_tokens × hidden_dim`) hoards ~30 MB/batch at 960² → ~38 GB CPU per eval at val=2606. New HF detection wrappers MUST mirror this behaviour or regress the leak. The compute_metrics path only consumes `loss`/`logits`/`pred_boxes`, so dropping the rest is lossless.
+`HFDetectionModel` (`hf_model.py`) wraps any HF `ForObjectDetection` model so HF Trainer can backprop.
+
+### GPU memory invariant — eval-mode `ModelOutput` strip (load-bearing)
+
+`HFDetectionModel.forward` (`hf_model.py:72-143`) replaces heavy `ModelOutput` fields with a 0-element placeholder tensor at eval time (the strip loop lives at `hf_model.py:113-142`). Affected fields: `encoder_last_hidden_state`, `encoder_hidden_states`, `encoder_attentions`, `decoder_hidden_states`, `decoder_attentions`, `cross_attentions`, `intermediate_hidden_states`, `intermediate_reference_points`, `intermediate_logits`, `intermediate_predicted_corners`, `initial_reference_points`, `init_reference_points`, `auxiliary_outputs`, `enc_topk_logits`, `enc_topk_bboxes`, `enc_outputs_class`, `enc_outputs_coord_logits`, `denoising_meta_values`. HF Trainer's `prediction_loop` accumulates every `ModelOutput` field on CPU across the full eval split before invoking `compute_metrics`; without the strip, `encoder_last_hidden_state` alone hoards ~30 MB/batch at 960² → ~38 GB CPU per eval at val=2606, and Python's allocator does not return freed pages to the OS so RAM grows ~+30 GB per epoch (verified 2026-05-04: ep1 → ep3 went 38 → 122 GB → OOM). The placeholder must be a 0-element tensor, NOT `None` — accelerate's `pad_across_processes` raises `TypeError: Unsupported types NoneType`. New HF detection wrappers MUST mirror this behaviour or the leak regresses. `compute_metrics` only consumes `loss`/`logits`/`pred_boxes`; the strip is lossless.
 
 ## Weights-only resume (continue training from a previous run)
 

@@ -27,10 +27,13 @@ authoritative example.
 
 Pre-fix splits had **0 industrial/hazard images in val and test** despite
 711 such images in the raw `industrial_hazards` source: the previous
-class-only stratifier (`SplitGenerator._stratified_split` + the standalone
-`scripts/dedup_split.py::_stratified_group_split`) only balanced per-class
-box counts, so smaller sources collapsed into whatever split their largest
-groups landed in.
+class-only stratifier (`SplitGenerator._stratified_split`, and the same
+logic mirrored in the `scripts/dedup_split.py` wrapper) only balanced
+per-class box counts, so smaller sources collapsed into whatever split
+their largest groups landed in. The canonical implementation now lives in
+`core/p00_data_prep/core/dedup.py` (invoked by p00's main pipeline);
+`scripts/dedup_split.py` is a thin wrapper for re-deduping an existing
+`training_ready/<name>/` without re-running p00 from raw.
 
 Re-running p00 with the new pipeline at `hamming_thresh: 3` produced:
 
@@ -113,9 +116,10 @@ fps where each frame is already different, the defaults are fine.
 
 ### Legacy entry point
 
-`scripts/dedup_split.py` is now a thin wrapper that imports from
-`core/p00_data_prep/core/dedup.py`. Use it only when you already have a
-`training_ready/<name>/` directory and don't want to re-run p00 from raw.
-The wrapper derives `source` from the leading underscore-token of the
-filename (lossy heuristic) — new datasets going through p00 use the real
-`source.name` from each sample's adapter metadata.
+`core/p00_data_prep/core/dedup.py` is the canonical module — called by
+p00's main pipeline from raw. `scripts/dedup_split.py` is a thin wrapper
+around the same module, kept only for re-deduping an existing
+`training_ready/<name>/` directory without re-running p00 from raw.
+Warning: the wrapper derives `source` from the leading underscore-token
+of the filename (lossy fallback heuristic); running p00 from raw uses the
+metadata-driven `source.name` from each sample's adapter for accuracy.

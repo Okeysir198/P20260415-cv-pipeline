@@ -4,6 +4,12 @@ Authoritative notes on the training loop(s), callbacks, and the choice between
 the pytorch and HF Trainer backends. Companion to `README.md` — this file
 covers what's *between* files and the gotchas learned the hard way.
 
+## Read First — Critical Pitfalls
+
+- **HF DETR-family val OOM**: set `eval_accumulation_steps=4` for val sets ≥1000 imgs — see [Gotchas: `eval_accumulation_steps=4` is mandatory](#gotchas) (line ~322).
+- **One switch for rescale+normalize+input_size**: the `tensor_prep` block in `06_training.yaml` is authoritative — see [Gotchas: `tensor_prep` is the single switch](#gotchas) (line ~243).
+- **Early `set_seed` before `build_model`**: required for D-FINE/RT-DETRv2 head-reinit reproducibility (prevents 0.15-mAP stall) — see [Determinism: Early `set_seed` hook](#determinism) (line ~180).
+
 ## Three backends, one config
 
 `training.backend` in `06_training.yaml` picks the execution path:
@@ -146,6 +152,8 @@ training:
   error_analysis: { enabled: false }
   post_train: { enabled: false }   # pytorch-backend only: skip best-reload + test eval
 ```
+
+> **Backend asymmetry**: pytorch-backend post_train (best-reload + test eval) is opt-out via `training.post_train: { enabled: false }`; HF backend auto-enables via `load_best_model_at_end` + auto-test eval (no separate knob).
 
 **pytorch-backend `_finalize_training`** (trainer.py): on train-end, reloads `best.pth`, auto-builds the test-split loader via `YOLOXDataset(split="test")` with `base_dir=self.config_path.parent` (so `05_data.yaml::path: "../../../dataset_store/..."` resolves correctly), runs `_validate(test_loader)` → writes `test_results.json`, then dispatches to `run_post_train_artifacts`. Brings pytorch backend to parity with HF's `load_best_model_at_end` + auto-test convention.
 

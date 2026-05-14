@@ -1,5 +1,7 @@
 # safety-poketenashi_phone_usage
 
+> **Status (as of 2026-05-14): Phase-B not yet executed.** `eval/benchmark_results.json` and `eval/benchmark_report.md` referenced below are absent (only `.gitkeep` in `eval/`); two exploratory `dfine_n_*` run directories exist under `runs/` but are not the Phase-B {YOLOX-M, RT-DETRv2-R50, D-FINE-M} sweep and the results table below is empty. Tables below are forward-looking. Unblock criteria: TBD — see iteration log.
+
 **Type:** Detection sub-model | **Training:** Fine-tune required (phone_usage action class not in COCO)
 
 ## Overview

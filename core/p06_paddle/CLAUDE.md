@@ -19,6 +19,8 @@ Convergence with the rest of the pipeline happens at ONNX, not `nn.Module`.
 bash scripts/setup-paddle-venv.sh                              # one-time
 .venv-paddle/bin/python core/p06_paddle/train.py \
   --config configs/_test/06_training_paddle_det.yaml
+# Example config above is the CI fixture; per-feature configs live at
+# features/<name>/configs/06_training_paddle_*.yaml (cls/det/kpt/seg variants).
 .venv-paddle/bin/python core/p06_paddle/export.py \
   --config <same.yaml> --checkpoint <run>/best.pdparams --out <run>/model.onnx
 # From here, main venv handles eval/infer/demo via standard ORT path:
@@ -36,4 +38,4 @@ family is a thin driver around its upstream Trainer/Engine. No torch dependency.
 - **PaddleDetection's pip wheel strips `configs/` + `tools/`** — `setup-paddle-venv.sh` clones the upstream repo to `.venv-paddle/PaddleDetection/`. `_find_ppdet_config` searches there first.
 - **Train-from-scratch on small datasets explodes** — paddle reports as `Cannot allocate 4.5 PB` (integer underflow on shape). Always use `model.pretrained: <url>` for CI smokes.
 - **YOLO labels → COCO JSON** — auto-converted by `utils.paddle_bridge.yolo_to_coco`, cached as `<dataset_root>/<split>_paddle_coco.json`. `image_dir` for ppdet's `COCODataSet` is the dataset root (file_name in our JSON is already prefixed with `<split>/images/`).
-- **Hardware**: paddle 3.3.x doesn't support sm_120 (RTX 50xx Blackwell). Tests skip-with-reason on these GPUs until upstream paddle ships a release. Verified working on sm_90 and below.
+- **Hardware**: paddle 3.3.x doesn't support sm_120 (RTX 50xx Blackwell). Tests skip-with-reason on these GPUs until upstream paddle ships a release. Verified working on sm_90 and below (as of 2026-05-14, CUDA 12.6 bundled wheel, paddlepaddle-gpu>=3.0.0).

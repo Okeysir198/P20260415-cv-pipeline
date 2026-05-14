@@ -1,5 +1,7 @@
 # ppe-shoes_detection
 
+> **Status (as of 2026-05-14): Phase-B not yet executed.** No Phase-B training run directories under `runs/` (only `02_annotation_quality` runs) and the Phase-B results table below is empty. `eval/benchmark_results.json` is present (pretrained baseline only, 2026-04-17). Tables below are forward-looking. Unblock criteria: sequential GPU 2 queue per `features/CLAUDE.md` Phase B order (shoes is last of the 5 detection features; may short-circuit if a winner is obvious from earlier features).
+
 **Type:** Detection | **Training:** Fine-tune required (safety shoe compliance classes not in COCO)
 
 ## Overview

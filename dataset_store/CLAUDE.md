@@ -2,6 +2,20 @@
 
 Root: `ai/dataset_store/`
 
+## Contents
+
+- [Layout](#layout)
+- [Top-level summary](#top-level-summary)
+- [Per-source inventory (disk truth)](#per-source-inventory-disk-truth)
+- [site_collected/ (internal Nitto Denko footage)](#site_collected-internal-nitto-denko-footage)
+- [training_ready/ (derived)](#training_ready-derived)
+- [Downloading datasets (via MCP, no scripts)](#downloading-datasets-via-mcp-no-scripts)
+- [Source registry (public, reproducible)](#source-registry-public-reproducible)
+- [Known gaps](#known-gaps)
+- [Baidu-Only Dataset Downloads](#baidu-only-dataset-downloads)
+- [Annotation conversions pending](#annotation-conversions-pending)
+- [Disk cleanup completed (2026-05-11)](#disk-cleanup-completed-2026-05-11)
+
 ## Layout
 
 ```
@@ -36,7 +50,7 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 
 ## Top-level summary
 
-> **Disk-size snapshot last verified: 2026-05-11.** Image counts are from Phase A data-prep logs (2026-04-17) and are not re-counted here — for current per-source counts see each feature's `DATASET_REPORT.md`. To refresh disk sizes: `du -sh dataset_store/raw/*/ dataset_store/training_ready/`.
+> **Disk-size snapshot last verified: 2026-05-11** (refresh: `du -sh dataset_store/{raw,site_collected,training_ready}/*`). Image counts are from Phase A data-prep logs (2026-04-17) and are not re-counted here — for current per-source counts see each feature's `DATASET_REPORT.md`.
 
 | Category | Size | Imgs | Notes |
 |---|---|---|---|
