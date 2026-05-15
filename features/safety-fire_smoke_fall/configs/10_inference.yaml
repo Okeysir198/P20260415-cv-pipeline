@@ -1,0 +1,31 @@
+# Inference + alert config for the combined fire+smoke+fall feature.
+# Loaded by core.p10_inference.video_inference.load_alert_config.
+
+model:
+  weights: ../runs/best.pt        # relative to this file
+  # DETR sigmoid scores cap ~0.2; default 0.05 floods FPs. Re-sweep this value
+  # via scripts/threshold_sweep.py after training. Tighter per-class alert
+  # thresholds live in `alerts.confidence_thresholds` below.
+  conf: 0.075
+  iou: 0.45
+
+alerts:
+  # Per-class alert thresholds — fire/smoke values mirror safety-fire_detection;
+  # fallen_person threshold mirrors safety-fall-detection (0.7) until re-sweep.
+  confidence_thresholds: {fire: 0.10, smoke: 0.10, fallen_person: 0.7}
+  # fallen_person requires sustained detection to suppress transient mis-pose
+  # FPs; fire/smoke alert immediately.
+  frame_windows: {fallen_person: 15}
+  window_ratio: 0.8
+  cooldown_frames: 90
+
+tracker:
+  type: bytetrack
+  track_activation_threshold: 0.10
+  lost_track_buffer: 30
+  minimum_iou_threshold: 0.1
+  frame_rate: 30
+
+samples:
+  images: []
+  videos: []

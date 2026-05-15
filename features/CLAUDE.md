@@ -17,6 +17,7 @@ Status legend: 🟢 trained/optimized • 🟡 partial / plateau • ✅ done (p
 |---|---|---|---|---|---|
 | `safety-fire_detection` | Detection | 🎯 Fine-tune | SalahALHaismawi_yolov26 | 0.153 | 🟢 Optimized recipe (2026-05-10): RT-DETRv2-R18 test mAP50=0.555, R50 test mAP50=0.607 (current best). See feature CLAUDE.md for the loss-recipe overhaul + the CPU-RAM leak fix that was required to train at 960². |
 | `safety-fall-detection` | Detection | 🎯 Fine-tune | yolov11_fall_melihuzunoglu.pt | 0.050 | ⬜ not started |
+| `safety-fire_smoke_fall` | Detection (combined 3-class) | 🎯 Fine-tune | inherits fire+fall sources | — | 🟢 D-FINE-N test mAP50=**0.584** (2026-05-15, 4 archs benched: N 0.584, S 0.522, M 0.340, R50 0.339). Bigger D-FINE variants underperformed due to LR×bs gap — see feature CLAUDE.md. |
 | `safety-fall_pose_estimation` | Pose keypoints | 🔧 Pretrained only (optional fine-tune) | dwpose_384_pose (DWPose ONNX), RTMPose-S/M | — | ✅ DWPose ONNX ready; fine-tune optional |
 | `safety-poketenashi_phone_usage` | Detection sub-model | 🎯 Fine-tune | none (action class) | 0.000 | ⬜ not started |
 | `safety-poketenashi_point_and_call` | Pose orchestrator | 🔧 Pretrained only | dwpose_384_pose | — | 🟢 v1.8 **F1=0.824** (P=0.778, R=0.875), Δ +0.721 vs baseline 0.103, 2026-04-30 — **v1.2 target hit; 8× baseline** |
