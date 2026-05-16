@@ -67,7 +67,7 @@ augmentation:
 
 training:
   backend: hf
-  epochs: 60
+  epochs: 120
   optimizer: adamw
   lr: 0.0001
   weight_decay: 0.0               # D-FINE uses wd=0
@@ -82,7 +82,7 @@ training:
   ema: true
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 20
+  patience: 40
 
   val_viz:
     enabled: true
