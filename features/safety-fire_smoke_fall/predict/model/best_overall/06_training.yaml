@@ -1,18 +1,19 @@
-# Training config — Fire + Smoke + Fallen Person (D-FINE-M, HF Trainer backend)
-# Mirrors safety-fire_smoke_fall/configs/06_training_dfine_s.yaml; scaled to dfine-m (31M).
+# Training config — Fire + Smoke + Fallen Person (D-FINE-N, HF Trainer backend)
+# Mirrors safety-fire_detection/configs/06_training_dfine_n.yaml; adapted to 3 classes
+# and bumped num_queries (fall imagery has more boxes per image than pure fire).
 
 model:
-  arch: dfine-m
-  pretrained: ustc-community/dfine-medium-obj2coco
+  arch: dfine-n
+  pretrained: ustc-community/dfine_n_coco
   num_classes: 3
   input_size: [640, 640]
-  num_queries: 20
+  num_queries: 30                 # fire used 30 (p99=9)
   num_denoising: 100
   box_noise_scale: 1.0
   label_noise_ratio: 0.1
   eos_coefficient: 0.0001
-  focal_loss_alpha: 0.9           # bumped 0.75 → 0.9 — heavier weight on rare positives
-  focal_loss_gamma: 3.0           # bumped 2.0 → 3.0 — focus on hard examples (down-weights easy preds 10×)
+  focal_loss_alpha: 0.75
+  focal_loss_gamma: 2.0
   # Penalize wrong-class predictions: bump cls loss + matcher class cost.
   weight_loss_vfl: 2.0            # default 1.0 — cls loss 2× vs bbox/giou
   matcher_class_cost: 4.0         # default 2.0 — Hungarian matching prefers right class
@@ -20,16 +21,15 @@ model:
 tensor_prep:
   input_size: [640, 640]
   rescale: true
-  normalize: false
+  normalize: false                # fire stats diverge from ImageNet; verified beneficial on fire feature (+0.089 mAP@50)
   mean: [0.485, 0.456, 0.406]
   std:  [0.229, 0.224, 0.225]
   applied_by: hf_processor
 
 data:
   dataset_config: 05_data.yaml
-  # dfine-m is ~2× dfine-s params (31M vs 16M). Halve bs to keep VRAM safe on 32 GB GPU.
-  batch_size: 16
-  eval_batch_size: 16
+  batch_size: 32
+  eval_batch_size: 32
   num_workers: 4
   prefetch_factor: 2
   pin_memory: true
@@ -40,48 +40,43 @@ data:
 
 augmentation:
   library: torchvision
-  normalize: false
+  normalize: false                # HF processor handles normalization
   mosaic: false
   mixup: false
 
   perspective_p: 0.0
   fliplr: 0.5
   flipud: 0.0                     # MANDATORY 0 — vertical flip destroys upright-vs-fallen signal
-  brightness_contrast_p: 0.3      # reverted 0.5 → 0.3 (less frequent)
-  brightness: 0.15                # softened 0.25 → 0.15
-  contrast: 0.15                  # softened 0.25 → 0.15
+  brightness_contrast_p: 0.3
+  brightness: 0.1
+  contrast: 0.1
   hsv_p: 0.2
-  hsv_h: 0.01
+  hsv_h: 0.01                     # tight — fire color is class-defining
   hsv_s: 0.2
   hsv_v: 0.2
 
   min_bbox_area: 4.0
 
-  scale: [0.7, 1.0]               # mild zoom-out (≤ native); 0.5 was too aggressive (fire shrunk below grid)
+  scale: [0.9, 1.1]
   degrees: 5.0
-  translate: 0.15                 # ±15% — reverted from 0.25 (combined with scale 0.5 was clipping too much)
-  shear: 5.0                      # bumped 0.0 → 5.0 (degrees)
+  translate: 0.15                 # ±15% shift along x/y — stronger position invariance
+  shear: 0.0
 
 training:
   backend: hf
   epochs: 60
   optimizer: adamw
-  # Bumped 5e-5 → 1e-4 to match D-FINE-N/S (winner LR×bs). Backbone unified with head
-  # (no lr_backbone split) — single-LR recipe matched the N/S winning configs.
   lr: 0.0001
-  lr_backbone: 0.0001               # explicit: backbone == head LR (no split)
-  weight_decay: 0.0
-  warmup_steps: 1000              # bumped 300 → 1000 — longer warmup for sharper loss (γ=3.0, α=0.9)
+  weight_decay: 0.0               # D-FINE uses wd=0
+  warmup_steps: 300
   scheduler: cosine_with_min_lr
   lr_scheduler_kwargs:
-    min_lr: 0.000001
+    min_lr: 0.00001
   max_grad_norm: 0.1
   bf16: false                     # MANDATORY for D-FINE
   amp: false
   gpu_augment: true
-  ema: true
-  ema_decay: 0.9999
-  ema_warmup_steps: 1000
+  ema: false
   patience: 20
 
   val_viz:
@@ -112,7 +107,7 @@ loss:
 
 logging:
   report_to: none
-  save_dir: ../runs/dfine_m
+  save_dir: ../runs/dfine_n
   wandb_project: smart-camera
   save_strategy: epoch
   save_total_limit: 5

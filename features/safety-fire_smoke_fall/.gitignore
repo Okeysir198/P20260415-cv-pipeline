@@ -4,8 +4,20 @@ eval/*
 !eval/.gitkeep
 export/*
 !export/.gitkeep
-predict/*
-!predict/.gitkeep
+
+# predict/ — self-contained inference bundle.
+# Track: inference.py, samples/*.mp4, model/<variant>/{config.json, *.yaml, *.json}
+# Ignore: per-video outputs + large binaries (DVC-trackable)
+
+# per-video extracted frames + raw json + rendered mp4
+predict/L*/
+
+# pytorch_model.bin, ema_model.bin, training_args.bin
+predict/**/*.bin
+
+# HF Trainer full state for resume
+predict/**/checkpoint-*/
+
 release/**/*.onnx
 release/**/*.pt
 release/**/*.pth

@@ -1,0 +1,62 @@
+# Unified detection — 19 classes, deduplicated.
+# Dataset built by:
+#   1. scripts/merge_unified_detection_training_ready.py
+#   2. scripts/dedup_split.py --name unified_detection --thresh 6 (cross-split leakage = 0)
+
+dataset_name: "unified_detection"
+path: "../../../dataset_store/training_ready/unified_detection"
+train: "train/images"
+val:   "val/images"
+test:  "test/images"
+
+names:
+  0:  person
+  1:  fallen_person
+  2:  fire
+  3:  smoke
+  4:  phone_usage
+  5:  helmet
+  6:  no_helmet
+  7:  nitto_hat
+  8:  safety_shoes
+  9:  no_safety_shoes
+  10: mask
+  11: no_mask
+  12: n95
+  13: gloves
+  14: apron
+  15: harness
+  16: no_harness
+  17: harness_hooked
+  18: harness_unhooked
+
+num_classes: 19
+input_size: [640, 640]
+
+mean: [0.485, 0.456, 0.406]
+std:  [0.229, 0.224, 0.225]
+
+# Per-source loss masking. JSON sidecar at <path>/valid_classes.json maps each
+# image filename → list of unified class IDs that the source actually annotates.
+# Required so e.g. a fire image (no helmet labels) doesn't penalize the model
+# for predicting a helmet (false-negative bias).
+valid_classes_json: "valid_classes.json"
+
+# Per-source class registry (documentation only).
+sources:
+  fire:     {classes: [2, 3]}
+  fall:     {classes: [0, 1]}
+  phone:    {classes: [4]}
+  helmet:   {classes: [0, 5, 6, 7]}
+  shoes:    {classes: [0, 8, 9]}
+  mask3:    {classes: [10, 11]}
+  mask2:    {classes: [10, 11]}
+  n95:      {classes: [12]}
+  gloves:   {classes: [13]}
+  apron:    {classes: [14]}
+  harness1: {classes: [15]}
+  harness2: {classes: [16, 17, 18]}
+
+text_prompts: {}
+auto_label:
+  class_rules: []

@@ -45,6 +45,27 @@ Per-class mAP shown is COCO-style mAP@[.5:.95] (`test_map_per_class_*`).
   - `runs/dfine_n_2026-05-14_222459/checkpoint-23184` (best.pt resolves to this)
   - `runs/dfine_s_2026-05-15_030458/checkpoint-19747`
 
+## Self-contained inference (`predict/`)
+
+`features/safety-fire_smoke_fall/predict/` is a portable inference bundle — copy it
+anywhere with `torch + torchvision + transformers + cv2 + ffmpeg` and it runs
+without the rest of the repo:
+
+- `inference.py` — three-stage CLI (extract / infer / render). **Per-class NMS**
+  via `torchvision.ops.nms` (DETR is "NMS-free" in theory; in practice noisy
+  real-world video produces overlapping low-conf proposals — NMS at IoU=0.5
+  removes 88-99% of them). Output mp4 is **native H.264 via ffmpeg pipe**
+  (VS Code playable; cv2 mp4v isn't).
+- `model/best_overall/` — D-FINE-N original recipe, **test mAP50=0.584**
+  (overall winner).
+- `model/best_fire/` — D-FINE-N γ=3 α=0.9 EMA recipe, **fire 0.203** (fire
+  winner; overall mAP50=0.534). Default model (production prefers fire recall).
+- Each `model/<variant>/` includes `config.json`, `pytorch_model.bin`,
+  `preprocessor_config.json`, `06_training.yaml`, `05_data.yaml`,
+  `training_args.bin`, and `checkpoint-N/` subdir for full HF Trainer resume.
+- Class names come from `config.json::id2label` — no separate yaml needed.
+- Raw predictions saved at `conf=0.0` → re-render at any threshold without GPU.
+
 ## Load-bearing facts
 
 1. **D-FINE-N beats every bigger D-FINE variant by a wide margin** (0.584 vs S 0.522 vs M 0.340) — fire and smoke are small/diffuse, and N's 4M-param backbone with EMA-style smoothing fits the dataset's small-object distribution best. **Do not assume bigger D-FINE = better here.**

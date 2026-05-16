@@ -1,18 +1,18 @@
-# Training config — Fire + Smoke + Fallen Person (RT-DETRv2-R50, HF Trainer backend)
-# Mirrors safety-fire_detection/configs/06_training_rtdetr_r50.yaml; adapted to 3 classes.
+# Training config — Unified detection (RT-DETRv2-R50, HF Trainer backend)
+# 19 classes (Phase 1 + Phase 2 partial). Alt arch alongside D-FINE-N/M.
 
 model:
   arch: rtdetr-r50
   pretrained: PekingU/rtdetr_v2_r50vd
-  num_classes: 3
+  num_classes: 19
   input_size: [640, 640]
-  num_queries: 20                 # reduced 30 → 20 (p99=9 GT/image; headroom kept)
+  num_queries: 30
   num_denoising: 100
   box_noise_scale: 1.0
-  label_noise_ratio: 0.1
+  label_noise_ratio: 0.5  # HF default, restored for unified multi-source training
   eos_coefficient: 0.0001
-  focal_loss_alpha: 0.9           # bumped 0.75 → 0.9 — heavier weight on rare positives
-  focal_loss_gamma: 3.0           # bumped 2.0 → 3.0 — focus on hard examples (down-weights easy preds 10×)
+  focal_loss_alpha: 0.9            # hard-example focus on rare positives
+  focal_loss_gamma: 3.0            # hard-example focus (down-weights easy preds 10x)
   # Penalize wrong-class predictions: bump cls loss + matcher class cost.
   weight_loss_vfl: 2.0            # default 1.0 — cls loss 2× vs bbox/giou
   matcher_class_cost: 4.0         # default 2.0 — Hungarian matching prefers right class
@@ -44,22 +44,22 @@ augmentation:
   mixup: false
 
   perspective_p: 0.0
-  fliplr: 0.5
+  fliplr: 0.5                     # horizontal flip (safe — fallen detection cares about vertical only)
   flipud: 0.0                     # MANDATORY 0 — vertical flip destroys upright-vs-fallen signal
-  brightness_contrast_p: 0.3      # reverted 0.5 → 0.3 (less frequent)
-  brightness: 0.15                # softened 0.25 → 0.15
-  contrast: 0.15                  # softened 0.25 → 0.15
-  hsv_p: 0.2
-  hsv_h: 0.01
-  hsv_s: 0.2
-  hsv_v: 0.2
+  brightness_contrast_p: 0.2      # small
+  brightness: 0.1                 # small
+  contrast: 0.1                   # small
+  hsv_p: 0.2                      # small (fire color-defining — keep tight)
+  hsv_h: 0.01                     # very tight (fire is color-defining)
+  hsv_s: 0.1                      # small
+  hsv_v: 0.1                      # small
 
   min_bbox_area: 4.0
 
-  scale: [0.7, 1.0]               # mild zoom-out (≤ native); 0.5 was too aggressive (fire shrunk below grid)
-  degrees: 5.0
+  scale: [0.9, 1.0]               # small zoom-out only (deployment is 640²)
+  degrees: 2.0                    # small rotation
   translate: 0.15                 # ±15% — reverted from 0.25 (combined with scale 0.5 was clipping too much)
-  shear: 5.0                      # bumped 0.0 → 5.0 (degrees)
+  shear: 2.0                      # small shear
 
 training:
   backend: hf
@@ -122,7 +122,7 @@ logging:
 
 checkpoint:
   save_best: true
-  metric: eval_map_50
+  metric: eval_map
   mode: max
   save_interval: 1
 

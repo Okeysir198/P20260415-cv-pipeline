@@ -30,6 +30,20 @@ Reusable across features. Run via `uv run python scripts/<name>.py`.
   Detects same-source-ID leaks (Roboflow `*.rf.<hash>.jpg` pattern) and pHash near-dupes
   at hamming ≤ 4. Writes to `<name>_clean/` (non-destructive). See `safety-fire_detection`
   incident 2026-04-30: 50% of val/test were leaked from train (74,707 cross-split pairs).
+  Also: `unified_detection` 2026-05-16 — 42.9% of merged dataset was augmented siblings;
+  thresh=6 collapsed 130k → 74k unique groups, cross-split pairs = 0.
+- `merge_unified_detection_training_ready.py` — multi-source merge for `unified_detection`
+  feature. Reads 5 Phase-1 `training_ready/<src>/` + 7 Phase-2 `raw/<src>/<subdir>/`,
+  copies (no symlinks) into one tree, prefixes filenames with source key
+  (`fire__abc.jpg`), remaps native class IDs to unified taxonomy, writes
+  `valid_classes.json` sidecar (per-image source-valid IDs for future per-source loss
+  masking). Idempotent — re-run after sources update. Pattern reusable for any future
+  multi-source detection dataset.
+- `qa_unified_detection.py` — image+label validity (corruption, OOB coords, sub-pixel
+  boxes, empty labels), per-source class consistency, gallery generation. `--apply`
+  deletes flagged files (image + sibling label). On unified_detection 2026-05-16:
+  removed 243 malformed labels from 130k images. Output at `<dataset_root>/qa/`:
+  `qa_report.md`, `removal_candidates.json`, `gallery/<class>/`.
 
 **Diagnostic eval (post-training):**
 - `eval_train_per_class.py --run <ckpt-dir>` — per-class TP/FP/FN/precision/recall on

@@ -20,28 +20,16 @@ Root: `ai/dataset_store/`
 
 ```
 dataset_store/
-├── raw/                          # public datasets, downloaded via MCP / curl / git
-│   ├── _coco_val/                # (empty — COCO val2017 placeholder)
-│   ├── apron_detection/
-│   ├── ear_protection/
-│   ├── fall_detection/
-│   ├── fire_detection/
-│   ├── glove_detection/
-│   ├── harness_detection/
-│   ├── helmet_detection/
-│   ├── mask_detection/
-│   ├── phone_detection/
-│   ├── shoes_detection/
-│   ├── smoking_detection/
-│   └── zone_intrusion/
+├── raw/                          # Phase 2 raw sources (Phase 1 raw deleted 2026-05-16
+│   │                             #  — duplicated in training_ready/<src>/, saved 32 GB)
+│   ├── apron_detection/, glove_detection/, harness_detection/, mask_detection/  # Phase 2
+│   ├── ear_protection/, smoking_detection/, zone_intrusion/                     # unused
+│   └── _coco_val/                # (empty — COCO val2017 placeholder)
 ├── site_collected/               # internal Nitto Denko site footage (empty placeholders)
-│   ├── fall_detection/
-│   ├── fire_detection/
-│   ├── helmet_detection/
-│   ├── phone_detection/
-│   ├── shoes_detection/
-│   └── test_video/
-└── training_ready/               # derived splits built by core/p00_data_prep/ (currently empty)
+│   ├── fall_detection/, fire_detection/, helmet_detection/, phone_detection/, shoes_detection/, test_video/
+└── training_ready/               # 12 datasets — see snapshot table below
+                                  #  Includes unified_detection (12 GB, 19 classes,
+                                  #  Phase 1+2 merged, dedup-clean) — production target.
 ```
 
 Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD, etc.).
@@ -50,27 +38,25 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 
 ## Top-level summary
 
-> **Disk-size snapshot last verified: 2026-05-11** (refresh: `du -sh dataset_store/{raw,site_collected,training_ready}/*`). Image counts are from Phase A data-prep logs (2026-04-17) and are not re-counted here — for current per-source counts see each feature's `DATASET_REPORT.md`.
+> **Disk-size snapshot last verified: 2026-05-16** (post unified_detection merge + Phase 1 raw cleanup). Image counts are from Phase A data-prep logs (2026-04-17) and are not re-counted here — for current per-source counts see each feature's `DATASET_REPORT.md`.
 
 | Category | Size | Imgs | Notes |
 |---|---|---|---|
-| `raw/fire_detection` | 3.4 GB | 32,870 | d_fire + zenodo + industrial (v2 candidates removed 2026-05-11) |
-| `raw/helmet_detection` | 17 GB | 55,338 | sh17, shlokraval, roboflow_ppe_6class, construction_safety, rf_siabar_ppe, rf_chemical_ppe_11class (v2 candidates removed) |
-| `raw/fall_detection` | 666 MB | 12,556 | roboflow_person_fall_8k, roboflow_fall, cctv_fall (coco_keypoints removed 2026-05-11) |
-| `raw/shoes_detection` | 8.3 GB | 34,662+ | keremberke, rf_feet_segmentation, rf_safety_shoes_11k, rf_footwear_*, rf_sneakers, rf_barefoot |
-| `raw/phone_detection` | 3.2 GB | 62,522 | fpi_det + 6 roboflow sources (duplicates removed 2026-05-11) |
-| `raw/smoking_detection` | 676 MB | 10,291 | rf_cigarette_5k |
-| `raw/harness_detection` | 547 MB | 3,303 | rf_body_harness + rf_safety_harness_v2 |
-| `raw/mask_detection` | 465 MB | 12,226 | rf_n95, rf_mask_3class, rf_mask_3k, mask_type_det |
-| `raw/glove_detection` | 473 MB | 1,181 | datacluster_gloves (VOC), rf_hand_gloves |
-| `raw/zone_intrusion` | 368 MB | 6,507 | rf_intrusion_3k + rf_intrusion_face_3k |
-| `raw/apron_detection` | 76 MB | 1,379 | rf_apron |
-| `raw/ear_protection` | 37 MB | 780 | rf_earplug |
+| ~~`raw/fire/fall/helmet/shoes/phone_detection`~~ | — | — | **DELETED 2026-05-16** — duplicated in `training_ready/<src>/`; saved 32 GB |
+| `raw/smoking_detection` | 676 MB | 10,291 | rf_cigarette_5k (unused — not in Phase 1/2 detection scope) |
+| `raw/harness_detection` | 547 MB | 3,303 | rf_body_harness + rf_safety_harness_v2 — **Phase 2 source for unified_detection harness*** |
+| `raw/mask_detection` | 465 MB | 12,226 | rf_n95, rf_mask_3class, rf_mask_3k, mask_type_det — **Phase 2 source for unified_detection mask/n95** |
+| `raw/glove_detection` | 473 MB | 1,181 | datacluster_gloves (VOC), rf_hand_gloves — **Phase 2 source for unified_detection gloves** |
+| `raw/zone_intrusion` | 368 MB | 6,507 | rf_intrusion_3k + rf_intrusion_face_3k (unused — pretrained-only feature) |
+| `raw/apron_detection` | 76 MB | 1,379 | rf_apron — **Phase 2 source for unified_detection apron** |
+| `raw/ear_protection` | 37 MB | 780 | rf_earplug (unused — not in Phase 1/2 detection scope) |
 | `raw/_coco_val` | — | 0 | empty (COCO val2017 placeholder) |
 | `site_collected/` | — | 0 | placeholders only (populate on-site) |
-| `training_ready/` | 13 GB | 112,099 | Phase A complete (2026-04-17) — 5 features built (fire, helmet, shoes, fall, phone-usage) |
+| `training_ready/<5 phase-1 sources>` | ~10 GB | 112,099 | per-task source datasets (fire, helmet, shoes, fall, phone-usage) |
+| **`training_ready/unified_detection/`** | **12 GB** | **129,544** | **Phase 1 + Phase 2 multi-source, 19 classes, dedup-clean (cross-split pairs=0). Production target — replaces per-task models in one forward pass.** |
 
-**Total raw: ~35 GB across 11 categories, ~230K images (after 2026-05-11 cleanup: removed 31 GB of v2 candidates and duplicates).**
+**Total raw: ~2.6 GB** (Phase 1 raw deleted; Phase 2 + smoking/ear/zone retained).
+**Total training_ready: ~24 GB** (12 datasets including unified_detection).
 
 ---
 

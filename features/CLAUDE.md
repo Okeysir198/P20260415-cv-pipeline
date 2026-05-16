@@ -28,6 +28,7 @@ Status legend: 🟢 trained/optimized • 🟡 partial / plateau • ✅ done (p
 | `ppe-shoes_detection` | Detection | 🎯 Fine-tune | none (no foot detector) | 0.000 | ⬜ not started |
 | `access-face_recognition` | Face recognition | 🔧 Pretrained only | yunet + sface (rank-1=1.0) | — | 🔄 pipelines done |
 | `access-zone_intrusion` | Detection + zone logic | 🔧 Pretrained only | yolox_tiny (acc=1.0, 6.9ms) | — | 🔄 pipelines done |
+| `unified_detection` | Detection (19 classes, Phase 1+2) | 🎯 Fine-tune | per-task champions | — | 🔄 Dataset ready (129,544 imgs, dedup-clean). Replaces per-task models in one forward pass. R1 not yet trained. See feature CLAUDE.md. |
 
 Status icons: ⬜ not started · 🔄 in progress · ✅ done · ⏸ blocked · ❌ skipped
 

@@ -1,21 +1,24 @@
-# Training config — Fire + Smoke + Fallen Person (D-FINE-M, HF Trainer backend)
-# Mirrors safety-fire_smoke_fall/configs/06_training_dfine_s.yaml; scaled to dfine-m (31M).
+# Training config — Unified detection (D-FINE-M, HF Trainer backend)
+# Phase 1 + Phase 2 partial — 33 IDs reserved, 19 active in R1. ~94k train images.
+#
+# Bigger backbone justified here vs the 3-class fire_smoke_fall: 5× more data
+# AND more diverse classes (faces, hands, full body, small fire). dfine-m is
+# the safe pick at bs=16 on 32GB; try dfine-l later if results plateau.
 
 model:
   arch: dfine-m
   pretrained: ustc-community/dfine-medium-obj2coco
-  num_classes: 3
+  num_classes: 19                  # all IDs reserved; head expansion-ready for Phase 2
   input_size: [640, 640]
-  num_queries: 20
+  num_queries: 30
   num_denoising: 100
   box_noise_scale: 1.0
-  label_noise_ratio: 0.1
+  label_noise_ratio: 0.5  # HF default, restored for unified multi-source training
   eos_coefficient: 0.0001
-  focal_loss_alpha: 0.9           # bumped 0.75 → 0.9 — heavier weight on rare positives
-  focal_loss_gamma: 3.0           # bumped 2.0 → 3.0 — focus on hard examples (down-weights easy preds 10×)
-  # Penalize wrong-class predictions: bump cls loss + matcher class cost.
-  weight_loss_vfl: 2.0            # default 1.0 — cls loss 2× vs bbox/giou
-  matcher_class_cost: 4.0         # default 2.0 — Hungarian matching prefers right class
+  focal_loss_alpha: 0.9            # hard-example focus on rare positives
+  focal_loss_gamma: 3.0            # hard-example focus (down-weights easy preds 10x)
+  weight_loss_vfl: 2.0             # cls loss 2x vs bbox/giou
+  matcher_class_cost: 4.0          # Hungarian prefers right class
 
 tensor_prep:
   input_size: [640, 640]
@@ -27,7 +30,8 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  # dfine-m is ~2× dfine-s params (31M vs 16M). Halve bs to keep VRAM safe on 32 GB GPU.
+  # dfine-m on 33-class unified data; bs=16 fits at 32GB with EMA + 50 queries.
+  # Per-source loss masking via features/unified_detection/code/per_source_loss_mask.py
   batch_size: 16
   eval_batch_size: 16
   num_workers: 4
@@ -45,22 +49,22 @@ augmentation:
   mixup: false
 
   perspective_p: 0.0
-  fliplr: 0.5
+  fliplr: 0.5                     # horizontal flip (safe — fallen detection cares about vertical only)
   flipud: 0.0                     # MANDATORY 0 — vertical flip destroys upright-vs-fallen signal
-  brightness_contrast_p: 0.3      # reverted 0.5 → 0.3 (less frequent)
-  brightness: 0.15                # softened 0.25 → 0.15
-  contrast: 0.15                  # softened 0.25 → 0.15
-  hsv_p: 0.2
-  hsv_h: 0.01
-  hsv_s: 0.2
-  hsv_v: 0.2
+  brightness_contrast_p: 0.2      # small
+  brightness: 0.1                 # small
+  contrast: 0.1                   # small
+  hsv_p: 0.2                      # small (fire color-defining — keep tight)
+  hsv_h: 0.01                     # very tight (fire is color-defining)
+  hsv_s: 0.1                      # small
+  hsv_v: 0.1                      # small
 
   min_bbox_area: 4.0
 
-  scale: [0.7, 1.0]               # mild zoom-out (≤ native); 0.5 was too aggressive (fire shrunk below grid)
-  degrees: 5.0
+  scale: [0.9, 1.0]               # small zoom-out only (deployment is 640²)
+  degrees: 2.0                    # small rotation
   translate: 0.15                 # ±15% — reverted from 0.25 (combined with scale 0.5 was clipping too much)
-  shear: 5.0                      # bumped 0.0 → 5.0 (degrees)
+  shear: 2.0                      # small shear
 
 training:
   backend: hf
@@ -119,7 +123,7 @@ logging:
 
 checkpoint:
   save_best: true
-  metric: eval_map_50
+  metric: eval_map
   mode: max
   save_interval: 1
 

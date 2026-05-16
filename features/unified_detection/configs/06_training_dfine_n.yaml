@@ -1,22 +1,25 @@
-# Training config — Fire + Smoke + Fallen Person (D-FINE-N, HF Trainer backend)
-# Mirrors safety-fire_detection/configs/06_training_dfine_n.yaml; adapted to 3 classes
-# and bumped num_queries (fall imagery has more boxes per image than pure fire).
+# Training config — Unified detection (D-FINE-N, HF Trainer backend)
+# Phase 1 + Phase 2 partial — 33 IDs reserved, 19 active in R1. ~94k train images.
+#
+# D-FINE-N (4M) parity baseline alongside dfine-m. Per the safety-fire_smoke_fall
+# learnings, D-FINE-N often beats bigger D-FINE on small/diffuse classes
+# (fire, smoke). With 5× more data here, the result may flip — this run
+# tells us whether scaling up to dfine-m/l is justified.
 
 model:
   arch: dfine-n
   pretrained: ustc-community/dfine_n_coco
-  num_classes: 3
+  num_classes: 19                  # all IDs reserved; head expansion-ready for Phase 2
   input_size: [640, 640]
-  num_queries: 20                 # reduced 30 → 20 (p99=9 GT/image)
+  num_queries: 30
   num_denoising: 100
   box_noise_scale: 1.0
-  label_noise_ratio: 0.1
+  label_noise_ratio: 0.5  # HF default, restored for unified multi-source training
   eos_coefficient: 0.0001
-  focal_loss_alpha: 0.9            # bumped 0.75 → 0.9 — heavier weight on rare positives
-  focal_loss_gamma: 3.0            # bumped 2.0 → 3.0 — focus on hard examples
-  # Penalize wrong-class predictions: bump cls loss + matcher class cost.
-  weight_loss_vfl: 2.0            # default 1.0 — cls loss 2× vs bbox/giou
-  matcher_class_cost: 4.0         # default 2.0 — Hungarian matching prefers right class
+  focal_loss_alpha: 0.9            # hard-example focus on rare positives
+  focal_loss_gamma: 3.0            # hard-example focus (down-weights easy preds 10x)
+  weight_loss_vfl: 2.0             # cls loss 2x vs bbox/giou
+  matcher_class_cost: 4.0          # Hungarian prefers right class
 
 tensor_prep:
   input_size: [640, 640]
@@ -45,22 +48,22 @@ augmentation:
   mixup: false
 
   perspective_p: 0.0
-  fliplr: 0.5
+  fliplr: 0.5                     # horizontal flip (safe — fallen detection cares about vertical only)
   flipud: 0.0                     # MANDATORY 0 — vertical flip destroys upright-vs-fallen signal
-  brightness_contrast_p: 0.3
-  brightness: 0.15
-  contrast: 0.15
-  hsv_p: 0.2
-  hsv_h: 0.01                     # tight — fire color is class-defining
-  hsv_s: 0.2
-  hsv_v: 0.2
+  brightness_contrast_p: 0.2      # small
+  brightness: 0.1                 # small
+  contrast: 0.1                   # small
+  hsv_p: 0.2                      # small (fire color-defining — keep tight)
+  hsv_h: 0.01                     # very tight (fire is color-defining)
+  hsv_s: 0.1                      # small
+  hsv_v: 0.1                      # small
 
   min_bbox_area: 4.0
 
-  scale: [0.7, 1.0]               # mild zoom-out only (≤ native); deployment is 640²
-  degrees: 5.0
+  scale: [0.9, 1.0]               # small zoom-out only (deployment is 640²)
+  degrees: 2.0                    # small rotation
   translate: 0.15                 # ±15% shift along x/y
-  shear: 5.0                      # bumped 0.0 → 5.0 (degrees)
+  shear: 2.0                      # small shear
 
 training:
   backend: hf
@@ -116,7 +119,7 @@ logging:
 
 checkpoint:
   save_best: true
-  metric: eval_map_50
+  metric: eval_map
   mode: max
   save_interval: 1
 
