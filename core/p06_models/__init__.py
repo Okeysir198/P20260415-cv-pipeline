@@ -31,6 +31,7 @@ from core.p06_models.registry import MODEL_REGISTRY, build_model
 
 with contextlib.suppress(ImportError):
     import core.p06_models.dfine  # noqa: F401
+    import core.p06_models.dfine_multitask  # noqa: F401
     import core.p06_models.hf_classification_variants  # noqa: F401
     import core.p06_models.hf_model  # noqa: F401
     import core.p06_models.hf_segmentation_variants  # noqa: F401
