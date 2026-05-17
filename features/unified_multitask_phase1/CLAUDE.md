@@ -4,6 +4,10 @@
 **Architecture:** D-FINE-N shared trunk + 5 per-task classification heads
 **Goal:** One ONNX file delivering all Phase 1 detection capabilities in a single forward pass.
 
+> **Deep dive**: see `ARCHITECTURE.md` for the full design rationale,
+> why R1/R2 (single 19-class head, frozen backbone) both failed at 0.30 mAP,
+> code organization, training dynamics, and deployment notes.
+
 ## Tasks
 
 | Head | Classes | Dataset | Single-task baseline |
