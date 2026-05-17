@@ -65,10 +65,27 @@ Best-checkpoint selection uses `mean_mAP_50` (balanced across all tasks).
 ```
 configs/
   05_data.yaml                              — 5 tasks, dataset paths, sampling weights
-  06_training_dfine_n_multitask.yaml        — multi-task training recipe
+  06_training_dfine_n_multitask.yaml        — N (4M) — first to validate architecture
+  06_training_dfine_s_multitask.yaml        — S (11M) — run after N validates
+  06_training_dfine_m_multitask.yaml        — M (19M, bs=16) — run after S beats N
 code/                                       — (empty; uses core/ implementations)
 runs/<arch>_<ts>/                           — checkpoints + per-task eval logs
 ```
+
+## Arch progression strategy
+
+Multi-task changes the size-vs-data calculus: 5 tasks share ~75k images of
+backbone supervision, so bigger D-FINE is justified here (unlike single-task
+fire_smoke_fall where M underfit at ~20k images).
+
+| Step | Arch | Train time (est) | Gate to advance |
+|---|---|---:|---|
+| 1 | dfine-n | ~6 h | ≥80% of single-task baselines on all 5 tasks |
+| 2 | dfine-s | ~14 h | beat N by ≥5% mean mAP_50 |
+| 3 | dfine-m | ~24 h | beat S by ≥2% mean mAP_50 |
+| 4 | dfine-l | (skip Phase 1) | revisit at Phase 2 (13 tasks) |
+
+Stop at first arch that fails its gate — no point burning GPU on diminishing returns.
 
 ## Required core/ implementations (Days 2-3)
 

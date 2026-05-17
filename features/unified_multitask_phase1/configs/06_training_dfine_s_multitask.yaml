@@ -1,0 +1,126 @@
+# Multi-task training — D-FINE-S shared trunk + 5 per-task cls heads.
+# Same recipe as dfine_n_multitask, just bigger backbone. With 5 tasks sharing
+# the trunk, effective training data is ~5× single-task, so bigger backbones
+# (S/M) are more justified here than in single-task (where M underfit).
+#
+# Run only after dfine_n_multitask validates the architecture.
+
+model:
+  arch: dfine-s-multitask
+  pretrained: ustc-community/dfine_s_coco
+  input_size: [640, 640]
+  num_queries: 30
+  num_denoising: 0
+  box_noise_scale: 1.0
+  label_noise_ratio: 0.5
+  eos_coefficient: 0.0001
+  focal_loss_alpha: 0.75
+  focal_loss_gamma: 2.0
+  weight_loss_vfl: 1.0
+  matcher_class_cost: 2.0
+  share_box_head: true
+  share_decoder: true
+  task_loss_weights: auto
+
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 32                       # S fits at bs=32 on 32 GB VRAM
+  eval_batch_size: 32
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: true
+  sampling_strategy: round_robin_sqrt
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false
+  mosaic: false
+  mixup: false
+  perspective_p: 0.0
+  fliplr: 0.5
+  flipud: 0.0
+  brightness_contrast_p: 0.2
+  brightness: 0.1
+  contrast: 0.1
+  hsv_p: 0.2
+  hsv_h: 0.01
+  hsv_s: 0.1
+  hsv_v: 0.1
+  min_bbox_area: 4.0
+  scale: [0.9, 1.0]
+  degrees: 2.0
+  translate: 0.15
+  shear: 2.0
+
+training:
+  backend: hf_multitask
+  epochs: 40
+  optimizer: adamw
+  lr: 0.0001                           # same as N — bs=32 keeps LR×bs constant
+  weight_decay: 0.0
+  warmup_steps: 1000
+  scheduler: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr: 0.000001
+  max_grad_norm: 0.1
+  bf16: false                          # MANDATORY for D-FINE
+  amp: false
+  gpu_augment: true
+  ema: true
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+  patience: 20
+
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 4
+    balanced: true
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.05
+  data_viz:
+    enabled: true
+    splits: [train, val]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr_multitask
+
+logging:
+  report_to: none
+  save_dir: ../runs/dfine_s_multitask
+  wandb_project: smart-camera
+  save_strategy: epoch
+  save_total_limit: 5
+
+checkpoint:
+  save_best: true
+  metric: mean_mAP_50
+  mode: max
+  save_interval: 1
+
+evaluation:
+  score_threshold: 0.015
+
+seed: 42
