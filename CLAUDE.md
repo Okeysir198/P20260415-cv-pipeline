@@ -140,6 +140,7 @@ model = build_model(config)  # Dispatches by config["model"]["arch"]
 | `hf-classification` | Classification | HF Transformers |
 | `hf-segformer/mask2former/dinov2-seg` | Segmentation | HF Transformers |
 | `hf_keypoint` | Keypoint (top-down) | HF Transformers (ViTPose family) |
+| `dfine-{n,s,m,l}-multitask` | Detection (N tasks, shared trunk) | D-FINE + per-task cls heads |
 
 Paddle archs (PicoDet, PP-YOLOE) are NOT in this unified registry — they live
 in their own package (`core/p06_paddle/`) and run in `.venv-paddle/`. See
@@ -150,6 +151,7 @@ in their own package (`core/p06_paddle/`) and run in `.venv-paddle/`. See
 Set `training.backend` in YAML:
 - **`pytorch`** (default): Custom trainer with EMA, SimOTA, per-component LR. YOLOX uses custom loss; HF/timm models use `forward_with_loss()`.
 - **`hf`**: HuggingFace Trainer with DDP/DeepSpeed.
+- **`hf_multitask`**: HF Trainer subclass with shared D-FINE trunk + per-task classification heads. Each batch routes to one task's cls head; per-task eval emits `eval_<task>_map_50_per_class_<classname>`; checkpoint metric is `eval_mean_mAP_50` averaged across tasks. Used by `features/unified_multitask_phase1/`.
 - **`custom`**: Dynamic import via `training.custom_trainer_class`.
 - **`paddle`**: Selecting `backend: paddle` in the unified dispatcher prints a redirect — paddle is NOT handled by `core/p06_training/train.py`. Train via `.venv-paddle/bin/python core/p06_paddle/train.py` (separate package, separate venv, drives upstream `ppdet.engine.Trainer` directly). Convergence with the rest of the pipeline happens at ONNX (`core/p06_paddle/export.py` → main-venv ORT path). Setup: `bash scripts/setup-paddle-venv.sh`. v1 = detection only (PicoDet, PP-YOLOE). See `core/p06_paddle/CLAUDE.md`.
 

@@ -28,7 +28,8 @@ Status legend: 🟢 trained/optimized • 🟡 partial / plateau • ✅ done (p
 | `ppe-shoes_detection` | Detection | 🎯 Fine-tune | none (no foot detector) | 0.000 | ⬜ not started |
 | `access-face_recognition` | Face recognition | 🔧 Pretrained only | yunet + sface (rank-1=1.0) | — | 🔄 pipelines done |
 | `access-zone_intrusion` | Detection + zone logic | 🔧 Pretrained only | yolox_tiny (acc=1.0, 6.9ms) | — | 🔄 pipelines done |
-| `unified_detection` | Detection (19 classes, Phase 1+2) | 🎯 Fine-tune | per-task champions | — | 🔄 Dataset ready (129,544 imgs, dedup-clean). Replaces per-task models in one forward pass. R1 not yet trained. See feature CLAUDE.md. |
+| `unified_detection` | Detection (19 classes, single head, Phase 1+2) | 🎯 Fine-tune | per-task champions | — | ⚠️ R1 plateaued at 0.30 mAP — single 19-class head doesn't handle cross-source label noise. Superseded by `unified_multitask_phase1`. |
+| `unified_multitask_phase1` | Detection (5 Phase 1 tasks, shared trunk + per-task heads) | 🎯 Multi-task | per-task baselines | — | ✅ Current production approach. 1 ONNX serves 5 tasks. See `ARCHITECTURE.md` for design rationale. |
 
 Status icons: ⬜ not started · 🔄 in progress · ✅ done · ⏸ blocked · ❌ skipped
 
