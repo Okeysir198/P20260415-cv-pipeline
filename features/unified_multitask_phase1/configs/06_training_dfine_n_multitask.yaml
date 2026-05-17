@@ -1,0 +1,131 @@
+# Multi-task training — D-FINE-N shared trunk + 5 per-task cls heads.
+# Backbone init: COCO (ustc-community/dfine_n_coco) — NOT unified_detection R1 (verified mediocre).
+#
+# Per-task baselines to beat (or match within 5%):
+#   fire_smoke: TBD (run safety-fire_detection single-task first)
+#   fall:       TBD
+#   helmet:     TBD
+#   shoes:      TBD
+#   phone:      0.529 mAP50 (safety-poketenashi_phone_usage/runs/dfine_n_2026-05-09_133543)
+
+model:
+  arch: dfine-n-multitask              # NEW arch (registered in core/p06_models/__init__.py)
+  pretrained: ustc-community/dfine_n_coco
+  input_size: [640, 640]
+  num_queries: 30
+  num_denoising: 0                     # disable CDN initially — re-enable after baseline works
+  box_noise_scale: 1.0
+  label_noise_ratio: 0.5
+  eos_coefficient: 0.0001
+  focal_loss_alpha: 0.75
+  focal_loss_gamma: 2.0
+  weight_loss_vfl: 1.0
+  matcher_class_cost: 2.0
+  # Multi-task knobs
+  share_box_head: true                 # one DFL head, all tasks (geometry is task-agnostic)
+  share_decoder: true                  # one decoder; each task only routes to its cls head
+  task_loss_weights: auto              # 'auto' = equal; or dict {task_name: float}
+
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false                     # fire stats diverge; verified
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 32                       # per-task batch (batches stay single-task — head routing requires this)
+  eval_batch_size: 32
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: true
+  sampling_strategy: round_robin_sqrt  # round_robin_sqrt | uniform | proportional
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false
+  mosaic: false
+  mixup: false
+  perspective_p: 0.0
+  fliplr: 0.5
+  flipud: 0.0                          # MANDATORY — protects fall, harness, vertical-oriented signals
+  brightness_contrast_p: 0.2
+  brightness: 0.1
+  contrast: 0.1
+  hsv_p: 0.2
+  hsv_h: 0.01                          # tight — fire is color-defining
+  hsv_s: 0.1
+  hsv_v: 0.1
+  min_bbox_area: 4.0
+  scale: [0.9, 1.0]
+  degrees: 2.0
+  translate: 0.15
+  shear: 2.0
+
+training:
+  backend: hf_multitask                # NEW — dispatches to MultitaskHFTrainer
+  epochs: 40
+  optimizer: adamw
+  lr: 0.0001
+  weight_decay: 0.0
+  warmup_steps: 1000                   # longer warmup — 5 tasks need more gentle ramp
+  scheduler: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr: 0.000001
+  max_grad_norm: 0.1
+  bf16: false                          # MANDATORY for D-FINE
+  amp: false
+  gpu_augment: true
+  ema: true
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000
+  patience: 20
+
+  # Per-task viz at every full eval
+  val_viz:
+    enabled: true
+    num_samples: 8
+    conf_threshold: 0.05
+    grid_cols: 4
+    balanced: true                     # samples drawn evenly across tasks
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.05
+  data_viz:
+    enabled: true
+    splits: [train, val]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr_multitask
+
+logging:
+  report_to: none
+  save_dir: ../runs/dfine_n_multitask
+  wandb_project: smart-camera
+  save_strategy: epoch
+  save_total_limit: 5
+
+checkpoint:
+  save_best: true
+  metric: mean_mAP_50                  # mean over per-task mAP_50
+  mode: max
+  save_interval: 1
+
+evaluation:
+  score_threshold: 0.015               # canonical mAP — operating thresholds set in 10_inference.yaml
+
+seed: 42

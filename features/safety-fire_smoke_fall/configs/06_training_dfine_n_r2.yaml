@@ -1,0 +1,133 @@
+# R2 config — Fire + Smoke + Fallen Person from UNIFIED backbone.
+# Loads unified_detection dfine_n best ckpt (19-class), freezes backbone, retrains
+# the 3-class cls head + decoder. Tests whether the unified backbone has useful
+# features beyond COCO obj365 pretrain for these classes.
+#
+# Baseline: features/safety-fire_smoke_fall/predict/model/best_overall test 0.584.
+
+model:
+  arch: dfine-n
+  # Load unified backbone (19-class). cls head reinits to 3-class via ignore_mismatched_sizes=True.
+  pretrained: ../../unified_detection/runs/dfine_n_2026-05-16_220050
+  num_classes: 3
+  input_size: [640, 640]
+  num_queries: 20                 # reduced 30 → 20 (p99=9 GT/image)
+  num_denoising: 100
+  box_noise_scale: 1.0
+  label_noise_ratio: 0.1
+  eos_coefficient: 0.0001
+  focal_loss_alpha: 0.9            # bumped 0.75 → 0.9 — heavier weight on rare positives
+  focal_loss_gamma: 3.0            # bumped 2.0 → 3.0 — focus on hard examples
+  # Penalize wrong-class predictions: bump cls loss + matcher class cost.
+  weight_loss_vfl: 2.0            # default 1.0 — cls loss 2× vs bbox/giou
+  matcher_class_cost: 4.0         # default 2.0 — Hungarian matching prefers right class
+
+tensor_prep:
+  input_size: [640, 640]
+  rescale: true
+  normalize: false                # fire stats diverge from ImageNet; verified beneficial on fire feature (+0.089 mAP@50)
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  applied_by: hf_processor
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 32
+  eval_batch_size: 32
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: true
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false                # HF processor handles normalization
+  mosaic: false
+  mixup: false
+
+  perspective_p: 0.0
+  fliplr: 0.5
+  flipud: 0.0                     # MANDATORY 0 — vertical flip destroys upright-vs-fallen signal
+  brightness_contrast_p: 0.3
+  brightness: 0.15
+  contrast: 0.15
+  hsv_p: 0.2
+  hsv_h: 0.01                     # tight — fire color is class-defining
+  hsv_s: 0.2
+  hsv_v: 0.2
+
+  min_bbox_area: 4.0
+
+  scale: [0.7, 1.0]               # mild zoom-out only (≤ native); deployment is 640²
+  degrees: 5.0
+  translate: 0.15                 # ±15% shift along x/y
+  shear: 5.0                      # bumped 0.0 → 5.0 (degrees)
+
+training:
+  backend: hf
+  epochs: 60                          # extended from 30 — longer to fully exploit frozen-backbone features
+  optimizer: adamw
+  lr: 0.0001                          # standard 1e-4 (was 5e-4 — gentler for stability over 60 ep)
+  weight_decay: 0.0
+  warmup_steps: 500                   # moderate — longer warmup pairs with longer schedule
+  scheduler: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr: 0.000001                  # 1e-6 floor — let cosine fully cool over 60 ep
+  max_grad_norm: 0.1
+  bf16: false                         # MANDATORY for D-FINE
+  amp: false
+  gpu_augment: true
+  ema: true
+  ema_decay: 0.9999
+  ema_warmup_steps: 1000              # bumped 500 → 1000 to match longer schedule
+  patience: 30                        # bumped 15 → 30 to absorb DETR late-epoch oscillation
+  # R2: freeze backbone for entire training (epochs=60 < 999).
+  # Tests whether unified-trained backbone features transfer to 3-class slice.
+  freeze_backbone_epochs: 999
+
+  val_viz:
+    enabled: true
+    num_samples: 10
+    conf_threshold: 0.03
+    grid_cols: 2
+    balanced: true
+  best_viz:
+    enabled: true
+    num_samples: 16
+    conf_threshold: 0.03
+  train_viz:
+    enabled: false
+  data_viz:
+    enabled: true
+    splits: [train, val, test]
+    num_samples: 16
+    grid_cols: 4
+  aug_viz:
+    enabled: true
+    splits: [train]
+    num_samples: 16
+    grid_cols: 4
+
+loss:
+  type: detr
+
+logging:
+  report_to: none
+  save_dir: ../runs/dfine_n_r2
+  wandb_project: smart-camera
+  save_strategy: epoch
+  save_total_limit: 5
+
+checkpoint:
+  save_best: true
+  metric: eval_map_50
+  mode: max
+  save_interval: 1
+
+evaluation:
+  score_threshold: 0.015
+
+seed: 42
