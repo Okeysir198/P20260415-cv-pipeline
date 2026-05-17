@@ -12,11 +12,32 @@
 
 | Head | Classes | Dataset | Single-task baseline |
 |---|---|---|---:|
-| fire_smoke | fire, smoke | `training_ready/fire_detection` | TBD |
-| fall | person, fallen_person | `training_ready/fall_detection` | TBD |
-| helmet | person, head_with_helmet, head_without_helmet, head_with_nitto_hat | `training_ready/helmet_detection` | TBD |
-| shoes | person, foot_with_safety_shoes, foot_without_safety_shoes | `training_ready/shoes_detection` | TBD |
-| phone | phone_usage | `training_ready/safety_poketenashi_phone_usage` | 0.529 mAP50 |
+| fire_smoke | fire, smoke | `training_ready/fire_detection` | ~0.45 mAP50 (safety-fire_detection) |
+| fall | person, fallen_person | `training_ready/fall_detection` | none (no prior training run) |
+| helmet | person, head_with_helmet, head_without_helmet, head_with_nitto_hat | `training_ready/helmet_detection` | none (no prior training run) |
+| shoes | person, foot_with_safety_shoes, foot_without_safety_shoes | `training_ready/shoes_detection` | none (no prior training run) |
+| phone | phone_usage | `training_ready/safety_poketenashi_phone_usage` | 0.529 mAP50 (poketenashi_phone) |
+
+## Benchmark Results — dfine-n-multitask (2026-05-17, 40 ep)
+
+Test set (held-out, never seen during training):
+
+| Task | Test mAP@50 | Test mAP (challenge) | Single-task baseline | Δ |
+|---|---:|---:|---:|---:|
+| fire_smoke | 0.313 | 0.134 | ~0.45 | **-30%** |
+| fall | 0.308 | 0.136 | (no baseline) | n/a |
+| helmet | 0.353 | 0.192 | (no baseline) | n/a |
+| shoes | 0.472 | 0.270 | (no baseline) | n/a |
+| phone | 0.486 | 0.226 | 0.529 | **-8%** |
+| **mean** | **0.386** | 0.192 | — | — |
+
+Best val checkpoint: ep37, `eval_mean_mAP_50=0.398`. Run dir:
+`runs/dfine_n_multitask_2026-05-17_141112/`.
+
+**Verdict**: architecture validated (+29% past R1's 0.30 plateau). Phone within 8% of
+single-task → production-acceptable. Fire dropped 30% — backbone capacity is split 5
+ways while single-task fire owned the entire 4M trunk. Recommend dfine-s next to
+recover fire (more trunk capacity = less per-task starvation).
 
 ## Architecture
 
@@ -104,11 +125,12 @@ Stop at first arch that fails its gate — no point burning GPU on diminishing r
 - [x] Pre-work P2: verify all 5 datasets exist in training_ready/
 - [x] Pre-work P3: collect available baselines (phone=0.529; others TBD)
 - [x] Pre-work P5: feature folder scaffold + configs
-- [ ] Implement DFineMultitaskModel
-- [ ] Implement MultitaskInterleaver dataset
-- [ ] Implement MultitaskHFTrainer
-- [ ] PoC: train fire_smoke + helmet (cross-domain, 20 ep)
-- [ ] Full 5-task training (40 ep)
+- [x] Implement DFineMultitaskModel
+- [x] Implement MultitaskInterleaver dataset
+- [x] Implement MultitaskHFTrainer
+- [x] Full 5-task training dfine-n (40 ep) — best val 0.398 / test 0.386
+- [ ] dfine-s training (scale-up — configs ready at `06_training_dfine_s_multitask.yaml`)
+- [ ] Post-hoc per-task error_analysis on dfine-n best ckpt
 - [ ] Per-task ONNX export
 - [ ] Inference adapter for multi-head outputs
 
@@ -119,3 +141,5 @@ Stop at first arch that fails its gate — no point burning GPU on diminishing r
 3. **Sampling strategy matters** — `round_robin_sqrt` is the default. `uniform` over-samples small tasks (helmet→4× phone effect); `proportional` drowns small tasks.
 4. **Eval runs N forward passes per image** when computing per-task mAP — eval time scales linearly with task count.
 5. **Don't init backbone from unified_detection** — that backbone is mixed-specific, not generic, and underperforms COCO init.
+6. **Per-task data starvation is real** — with sqrt-weighted sampling and N=5 tasks, each task gets ~20% of batches. For tasks with rich single-task baselines (fire_smoke: 12k imgs, single-task 0.45), multi-task starves them ~5× → observed 30% mAP regression on dfine-n. The trade is real: 5× deployment efficiency vs N% per-task accuracy loss. Mitigate via bigger arch (dfine-s/m has more shared trunk capacity to absorb the 5-way split) or per-task loss reweighting (`task_loss_weights`). Tasks with no single-task baseline (helmet/shoes/fall here) lose nothing because they had no baseline to lose against.
+7. **`class_metrics=True` is mandatory in `compute_metrics`** — without it, `MeanAveragePrecision` returns `map_per_class=-1.0` and per-class breakdowns are invisible. `_build_per_task_compute_metrics` in `multitask_trainer.py` enforces this and unpacks the per-class vector with each task's `id2label` so keys land as `eval_<task>_map_50_per_class_<classname>`. Verified post-fix on dfine-n best ckpt.
