@@ -158,6 +158,7 @@ class MultitaskHFTrainer(Trainer):
         *args,
         per_task_val_datasets: dict | None = None,
         per_task_test_datasets: dict | None = None,
+        per_task_compute_metrics: dict | None = None,
         input_size: tuple[int, int] = (640, 640),
         score_threshold: float = 0.0,
         **kwargs,
@@ -165,6 +166,7 @@ class MultitaskHFTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self._per_task_val = per_task_val_datasets or {}
         self._per_task_test = per_task_test_datasets or {}
+        self._per_task_compute_metrics = per_task_compute_metrics or {}
         self._input_size = input_size
         self._score_threshold = float(score_threshold)
 
@@ -204,6 +206,11 @@ class MultitaskHFTrainer(Trainer):
         for task_name, ds in datasets.items():
             logger.info("[%s] task=%s — running eval (n=%d)", prefix, task_name, len(ds))
             self._active_eval_task = task_name
+            # Swap compute_metrics to the task-specific one so per-class
+            # mAP keys carry that task's class names.
+            task_cm = self._per_task_compute_metrics.get(task_name)
+            if task_cm is not None:
+                self.compute_metrics = task_cm
             # Use a single-task eval_dataset; collator still emits task_name.
             metrics = super().evaluate(
                 eval_dataset=ds,
@@ -251,13 +258,17 @@ class MultitaskHFTrainer(Trainer):
 
 
 def _build_per_task_compute_metrics(
-    processor, input_size: tuple[int, int], score_threshold: float = 0.0,
+    processor,
+    input_size: tuple[int, int],
+    score_threshold: float = 0.0,
+    id2label: dict[int, str] | None = None,
 ):
     """Returns a compute_metrics callable for HF Trainer.
 
-    Uses ``torchmetrics.MeanAveragePrecision`` per evaluation pass. Since
-    each ``_evaluate_per_task`` pass holds a single task, the keys here are
-    task-agnostic — the trainer prefixes them with ``eval_<task_name>_``.
+    Emits per-class mAP keys (``map_per_class_<classname>``, ``mAP50_per_class_<classname>``)
+    in addition to scalar metrics. Trainer prefixes everything with
+    ``eval_<task_name>_`` downstream, so the final keys look like e.g.
+    ``eval_fire_smoke_map_50_per_class_fire``.
     """
     from torchmetrics.detection import MeanAveragePrecision
 
@@ -265,7 +276,7 @@ def _build_per_task_compute_metrics(
 
     def compute_metrics(eval_pred):
         from types import SimpleNamespace
-        evaluator = MeanAveragePrecision(box_format="xyxy", class_metrics=False)
+        evaluator = MeanAveragePrecision(box_format="xyxy", class_metrics=True)
         predictions, label_ids = eval_pred.predictions, eval_pred.label_ids
         for batch_pred, batch_labels in zip(predictions, label_ids, strict=True):
             batch_logits = torch.as_tensor(batch_pred[1])
@@ -292,12 +303,20 @@ def _build_per_task_compute_metrics(
                 targets.append({"boxes": boxes_xyxy, "labels": cls})
             evaluator.update(preds, targets)
         raw = evaluator.compute()
+        classes = raw.get("classes")
         out: dict[str, float] = {}
         for k, v in raw.items():
             if k == "classes":
                 continue
-            if isinstance(v, torch.Tensor) and v.ndim == 0:
-                out[k] = float(v.item())
+            if isinstance(v, torch.Tensor):
+                if v.ndim == 0:
+                    out[k] = float(v.item())
+                elif v.ndim == 1:
+                    ids = classes.tolist() if classes is not None else list(range(v.numel()))
+                    for cid, val in zip(ids, v.tolist(), strict=True):
+                        name = (id2label.get(int(cid), str(int(cid)))
+                                if id2label else str(int(cid)))
+                        out[f"{k}_per_class_{name}"] = float(val)
         if "map_50" in out:
             out["mAP50"] = out["map_50"]
         return out
@@ -490,9 +509,19 @@ def run_multitask_training(
         tp_eval.get("input_size") or data_config.get("input_size") or (640, 640)
     )
     score_thr = float(config.get("evaluation", {}).get("score_threshold", 0.0))
-    compute_metrics = _build_per_task_compute_metrics(
-        primary_proc, input_size=input_size, score_threshold=score_thr,
-    )
+    # Per-task compute_metrics — each carries its own id2label so per-class
+    # keys land as eval_<task>_map_<metric>_per_class_<classname>.
+    per_task_compute_metrics = {}
+    for task_name, inner_model in model.task_models.items():
+        per_task_compute_metrics[task_name] = _build_per_task_compute_metrics(
+            primary_proc,
+            input_size=input_size,
+            score_threshold=score_thr,
+            id2label=getattr(inner_model.config, "id2label", None),
+        )
+    # Placeholder for Trainer init — the MultitaskHFTrainer swaps in the
+    # right per-task callable before each super().evaluate() call.
+    compute_metrics = next(iter(per_task_compute_metrics.values()))
 
     # Callbacks: EarlyStopping + EMA (subset of single-task callback suite —
     # full viz callbacks expect single-task semantics, deferred).
@@ -517,6 +546,7 @@ def run_multitask_training(
         callbacks=callbacks,
         per_task_val_datasets=per_task_val,
         per_task_test_datasets=per_task_test,
+        per_task_compute_metrics=per_task_compute_metrics,
         input_size=input_size,
         score_threshold=score_thr,
     )
