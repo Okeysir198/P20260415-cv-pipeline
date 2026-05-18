@@ -370,20 +370,31 @@ ONNX because heads add ~0.25 M params on top of ~4 M shared.
 
 ---
 
-## 7. Why D-FINE specifically (not RT-DETRv2 or YOLOX)
+## 7. D-FINE vs RT-DETRv2 vs YOLOX — and the RT-DETRv2 multitask port
 
 | Aspect | D-FINE | RT-DETRv2 | YOLOX |
 |---|---|---|---|
-| Trunk shareability | Clean (HGNet + transformer) | Clean | Anchor-bound heads complicate sharing |
+| Trunk shareability | Clean (HGNet + transformer) | Clean (same trunk layout) | Anchor-bound heads complicate sharing |
 | Per-class head replacement | One `nn.Linear` per task | One `nn.Linear` per task | YOLOX decoupled head is bigger, less natural to swap |
 | Numerical stability for multi-task | DFL loss benefits from large effective dataset | Vanilla regression — also fine | Pre-decoded outputs — fine but less expressive heads |
+| bf16 safety | **NO** (DFL diverges; enforced in trainer) | **YES** (~2× speed on RTX 50-series) | YES |
 | ONNX cleanliness | Single model.onnx | Single model.onnx | Single model.onnx |
 
-D-FINE wins on **shareability + per-head simplicity**. RT-DETRv2 is a fine
-alternative (and the architecture as designed would work for it
-unchanged — just a different `pretrained` URL and a different arch
-registration). YOLOX would need more invasive surgery to the decoupled
-head.
+**RT-DETRv2 multitask is now supported** (`core/p06_models/rtdetrv2_multitask.py`,
+arches `rtdetr-r18-multitask` / `rtdetr-r50-multitask`). The infrastructure
+(`MultitaskInterleaver`, `MultitaskHFTrainer`, `multitask_collate_fn`,
+per-task `compute_metrics`) is **arch-agnostic** — only the model wrapper
+duplicates. RT-DETRv2 has the same submodule layout as D-FINE (minus
+DFL/LQE), so the port is structurally identical with these deltas:
+- Shared attrs drop `integral`, `lqe_layers`, `pre_bbox_head`; add top-level `bbox_embed`
+- `bf16: true` allowed (D-FINE-only invariant in trainer)
+- `num_queries: 300` default (D-FINE uses 30)
+- Pretrained: `PekingU/rtdetr_v2_r{18,50}vd`
+
+D-FINE wins on **shareability + per-head simplicity** and is the default.
+RT-DETRv2-R50 multitask is the **biggest-trunk option** (~40M shared vs
+D-FINE-L's ~30M) for cases where capacity is the binding constraint.
+YOLOX would need more invasive surgery to the decoupled head and is not ported.
 
 D-FINE's specific requirements that this architecture respects:
 - **`bf16: false`** is enforced (DFL loss numerical sensitivity — project
@@ -396,7 +407,22 @@ D-FINE's specific requirements that this architecture respects:
 
 ## 8. Open questions / future work
 
-### Currently deferred (out of scope for first run)
+### Done since first run
+
+- **Weights-only multitask resume** wired via `model.resume_weights:` knob
+  in `06_training_*_multitask.yaml`. Loads a prior multitask checkpoint
+  post-build (`model.load_state_dict(..., strict=False)`); optimizer/
+  scheduler/EMA stay fresh so a new LR + warmup take effect from step 1.
+  See `core/p06_training/multitask_trainer.py::run_multitask_training`.
+- **RT-DETRv2 multitask** ported (`core/p06_models/rtdetrv2_multitask.py`,
+  arches `rtdetr-r18-multitask` / `rtdetr-r50-multitask`) — bf16-safe
+  alternative when D-FINE capacity is the binding constraint.
+- **Better pretrained weights** wired for dfine-s/m: switched from
+  `ustc-community/dfine-{size}-coco` to `ustc-community/dfine-{size}-obj365`.
+  Objects365 (2M imgs, 365 classes) has direct representations of helmet,
+  shoes, hat — all unrepresented in COCO. Not available for nano.
+
+### Still deferred (out of scope for ongoing runs)
 
 - **Viz callbacks** are not wired (HF's single-task callbacks assume one
   cls head). Workaround: run `core/p08_evaluation/evaluate.py` per task
@@ -404,17 +430,34 @@ D-FINE's specific requirements that this architecture respects:
 - **`freeze_backbone_epochs` is not wired** — the trunk is inside one of
   the per-task models; freezing requires walking that nested path.
 - **Per-task loss weighting** uses uniform weights (`task_loss_weights: auto`).
-  After first run, we can experiment with weighting based on task
-  difficulty or sample count.
+  Empirical fire regression (-30% vs single-task) suggests per-task reweighting
+  could help; deferred until after dfine-s/m capacity tests complete.
 - **CDN denoising is disabled** (`num_denoising: 0`). Re-enable after
-  baseline works to test the interaction with multi-task training.
+  capacity test to isolate its contribution.
 - **ONNX export** for multi-task models is not implemented — needs to
   generate N output sets in one graph.
 
-### Future scaling
+### Arch progression strategy (post-dfine-n results)
 
-- **Arch progression**: N → S → M → L (configs already exist for N/S/M).
-  Stop at first arch that fails its gate (within 5% of previous).
+Empirical: dfine-n multitask plateaus at **mean mAP@50 ≈ 0.41** (resume best 0.413
+at ep4 of 40; oscillates 0.38-0.41 thereafter — capacity-bound, not optimization-bound).
+
+| Step | Arch | Pretrained | Train time | Gate |
+|---|---|---|---:|---|
+| 1 | dfine-n | coco (only option) | ~6 h ✓ | baseline 0.398-0.413, capacity-limited |
+| 2 | **dfine-s** | **obj365** | ~14 h | mean ≥ 0.45 → capacity hypothesis confirmed |
+| 3 | dfine-m | obj365 | ~24 h | only if S clearly clears N (≥0.45) |
+| alt | rtdetr-r50-multitask | rtdetr_v2_r50vd | ~14 h | largest trunk option; bf16-safe |
+
+**Capacity hypothesis test**: dfine-n has ~0.8M effective params per task
+(4M trunk ÷ 5 tasks). dfine-s gives ~2.2M, dfine-m ~3.8M, rtdetr-r50 ~8M.
+If multi-task is genuinely capacity-bound, dfine-s should break the 0.41
+ceiling cleanly. If dfine-s also plateaus near 0.41-0.43, the bottleneck
+is data/architecture (per-task heads insufficient), not raw params — and
+jumping to dfine-m wastes 24h.
+
+### Phase 2 work (after current Phase 1 stabilizes)
+
 - **Phase 2 expansion**: add masks, gloves, glasses, apron, harness,
   forklift_pedestrian. Each is +1 cls head, ~3 days of dev/training.
 - **Per-task decoders (Option B)**: if any task hurts another despite
@@ -436,8 +479,26 @@ D-FINE's specific requirements that this architecture respects:
 | Class imbalance | Dominates softmax | N/A (single subset) | Per-task only |
 | Per-task threshold | Impossible | Single threshold | **Independent** |
 | Adding new task | Retrain everything | Retrain head | **Add 1 head, fine-tune** |
-| Empirical result | 0.30 plateau | 0.30 plateau | climbing past 0.28 at ep5, target ≥0.45 |
+| Empirical result | 0.30 plateau | 0.30 plateau | **dfine-n: 0.398 → 0.413 (capacity-bound); dfine-s/m next** |
 | Ship-ready | No | No | **Yes** (once trained) |
+
+### dfine-n multitask empirical results
+
+Original run (40 ep, COCO init, lr=1e-4):
+- Best val: ep37, mean mAP@50 = **0.398**
+- Test mean mAP@50 = 0.386 (per-task: fire_smoke=0.313, fall=0.308,
+  helmet=0.353, shoes=0.472, phone=0.486)
+
+Weights-only resume (40 more ep, lr=5e-5 cosine, fresh AdamW):
+- Best val: ep4, mean mAP@50 = **0.413** (+0.015 over original best)
+- Trajectory: ep1-13 oscillates 0.38–0.41, no new high after ep4
+- Stopped at ep14 — flat plateau confirmed, capacity-bound diagnosis
+
+Per-task gap vs single-task baseline (from original test):
+- **fire_smoke**: 0.313 vs 0.45 (-30%) — backbone capacity split 5 ways
+- **phone**: 0.486 vs 0.529 (-8%) — production-acceptable
+- helmet/shoes/fall have no single-task baseline; their numbers are "free wins"
+  from the multi-task setup.
 
 ---
 
@@ -452,11 +513,13 @@ features/unified_multitask_phase1/
     └── 06_training_dfine_*_multitask.yaml ← arch-specific recipes
 
 core/
-├── p05_data/multitask_dataset.py        ← MultitaskInterleaver + collator
-├── p06_models/dfine_multitask.py        ← DFineMultitaskModel
-└── p06_training/multitask_trainer.py    ← MultitaskHFTrainer + entry point
+├── p05_data/multitask_dataset.py            ← MultitaskInterleaver + collator + TaskLabeledDataset
+├── p06_models/dfine_multitask.py            ← DFineMultitaskModel
+├── p06_models/rtdetrv2_multitask.py         ← RTDetrV2MultitaskModel (bf16-safe alternative)
+└── p06_training/multitask_trainer.py        ← MultitaskHFTrainer + run_multitask_training
+                                              (incl. weights-only `model.resume_weights` hook)
 
-tests/test_p06_multitask.py              ← 4 smoke tests (arch reg, forward, param-count, collator)
+tests/test_p06_multitask.py                  ← 4 smoke tests (arch reg, forward, param-count, collator)
 ```
 
 For one-line summaries see the file table in `CLAUDE.md`. For why something

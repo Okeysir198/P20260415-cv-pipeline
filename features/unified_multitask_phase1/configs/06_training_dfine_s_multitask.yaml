@@ -7,7 +7,7 @@
 
 model:
   arch: dfine-s-multitask
-  pretrained: ustc-community/dfine_s_coco
+  pretrained: ustc-community/dfine-small-obj365   # Objects365 pretrain — helmet/shoes/hat classes present (better than coco for our mix)
   input_size: [640, 640]
   num_queries: 30
   num_denoising: 0
@@ -66,9 +66,9 @@ augmentation:
 
 training:
   backend: hf_multitask
-  epochs: 40
+  epochs: 80
   optimizer: adamw
-  lr: 0.0001                           # same as N — bs=32 keeps LR×bs constant
+  lr: 0.00005                          # 5e-5 — qubvel D-FINE canonical (lower than N to handle bigger arch)
   weight_decay: 0.0
   warmup_steps: 1000
   scheduler: cosine_with_min_lr
@@ -81,7 +81,7 @@ training:
   ema: true
   ema_decay: 0.9999
   ema_warmup_steps: 1000
-  patience: 20
+  patience: 30
 
   val_viz:
     enabled: true

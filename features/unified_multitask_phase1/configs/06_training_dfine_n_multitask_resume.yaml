@@ -1,10 +1,11 @@
-# Multi-task training — D-FINE-M shared trunk + 5 per-task cls heads.
-# bs reduced to 16 (M doesn't fit at bs=32 on RTX 5090 32 GB).
-# Run only after dfine_s_multitask validates the scaling trend.
+# Resume continuation of dfine_n_multitask_2026-05-17_141112 (best val mean_mAP_50=0.398 @ ep37).
+# Weights-only resume: optimizer/scheduler/EMA reinitialized; fresh cosine starting at lr=5e-5.
+# All viz callbacks left enabled (data_viz/aug_viz/val_viz/best_viz).
 
 model:
-  arch: dfine-m-multitask
-  pretrained: ustc-community/dfine-medium-obj365  # Objects365 pretrain — helmet/shoes/hat classes present (better than coco for our mix)
+  arch: dfine-n-multitask
+  pretrained: ustc-community/dfine_n_coco        # base structure (per-task DFine init)
+  resume_weights: ../runs/dfine_n_multitask_2026-05-17_141112/pytorch_model.bin  # overrides weights post-build
   input_size: [640, 640]
   num_queries: 30
   num_denoising: 0
@@ -17,7 +18,7 @@ model:
   matcher_class_cost: 2.0
   share_box_head: true
   share_decoder: true
-  task_loss_weights: auto
+  task_loss_weights: auto                        # unchanged from original
 
 tensor_prep:
   input_size: [640, 640]
@@ -29,8 +30,8 @@ tensor_prep:
 
 data:
   dataset_config: 05_data.yaml
-  batch_size: 16                       # M needs smaller batch (single-task M used 16)
-  eval_batch_size: 16
+  batch_size: 32
+  eval_batch_size: 32
   num_workers: 4
   prefetch_factor: 2
   pin_memory: true
@@ -63,21 +64,21 @@ augmentation:
 
 training:
   backend: hf_multitask
-  epochs: 40
+  epochs: 40                                     # +40 on top of prior 40 (fresh schedule)
   optimizer: adamw
-  lr: 0.0001                           # keep LR=1e-4; multi-task data volume covers it (per CLAUDE.md LR×bs note)
+  lr: 0.00005                                    # 5e-5 — half of original 1e-4, anchored to ep37 LR
   weight_decay: 0.0
-  warmup_steps: 1000
+  warmup_steps: 100                              # small ramp; fresh AdamW state
   scheduler: cosine_with_min_lr
   lr_scheduler_kwargs:
     min_lr: 0.000001
   max_grad_norm: 0.1
-  bf16: false                          # MANDATORY for D-FINE
+  bf16: false
   amp: false
   gpu_augment: true
   ema: true
   ema_decay: 0.9999
-  ema_warmup_steps: 1000
+  ema_warmup_steps: 1                            # effectively no ramp (decay ~0.9999 from step 1); 0 would div-by-zero
   patience: 20
 
   val_viz:
@@ -106,7 +107,7 @@ loss:
 
 logging:
   report_to: none
-  save_dir: ../runs/dfine_m_multitask
+  save_dir: ../runs/dfine_n_multitask_resume
   wandb_project: smart-camera
   save_strategy: epoch
   save_total_limit: 5

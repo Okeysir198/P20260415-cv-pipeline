@@ -1,43 +1,30 @@
-"""D-FINE multi-task detector.
+"""RT-DETRv2 multi-task detector.
 
-A single shared backbone + encoder + decoder + box head, with N per-task
-classification heads. Each forward routes through one task only.
+Mirror of ``dfine_multitask.py`` — shared backbone + encoder + decoder +
+box head, N per-task classification heads. RT-DETRv2's submodule layout is
+near-identical to D-FINE (no DFL/LQE), so only the model class and the
+shared-attr lists differ.
 
-Implementation strategy (simplest correct approach):
-
-1. Build N full ``DFineForObjectDetection`` instances, one per task, each
-   with that task's ``num_labels``. HF's built-in matcher + VFL + GIoU +
-   DFL loss work out-of-the-box for each.
-2. After construction, replace the SHARED submodules in models[1..N] with
-   *references* to model[0]'s submodules. PyTorch tracks parameters by
-   object identity, so the shared modules are registered (and parameter-
-   counted, and optimized) exactly once.
-
-Task-specific (per-model) modules:
+Task-specific (per-model):
     - ``model.class_embed``                  (top-level cls heads list)
-    - ``model.bbox_embed``                   (top-level bbox heads list — kept
-      per-task; D-FINE ties these by reference to decoder submodules)
     - ``model.model.decoder.class_embed``    (per-decoder-layer cls)
     - ``model.model.denoising_class_embed``  (CDN cls embedding)
     - ``model.model.enc_score_head``         (encoder-side cls)
     - ``model.config``                       (holds num_labels, id2label, ...)
 
 Shared (referenced from task[0]):
+    - ``model.bbox_embed``                   (top-level box heads — geometry only)
     - ``model.model.backbone``
     - ``model.model.encoder_input_proj``
     - ``model.model.encoder``
     - ``model.model.enc_output``
-    - ``model.model.enc_bbox_head``          (geometry only — task-agnostic)
+    - ``model.model.enc_bbox_head``          (geometry only)
+    - ``model.model.decoder_input_proj``
     - ``model.model.decoder.layers``
     - ``model.model.decoder.query_pos_head``
-    - ``model.model.decoder.pre_bbox_head``
-    - ``model.model.decoder.integral``
-    - ``model.model.decoder.lqe_layers``
-    - ``model.model.decoder.bbox_embed``
-    - ``model.model.decoder_input_proj``
+    - ``model.model.decoder.bbox_embed``     (per-layer box heads — geometry only)
 
-Forward signature: ``forward(pixel_values, labels=None, task_name=str)``.
-The HF Trainer collator emits ``task_name`` per batch (single-task batches).
+bf16 is safe for RT-DETRv2 (unlike D-FINE which diverges in bf16).
 """
 
 from __future__ import annotations
@@ -53,8 +40,7 @@ from core.p06_models.hf_model import _resolve_pretrained_path
 from core.p06_models.registry import register_model
 
 
-# Names of submodule attributes that are SHARED across tasks. Replaced on
-# task-models[1..N] with references to task-model[0]'s submodules.
+_SHARED_TOP_ATTRS = ("bbox_embed",)
 _SHARED_INNER_MODEL_ATTRS = (
     "backbone",
     "encoder_input_proj",
@@ -66,48 +52,36 @@ _SHARED_INNER_MODEL_ATTRS = (
 _SHARED_DECODER_ATTRS = (
     "layers",
     "query_pos_head",
-    "pre_bbox_head",
-    "integral",
-    "lqe_layers",
     "bbox_embed",
 )
 
 
-def _build_one_dfine(
+def _build_one_rtdetrv2(
     pretrained: str, num_classes: int, hf_kwargs: dict[str, Any],
 ) -> nn.Module:
-    from transformers import DFineForObjectDetection
+    from transformers import RTDetrV2ForObjectDetection
     kwargs = dict(hf_kwargs)
     kwargs["num_labels"] = num_classes
-    # id2label/label2id must align with num_labels for HF cookbook compliance.
     if "id2label" not in kwargs:
         kwargs["id2label"] = {i: f"class_{i}" for i in range(num_classes)}
     if "label2id" not in kwargs:
         kwargs["label2id"] = {v: k for k, v in kwargs["id2label"].items()}
-    return DFineForObjectDetection.from_pretrained(
+    return RTDetrV2ForObjectDetection.from_pretrained(
         pretrained, **kwargs, ignore_mismatched_sizes=True,
     )
 
 
 def _share_modules(target: nn.Module, source: nn.Module) -> None:
-    """Replace shared submodules in ``target`` with references to those in
-    ``source``. PyTorch deduplicates parameters by object identity in
-    ``named_parameters()``, so shared modules are counted exactly once.
-    """
+    for attr in _SHARED_TOP_ATTRS:
+        setattr(target, attr, getattr(source, attr))
     for attr in _SHARED_INNER_MODEL_ATTRS:
         setattr(target.model, attr, getattr(source.model, attr))
     for attr in _SHARED_DECODER_ATTRS:
         setattr(target.model.decoder, attr, getattr(source.model.decoder, attr))
 
 
-class DFineMultitaskModel(DetectionModel):
-    """Multi-task D-FINE detector with shared trunk + per-task cls heads.
-
-    Use ``forward(pixel_values, labels=..., task_name=str)`` for training;
-    ``forward(pixel_values, task_name=str)`` for inference. Returns the
-    underlying HF ``ModelOutput`` so HF Trainer can read ``.loss`` and
-    backprop, with the standard eval-mode strip (mirrors HFDetectionModel).
-    """
+class RTDetrV2MultitaskModel(DetectionModel):
+    """Multi-task RT-DETRv2 with shared trunk + per-task cls heads."""
 
     _keys_to_ignore_on_save = None
 
@@ -119,7 +93,6 @@ class DFineMultitaskModel(DetectionModel):
     ) -> None:
         super().__init__()
         self.task_models = nn.ModuleDict(task_models)
-        # Plain dict — processors are not nn.Modules.
         self.task_processors = task_processors
         self.primary_task = primary_task
         self.task_names = list(task_models.keys())
@@ -133,10 +106,6 @@ class DFineMultitaskModel(DetectionModel):
 
     @property
     def processor(self):
-        """Default processor (for tensor_prep + post-process from primary
-        task). All processors are configured identically, so primary's
-        normalize/resize settings stand in for the rest.
-        """
         return self.task_processors[self.primary_task]
 
     def forward(
@@ -155,8 +124,8 @@ class DFineMultitaskModel(DetectionModel):
         model = self.task_models[task_name]
         outputs = model(pixel_values=pixel_values, labels=labels, **kwargs)
 
-        # Mirror HFDetectionModel's eval-mode ModelOutput strip — keeps CPU
-        # RAM in check during full per-task eval loops.
+        # Eval-mode ModelOutput strip (parity with HFDetectionModel +
+        # DFineMultitaskModel) — prevents per-eval CPU RAM growth.
         if labels is not None and not self.training:
             placeholder = torch.empty(0, device=pixel_values.device)
             for fld in (
@@ -175,36 +144,26 @@ class DFineMultitaskModel(DetectionModel):
         return outputs
 
 
-@register_model("dfine-n-multitask")
-@register_model("dfine-s-multitask")
-@register_model("dfine-m-multitask")
-@register_model("dfine-l-multitask")
-def build_dfine_multitask(config: dict) -> DFineMultitaskModel:
-    """Build the multi-task D-FINE wrapper from the unified config.
-
-    The config provides:
-      model.arch, model.pretrained, model.input_size
-      tasks: [{name, num_classes, names}, ...]  (loaded from 05_data.yaml)
-    """
+@register_model("rtdetr-r18-multitask")
+@register_model("rtdetr-r50-multitask")
+def build_rtdetrv2_multitask(config: dict) -> RTDetrV2MultitaskModel:
+    """Build the multi-task RT-DETRv2 wrapper from the unified config."""
     from transformers import AutoImageProcessor
 
     model_cfg = config.get("model", {})
     pretrained = model_cfg.get("pretrained")
     if not pretrained:
-        raise ValueError("model.pretrained required for dfine-*-multitask")
+        raise ValueError("model.pretrained required for rtdetr-*-multitask")
     pretrained = _resolve_pretrained_path(pretrained, config)
     input_size = model_cfg.get("input_size", [640, 640])
 
-    # Tasks come from data_config (loaded by trainer entry point and stashed
-    # under config['_tasks']). Each entry: {name, num_classes, names}.
     tasks = config.get("_tasks")
     if not tasks:
         raise ValueError(
-            "dfine-*-multitask requires resolved tasks under config['_tasks']; "
+            "rtdetr-*-multitask requires resolved tasks under config['_tasks']; "
             "the multitask trainer entry point populates this from 05_data.yaml."
         )
 
-    # Strip our pipeline keys before forwarding to HF.
     _NON_HF = {
         "arch", "pretrained", "input_size", "num_classes", "depth", "width",
         "ignore_mismatched_sizes", "hf_model_id", "share_box_head",
@@ -216,7 +175,7 @@ def build_dfine_multitask(config: dict) -> DFineMultitaskModel:
     task_processors: dict[str, Any] = {}
     primary = tasks[0]["name"]
 
-    for i, t in enumerate(tasks):
+    for t in tasks:
         name = t["name"]
         nc = int(t["num_classes"])
         names = t.get("names")
@@ -227,10 +186,10 @@ def build_dfine_multitask(config: dict) -> DFineMultitaskModel:
                 v: k for k, v in per_task_kwargs["id2label"].items()
             }
         logger.info(
-            f"Multitask: building D-FINE for task={name} (num_classes={nc}) "
+            f"Multitask: building RT-DETRv2 for task={name} (num_classes={nc}) "
             f"from {pretrained}"
         )
-        m = _build_one_dfine(pretrained, nc, per_task_kwargs)
+        m = _build_one_rtdetrv2(pretrained, nc, per_task_kwargs)
         task_models[name] = m
 
         processor = AutoImageProcessor.from_pretrained(
@@ -240,15 +199,12 @@ def build_dfine_multitask(config: dict) -> DFineMultitaskModel:
         )
         task_processors[name] = processor
 
-    # Share trunk submodules: every task model points at task[primary]'s.
     primary_model = task_models[primary]
     for name, m in task_models.items():
         if name == primary:
             continue
         _share_modules(m, primary_model)
 
-    # Apply tensor_prep contract to every processor (same logic as
-    # build_hf_model). All processors normalize identically.
     from utils.config import resolve_tensor_prep
     tp = resolve_tensor_prep(config, backend="hf")
     for processor in task_processors.values():
@@ -268,13 +224,10 @@ def build_dfine_multitask(config: dict) -> DFineMultitaskModel:
             processor.do_normalize = False
             processor.do_resize = False
 
-    wrapper = DFineMultitaskModel(task_models, task_processors, primary)
-    # Sanity-log parameter sharing — total params should be roughly the same
-    # as a single-task D-FINE, NOT N× larger (named_parameters dedupes by
-    # tensor object identity, so shared modules are counted once).
+    wrapper = RTDetrV2MultitaskModel(task_models, task_processors, primary)
     n_total = sum(p.numel() for _, p in wrapper.named_parameters())
     logger.info(
-        f"Multitask D-FINE built: ~{n_total / 1e6:.2f} M parameters across "
+        f"Multitask RT-DETRv2 built: ~{n_total / 1e6:.2f} M parameters across "
         f"{len(task_models)} tasks (shared trunk)"
     )
     return wrapper

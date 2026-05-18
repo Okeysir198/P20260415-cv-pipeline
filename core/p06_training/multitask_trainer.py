@@ -468,6 +468,30 @@ def run_multitask_training(
     logger.info("Built multitask model with %d tasks: %s",
                 len(tasks), list(model.task_names))
 
+    # Weights-only resume from a prior multitask checkpoint.
+    # Loads tasks.*.{model,cls_head} weights post-build; optimizer/scheduler/
+    # EMA stay fresh so the new LR / warmup take effect from step 1.
+    resume_weights = config.get("model", {}).get("resume_weights")
+    if resume_weights:
+        rw_path = Path(resume_weights)
+        if not rw_path.is_absolute():
+            rw_path = (config_path.parent / rw_path).resolve()
+        if not rw_path.exists():
+            raise FileNotFoundError(f"model.resume_weights not found: {rw_path}")
+        logger.info("Loading multitask weights (weights-only) from %s", rw_path)
+        state = torch.load(str(rw_path), map_location="cpu", weights_only=False)
+        if isinstance(state, dict) and "state_dict" in state:
+            state = state["state_dict"]
+        result = model.load_state_dict(state, strict=False)
+        logger.info(
+            f"resume_weights loaded: missing={len(result.missing_keys)} "
+            f"unexpected={len(result.unexpected_keys)}"
+        )
+        if result.missing_keys:
+            logger.warning(f"First 5 missing keys: {result.missing_keys[:5]}")
+        if result.unexpected_keys:
+            logger.warning(f"First 5 unexpected keys: {result.unexpected_keys[:5]}")
+
     # Build datasets (using the primary task's processor for transform parity).
     base_dir = str(config_path.parent)
     primary_proc = model.processor
