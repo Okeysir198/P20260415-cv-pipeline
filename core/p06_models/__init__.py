@@ -37,6 +37,7 @@ with contextlib.suppress(ImportError):
     import core.p06_models.hf_segmentation_variants  # noqa: F401
     import core.p06_models.rtdetr  # noqa: F401
     import core.p06_models.rtdetrv2_multitask  # noqa: F401
+    import core.p06_models.yolox_multitask  # noqa: F401
 
 # Import timm model module to trigger registration (optional dep)
 with contextlib.suppress(ImportError):

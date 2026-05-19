@@ -188,3 +188,46 @@ def multitask_collate_fn(batch: list) -> dict:
                 "boxes": targets[:, 1:5].float(),
             })
     return {"pixel_values": images, "labels": labels, "task_name": task}
+
+
+def multitask_yolox_collate_fn(batch: list) -> dict:
+    """Collate single-task samples into the YOLOX detection batch dict.
+
+    YOLOX expects per-image targets as Tensor[N, 5] in `[cls, cx, cy, w, h]`
+    (matches ``core.p05_data.detection_dataset.collate_fn``).
+
+    Output:
+        {
+          "images":     Tensor(B, 3, H, W),
+          "targets":    list[Tensor[N, 5]],
+          "task_name":  str
+        }
+    """
+    if not batch:
+        raise ValueError("Empty batch")
+    task_names = {item[2] for item in batch}
+    if len(task_names) != 1:
+        raise ValueError(
+            f"Mixed-task batch is unsupported (got tasks={task_names}); "
+            "MultitaskInterleaver should yield single-task batches."
+        )
+    task = next(iter(task_names))
+
+    images = torch.stack([item[0] for item in batch])
+    targets = []
+    for _, t, _tn, _p in batch:
+        # Tensor[N, 5] is the canonical YOLOX target format. Skip if a
+        # detection_dataset returned the HF dict form (would only happen if
+        # someone passed an HF transform — not supported here).
+        if isinstance(t, torch.Tensor):
+            targets.append(t)
+        elif isinstance(t, dict) and "boxes" in t:
+            cls = t["class_labels"].float().unsqueeze(1) if "class_labels" in t else t["labels"].float().unsqueeze(1)
+            boxes = t["boxes"].float()
+            targets.append(torch.cat([cls, boxes], dim=1))
+        else:
+            raise TypeError(
+                f"Unsupported target type for YOLOX multitask: {type(t)}; "
+                "expected Tensor[N, 5] in [cls, cx, cy, w, h]."
+            )
+    return {"images": images, "targets": targets, "task_name": task}

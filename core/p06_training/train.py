@@ -177,6 +177,20 @@ def main() -> None:
             )
             logger.info("Training complete (HF Multitask Trainer).")
             logger.info("  Total epochs: %d", summary.get("total_epochs", 0))
+        elif backend == "pytorch_multitask":
+            from core.p06_training.multitask_pytorch_trainer import (
+                run_multitask_pytorch_training,
+            )
+
+            summary = run_multitask_pytorch_training(
+                config_path=str(config_path),
+                overrides=overrides_or_none,
+            )
+            logger.info("Training complete (Pytorch Multitask Trainer).")
+            logger.info("  Epochs completed: %d", summary.get("epochs_completed", 0))
+            logger.info(
+                "  Best mean_val_loss: %.4f", summary.get("best_mean_val_loss", float("nan"))
+            )
         elif backend == "paddle":
             logger.error(
                 "backend='paddle' is not handled by core/p06_training/train.py.\n"
@@ -216,7 +230,7 @@ def main() -> None:
             logger.info("  Total epochs: %d", summary["total_epochs"])
         else:
             logger.error(
-                "Unknown training backend: '%s'. Valid values: pytorch, hf, hf_multitask, paddle, custom",
+                "Unknown training backend: '%s'. Valid values: pytorch, hf, hf_multitask, pytorch_multitask, paddle, custom",
                 backend,
             )
             sys.exit(1)

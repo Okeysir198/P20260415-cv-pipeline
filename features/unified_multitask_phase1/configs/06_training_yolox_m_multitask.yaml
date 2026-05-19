@@ -1,0 +1,86 @@
+# YOLOX-M multi-task — shared CSPDarknet+PAFPN + per-task cls heads.
+#
+# Pytorch backend (not HF — YOLOX uses the custom training loop). v1 scope:
+# basic training + per-task val loss; mAP integration + EMA + viz callbacks
+# deferred to v2.
+#
+# Per-task overhead is minimal (only final 1x1 cls_pred per FPN level differs).
+# Compared to dfine-n multitask: more capacity in the shared trunk (~25M vs 4M
+# trunk params), much faster inference (no transformer), but per-task data
+# starvation pattern still applies.
+
+model:
+  arch: yolox-m-multitask
+  pretrained: null              # optionally point to Megvii yolox_m.pth; null = fresh init
+  input_size: [640, 640]
+  act_type: silu
+  depthwise: false
+
+tensor_prep:
+  input_size: [640, 640]
+  rescale: false                # YOLOX expects raw [0, 255] inputs (Megvii convention)
+  normalize: false
+  mean: [0.485, 0.456, 0.406]   # unused when normalize=false
+  std:  [0.229, 0.224, 0.225]
+  applied_by: v2_pipeline
+
+data:
+  dataset_config: 05_data.yaml
+  batch_size: 16                # YOLOX-M at 640^2 — bs=16 fits 32 GB safely
+  eval_batch_size: 16
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: true
+  sampling_strategy: round_robin_sqrt
+  subset:
+    train: null
+    val: null
+    test: null
+
+augmentation:
+  library: torchvision
+  normalize: false
+  mosaic: false                 # v1: keep aug minimal; mosaic interaction with task routing TBD
+  mixup: false
+  perspective_p: 0.0
+  fliplr: 0.5
+  flipud: 0.0
+  brightness_contrast_p: 0.2
+  brightness: 0.1
+  contrast: 0.1
+  hsv_p: 0.2
+  hsv_h: 0.01
+  hsv_s: 0.1
+  hsv_v: 0.1
+  min_bbox_area: 4.0
+  scale: [0.8, 1.2]
+  degrees: 2.0
+  translate: 0.1
+  shear: 2.0
+
+training:
+  backend: pytorch_multitask    # dispatches to multitask_pytorch_trainer
+  epochs: 50
+  optimizer: sgd
+  lr: 0.0025                    # Megvii rule: 0.01 * bs/64 = 0.0025 at bs=16
+  momentum: 0.9
+  weight_decay: 0.0005
+  warmup_epochs: 1
+  max_grad_norm: 10.0           # YOLOX SGD with momentum; larger clip is fine
+  log_every: 50
+
+loss:
+  type: yolox
+  strides: [8, 16, 32]
+  cls_weight: 1.0
+  obj_weight: 1.0
+  reg_weight: 5.0
+  iou_variant: giou
+  simota_top_k: 10
+  warmup_epochs: 1
+
+logging:
+  save_dir: ../runs/yolox_m_multitask
+  report_to: none
+
+seed: 42
