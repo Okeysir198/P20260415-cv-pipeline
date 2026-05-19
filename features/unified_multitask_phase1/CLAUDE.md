@@ -10,13 +10,18 @@
 
 ## Tasks
 
-| Head | Classes | Dataset | Single-task baseline |
+All 5 task paths route through the **symlink farm** at
+`dataset_store/training_ready/unified_detection/` (manifest: `tasks.yaml`,
+aggregate report: `DATASET_REPORT.md`). Real data stays at the original
+per-task dirs — the farm just gives one root.
+
+| Head | Classes | Dataset (via farm) | Single-task baseline |
 |---|---|---|---:|
-| fire_smoke | fire, smoke | `training_ready/fire_detection` | ~0.45 mAP50 (safety-fire_detection) |
-| fall | person, fallen_person | `training_ready/fall_detection` | none (no prior training run) |
-| helmet | person, head_with_helmet, head_without_helmet, head_with_nitto_hat | `training_ready/helmet_detection` | none (no prior training run) |
-| shoes | person, foot_with_safety_shoes, foot_without_safety_shoes | `training_ready/shoes_detection` | none (no prior training run) |
-| phone | phone_usage | `training_ready/safety_poketenashi_phone_usage` | 0.529 mAP50 (poketenashi_phone) |
+| fire_smoke | fire, smoke | `unified_detection/fire_smoke` → `fire_detection/` | ~0.45 mAP50 (safety-fire_detection) |
+| fall | person, fallen_person | `unified_detection/fall` → `fall_detection/` | none |
+| helmet | person, head_with_helmet, head_without_helmet, head_with_nitto_hat | `unified_detection/helmet` → `helmet_detection/` (29,991 imgs after 2026-05-19 sh17 rebuild) | none |
+| shoes | person, foot_with_safety_shoes, foot_without_safety_shoes | `unified_detection/shoes` → `shoes_detection/` | none |
+| phone | phone_usage | `unified_detection/phone` → `safety_poketenashi_phone_usage/` | 0.529 mAP50 (poketenashi_phone) |
 
 ## Benchmark Results — dfine-n-multitask (2026-05-17, 40 ep)
 

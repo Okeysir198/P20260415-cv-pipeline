@@ -19,10 +19,17 @@ Detects helmet compliance: whether persons are wearing hard hats. Four classes i
 
 ## Dataset
 
-- **Images:** 22,323 (val: ~4,361)
-- **QA:** 94.7% good / 2.4% bad -> ACCEPT
+- **Images:** 29,991 (train 20,991 / val 4,500 / test 4,500) — **rebuilt 2026-05-19**
+- **QA:** 94.7% good / 2.4% bad -> ACCEPT (last p02 run pre-rebuild — re-run QA on the new dataset before Phase C)
 - **Label Studio:** project id=14
 - **Training ready:** `dataset_store/training_ready/helmet_detection/`
+
+**2026-05-19 rebuild:** added 7,668 imgs from `sh17_ppe` after fixing the
+VOC parser's silent-skip bug (see `core/p00_data_prep/CLAUDE.md` →
+"VOC source config knobs"). sh17 had been contributing 0 imgs since
+inception due to a `voc_annotations_dir` vs `labels/` candidate-name
+collision. Class distribution shifted: `head_with_helmet` 73.9% → 52.3%,
+`person` 3.0% → 18.0%, `head_with_nitto_hat` 1.5% → 1.1% (still the tail).
 
 ## Pretrained baseline
 

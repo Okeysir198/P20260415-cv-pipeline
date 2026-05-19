@@ -123,3 +123,28 @@ around the same module, kept only for re-deduping an existing
 Warning: the wrapper derives `source` from the leading underscore-token
 of the filename (lossy fallback heuristic); running p00 from raw uses the
 metadata-driven `source.name` from each sample's adapter for accuracy.
+
+## VOC source config knobs (`voc_annotations_dir`, `voc_images_dir`)
+
+The VOC parser (`parsers/voc.py`) auto-detects standard dir names
+(`images/`, `Annotations/`, `labels/`) but you can override either via
+source-config keys. **Required** for archives that ship YOLO `labels/`
+AND VOC XML side-by-side under a non-standard dir name (e.g. sh17_ppe
+ships `voc_labels/` + `labels/`). Without the override, the parser picks
+`labels/` (matches `"labels"` in its candidate list), globs for `*.xml`,
+finds none, and **silently contributes 0 imgs** with no error.
+
+```yaml
+sources:
+  - name: sh17_ppe
+    format: voc
+    voc_annotations_dir: voc_labels   # ← required: real XML dir, not labels/
+    voc_images_dir: images
+```
+
+Symptom this fixes: `DATASET_REPORT.md` shows a source with
+`⚠️ 0 images contributed` despite raw files being present. Diagnosed
+2026-05-19 — sh17_ppe contributed 0 imgs to `training_ready/helmet_detection`
+for ~10 days before the parser was patched to honor these keys
+(`parsers/voc.py` 2026-05-19). Any new VOC source that ships beside
+a YOLO `labels/` dir must set `voc_annotations_dir` explicitly.

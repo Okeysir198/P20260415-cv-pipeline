@@ -27,9 +27,12 @@ dataset_store/
 │   └── _coco_val/                # (empty — COCO val2017 placeholder)
 ├── site_collected/               # internal Nitto Denko site footage (empty placeholders)
 │   ├── fall_detection/, fire_detection/, helmet_detection/, phone_detection/, shoes_detection/, test_video/
-└── training_ready/               # 12 datasets — see snapshot table below
-                                  #  Includes unified_detection (12 GB, 19 classes,
-                                  #  Phase 1+2 merged, dedup-clean) — production target.
+└── training_ready/               # 5 per-task detection dirs + unified_detection/ symlink farm
+                                  #  unified_detection/ holds 5 symlinks (fire_smoke/,
+                                  #  fall/, helmet/, shoes/, phone/) → the per-task dirs,
+                                  #  plus tasks.yaml manifest + aggregate DATASET_REPORT.md.
+                                  #  Replaced the 12 GB 19-class single-head approach on
+                                  #  2026-05-19 (that approach plateaued at 0.30 mAP).
 ```
 
 Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD, etc.).
@@ -53,7 +56,7 @@ Pretrained weights live **outside** this tree at `ai/pretrained/` (YOLOX, SCRFD,
 | `raw/_coco_val` | — | 0 | empty (COCO val2017 placeholder) |
 | `site_collected/` | — | 0 | placeholders only (populate on-site) |
 | `training_ready/<5 phase-1 sources>` | ~10 GB | 112,099 | per-task source datasets (fire, helmet, shoes, fall, phone-usage) |
-| **`training_ready/unified_detection/`** | **12 GB** | **129,544** | **Phase 1 + Phase 2 multi-source, 19 classes, dedup-clean (cross-split pairs=0). Production target — replaces per-task models in one forward pass.** |
+| **`training_ready/unified_detection/`** | **16 KB** | **119,878** (via symlinks) | **Symlink farm + manifest** — 5 symlinks → per-task dirs, `tasks.yaml` + `DATASET_REPORT.md`. The previous 12 GB / 19-class single-head merge was retired on 2026-05-19 (plateaued at 0.30 mAP due to partial-label collision). |
 
 **Total raw: ~2.6 GB** (Phase 1 raw deleted; Phase 2 + smoking/ear/zone retained).
 **Total training_ready: ~24 GB** (12 datasets including unified_detection).

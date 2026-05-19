@@ -160,3 +160,16 @@ p06_training   →  <save_dir>/best.pt        (or last.pt if best wasn't saved)
 - **Test-runner mechanics + fixtures**: see `tests/CLAUDE.md`.
 - **External service start/health**: see `services/CLAUDE.md`.
 - **Dataset provenance**: see `dataset_store/CLAUDE.md`.
+
+## Unified-detection layout (added 2026-05-19)
+
+`dataset_store/training_ready/unified_detection/` is a **symlink farm** —
+5 symlinks (`fire_smoke/`, `fall/`, `helmet/`, `shoes/`, `phone/`) →
+per-task `training_ready/<task>/` dirs, plus a `tasks.yaml` manifest and
+aggregate `DATASET_REPORT.md`. The multi-task trainer
+(`p06_training/multitask_trainer.py`) reads from these symlink paths —
+same physical data, single root. Don't try to "merge" the 5 label spaces
+into one task folder: the previous 19-class single-head attempt at
+`training_ready/unified_detection.bak_v1_19class/` plateaued at 0.30 mAP
+due to cross-source partial-label collision. Multi-head architecture is
+the working path.
