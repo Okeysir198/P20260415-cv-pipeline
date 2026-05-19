@@ -1,10 +1,20 @@
 # Multi-task Phase 1 — 5 detection tasks sharing one D-FINE-N backbone.
 # Each task has its own classification head; backbone/encoder/decoder/box-head are shared.
-# Datasets are NOT merged — each task reads its own training_ready/ tree.
+#
+# Datasets are NOT merged at the label-space level — that approach plateaued
+# at 0.30 mAP (see training_ready/unified_detection.bak_v1_19class/). Instead
+# they share one root via the symlink farm at
+#   dataset_store/training_ready/unified_detection/
+# which holds 5 task subdirs. The trainer reads per-task paths below and
+# routes loss per-task at the batch level.
+
+# Single dataset root — symlink farm pointing at the 5 task training_ready dirs.
+# tasks.yaml in that root is the manifest source of truth.
+unified_root: ../../../dataset_store/training_ready/unified_detection
 
 tasks:
   - name: fire_smoke
-    dataset_path: ../../../dataset_store/training_ready/fire_detection
+    dataset_path: ../../../dataset_store/training_ready/unified_detection/fire_smoke
     num_classes: 2
     names:
       0: fire
@@ -13,7 +23,7 @@ tasks:
     weight: auto  # 'auto' = sqrt(train_size); set float to override
 
   - name: fall
-    dataset_path: ../../../dataset_store/training_ready/fall_detection
+    dataset_path: ../../../dataset_store/training_ready/unified_detection/fall
     num_classes: 2
     names:
       0: person
@@ -21,7 +31,7 @@ tasks:
     weight: auto
 
   - name: helmet
-    dataset_path: ../../../dataset_store/training_ready/helmet_detection
+    dataset_path: ../../../dataset_store/training_ready/unified_detection/helmet
     num_classes: 4
     names:
       0: person
@@ -31,7 +41,7 @@ tasks:
     weight: auto
 
   - name: shoes
-    dataset_path: ../../../dataset_store/training_ready/shoes_detection
+    dataset_path: ../../../dataset_store/training_ready/unified_detection/shoes
     num_classes: 3
     names:
       0: person
@@ -40,7 +50,7 @@ tasks:
     weight: auto
 
   - name: phone
-    dataset_path: ../../../dataset_store/training_ready/safety_poketenashi_phone_usage
+    dataset_path: ../../../dataset_store/training_ready/unified_detection/phone
     num_classes: 1
     names:
       0: phone_usage

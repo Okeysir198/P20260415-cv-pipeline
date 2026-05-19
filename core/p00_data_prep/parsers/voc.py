@@ -30,17 +30,28 @@ def parse_voc(source_config: dict, base_dir: Path) -> list[dict]:
     img_dir = None
     annotation_dir = None
 
-    for possible_img in ["images", "Image", "JPEGImages", "data"]:
-        test_dir = data_root / possible_img
-        if test_dir.is_dir():
-            img_dir = test_dir
-            break
+    # Explicit overrides from source config (let users point at non-standard
+    # dir names like `voc_labels/` when the archive ships YOLO + VOC side-by-side).
+    img_override = source_config.get("voc_images_dir")
+    ann_override = source_config.get("voc_annotations_dir")
+    if img_override:
+        img_dir = data_root / img_override
+    if ann_override:
+        annotation_dir = data_root / ann_override
 
-    for possible_ann in ["annotations", "Annotation", "Annotations", "labels"]:
-        test_dir = data_root / possible_ann
-        if test_dir.is_dir():
-            annotation_dir = test_dir
-            break
+    if img_dir is None:
+        for possible_img in ["images", "Image", "JPEGImages", "data"]:
+            test_dir = data_root / possible_img
+            if test_dir.is_dir():
+                img_dir = test_dir
+                break
+
+    if annotation_dir is None:
+        for possible_ann in ["annotations", "Annotation", "Annotations", "labels"]:
+            test_dir = data_root / possible_ann
+            if test_dir.is_dir():
+                annotation_dir = test_dir
+                break
 
     if img_dir is None:
         data_dir = data_root / "data"
